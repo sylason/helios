@@ -22,3 +22,14 @@
 ## 4. Observations for Prototype
 - The current Python Data Engine is functional but might be a bottleneck if we want "ultra-low latency".
 - Moving the Orchestrator to Rust early on would simplify integration with `ferro_trade` and `helios`.
+
+## 5. Integration Points (Deep Dive)
+- **Engine Interface:** erro_trade provides the core Backtest and Stats logic. For the Bot, we'll likely use its Broker and DataView components to manage internal state.
+- **Strategy Interface:** helios uses an Orchestrator pattern. The entry point is the step function, which must be called every time a new 1m candle is formed.
+- **Data Flow:**
+    1. Data Acquisition (Ticks) -> Data Processing (DuckDB/OHLCV).
+    2. Bot Orchestrator -> Fetch OHLCV History from DuckDB.
+    3. Bot Orchestrator -> Compute Indicators (using Helios's IndicatorCache).
+    4. Bot Orchestrator -> orchestrator.step(data, indicators, ...).
+    5. Execution Module -> Process OrchestratorStepResult (Send Orders).
+
