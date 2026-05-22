@@ -1,0 +1,32 @@
+[package]
+name = "helios"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Dependency tới engine backtest chính
+ferro_trade = { path = "../../ferro_trade" }
+
+# Đồng bộ 100% với ferro_trade (Tắt nightly để tránh lỗi hashbrown)
+polars = { version = "0.52.0", features = [
+    "lazy",
+    "dtype-datetime",
+    "temporal",
+    "timezones",
+    "rolling_window",
+    "abs",
+    "rank",
+    "strings",
+    "dynamic_group_by",
+    "rle",
+    "pct_change",
+    "asof_join",
+    "interpolate",
+    "performant",
+    "cse"
+] }
+chrono = { version = "0.4", features = ["serde"] }
+lazy_static = "1.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0" 
+toml = "0.8" 
