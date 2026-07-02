@@ -25,10 +25,36 @@ pub fn analyze_regime(
         return (MarketRegime::Ranging, scores);
     }
 
-    // 1. ANOMALY SCORE ⚡ (Soft-Capped)
-    let z_score_norm = price_z_score.abs() / reg_cfg.anomaly.z_score_threshold;
-    let chaos_boost = chaos_ratio / 1.2; 
-    scores.anomaly = (z_score_norm * 0.8 + chaos_boost * 0.2).tanh(); // Soft-cap tại 1.0
+    // 1. ANOMALY SCORE ⚡
+    //
+    // --- [BUG #9 - CŨ - ĐÃ VÔ HIỆU HÓA] ---
+    // Vấn đề: Double Tanh — price_z_score ĐÃ được tanh() trong matrix.rs,
+    //   nhân thêm z_score_threshold rồi tanh() lần nữa → signal bị nén 2 lần.
+    //   Ngoài ra, z_score_threshold đóng vai trò MULTIPLIER (không phải threshold),
+    //   tên biến sai → Optimizer hiểu nhầm semantic, tối ưu hóa biến vô nghĩa.
+    //
+    // Cụ thể:
+    //   price_z_score đã ở dải [-1, 1] (sau tanh trong matrix)
+    //   z_score_norm = |price_z_score| * z_score_threshold  → dải [0, ~0.9]
+    //   anomaly_score = tanh(z_score_norm * 0.8 + chaos * 0.2) → bị nén thêm lần nữa
+    //   Kết quả: anomaly_score gần như hằng số, không có gradient
+    //
+    // let z_score_norm = price_z_score.abs() * reg_cfg.anomaly.z_score_threshold;
+    // let chaos_boost = chaos_ratio / 1.2;
+    // scores.anomaly = (z_score_norm * 0.8 + chaos_boost * 0.2).tanh();
+
+    // --- [FIX #9 - MỚI]: Dùng price_z_score trực tiếp, tanh một lần duy nhất ---
+    //
+    // Ý nghĩa mới của z_score_threshold:
+    //   - Là ngưỡng phân loại thực sự: nếu |z_score| < threshold → anomaly score thấp
+    //   - Khi |price_z_score| = threshold → score ≈ tanh(1.0) ≈ 0.76 (ngưỡng cảnh báo)
+    //   - Khi |price_z_score| >> threshold → score tiến về 1.0 (anomaly rõ ràng)
+    //
+    // Đây là cách dùng đúng: threshold chia để "scale" tốc độ tăng của score.
+    let chaos_boost = chaos_ratio / 1.2;
+    let z_component  = price_z_score.abs() / reg_cfg.anomaly.z_score_threshold.max(0.01);
+    let chaos_component = chaos_boost;
+    scores.anomaly = (z_component * 0.8 + chaos_component * 0.2).tanh(); // Soft-cap tại 1.0
 
     // 2. TREND SCORE 🌊 (Soft-Capped)
     let is_currently_trending = memory.last_regime == MarketRegime::Trending;
@@ -57,13 +83,13 @@ pub fn analyze_regime(
     scores.parabolic = (trend_angle.abs() / reg_cfg.parabolic.angle_threshold).tanh();
 
     // 6. RANGING SCORE 🧱 (Mặc định khi các thế trận khác yếu)
-    scores.ranging = (1.0 - scores.trend.max(scores.squeeze).max(scores.anomaly)).max(0.01).min(1.0);
+    scores.ranging = (1.0 - scores.trend.max(scores.squeeze).max(scores.anomaly).max(scores.absorption)).max(0.01).min(1.0);
 
     // --- 🧭 XÁC ĐỊNH NHÃN CHÍNH (PRIMARY REGIME) ---
     // Dùng để tương thích ngược với Trailing Stop và Tagging.
-    // Chọn nhãn có điểm cao nhất vượt ngưỡng 1.0, theo thứ tự ưu tiên truyền thống nếu xấp xỉ.
+    // [FIX] Hạ ngưỡng max_val xuống 0.1 để các Squad có cửa thắng Ranging.
     let mut primary = MarketRegime::Ranging;
-    let mut max_val = 1.0; // Chỉ công nhận nếu điểm > 1.0
+    let mut max_val = 0.1; 
 
     if scores.anomaly > max_val {
         primary = MarketRegime::Anomaly;

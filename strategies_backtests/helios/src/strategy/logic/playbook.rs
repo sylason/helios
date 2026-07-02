@@ -14,64 +14,33 @@ pub fn select_playbook(
     matrix_rsi: f64, 
 ) -> TacticalPlaybook {
     
-    // --- 🛡️ BẢO VỆ TUYỆT ĐỐI ---
-    if env == MarketEnvironment::Chaotic {
-        return TacticalPlaybook::Wait;
-    }
+    // --- ⚖️ CƠ CHẾ PHÂN XỬ XẾP HẠNG (ABSOLUTE THRESHOLD ARBITRATION) ---
+    // Mỗi squad cạnh tranh công bằng dựa trên raw score.
+    let mut candidates: Vec<(MarketRegime, f64)> = vec![
+        (MarketRegime::Trending,   scores.trend),
+        (MarketRegime::Squeeze,    scores.squeeze),
+        (MarketRegime::Ranging,    scores.ranging),
+        (MarketRegime::Absorption, scores.absorption),
+        (MarketRegime::Anomaly,    scores.anomaly),
+        (MarketRegime::Parabolic,  scores.parabolic),
+    ];
+
+    // 1. Sắp xếp giảm dần theo Score
+    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // 2. Chọn kẻ đứng đầu và áp dụng Cầu chì Damping
+    let (best_squad, max_raw_score) = candidates[0];
+    
+    // [FIXED Task 2.2]: Final Score = Raw Score * Stability Index.
+    // Nếu môi trường hỗn loạn (index thấp), điểm số sẽ bị kéo xuống tự nhiên.
+    let final_score = max_raw_score * env.stability_index;
 
     let priority = &config.market_regime.priority;
     let min_thresh = priority.min_score_threshold;
 
-    // --- ⚖️ CƠ CHẾ PHÂN XỬ (ARBITRATION) ---
-    // 1. Tính điểm trọng số (Weighted Scores) cho từng Squad
-    let w_anomaly = scores.anomaly * priority.anomaly;
-    let w_absorption = scores.absorption * priority.absorption;
-    let w_parabolic = scores.parabolic * priority.parabolic;
-    let w_squeeze = scores.squeeze * priority.squeeze;
-    let w_trend = scores.trend * priority.trend;
-    let w_ranging = scores.ranging * priority.ranging;
-
-    // 2. Tìm Squad có điểm trọng số cao nhất vượt ngưỡng tối thiểu
-    let mut best_squad = MarketRegime::Ranging;
-    let mut max_weighted_score = min_thresh;
-
-    // --- 🕵️ DIAGNOSTIC LOG (Chỉ in khi điểm cao hoặc có lệnh) ---
-    if w_trend > 0.4 || w_anomaly > 0.4 {
-         println!("[COUNCIL] T:{:.2} (R:{:.2}*W:{:.2}) | A:{:.2} (R:{:.2}*W:{:.2}) | Thresh:{:.2}", 
-            w_trend, scores.trend, priority.trend,
-            w_anomaly, scores.anomaly, priority.anomaly,
-            min_thresh
-         );
-    }
-
-    // Ưu tiên theo thứ tự (nếu điểm bằng nhau): Anomaly -> Parabolic -> Squeeze -> Trend -> Ranging
-    if w_ranging > max_weighted_score {
-        best_squad = MarketRegime::Ranging;
-        max_weighted_score = w_ranging;
-    }
-    if w_trend > max_weighted_score {
-        best_squad = MarketRegime::Trending;
-        max_weighted_score = w_trend;
-    }
-    if w_squeeze > max_weighted_score {
-        best_squad = MarketRegime::Squeeze;
-        max_weighted_score = w_squeeze;
-    }
-    if w_parabolic > max_weighted_score {
-        best_squad = MarketRegime::Parabolic;
-        max_weighted_score = w_parabolic;
-    }
-    if w_absorption > max_weighted_score {
-        best_squad = MarketRegime::Absorption;
-        max_weighted_score = w_absorption;
-    }
-    if w_anomaly > max_weighted_score {
-        best_squad = MarketRegime::Anomaly;
-        max_weighted_score = w_anomaly;
-    }
-
-    // Nếu không có squad nào vượt ngưỡng tối thiểu, đứng ngoài quan sát
-    if max_weighted_score <= min_thresh {
+    // Nếu confidence cuối cùng chưa đủ ngưỡng tối thiểu → đứng ngoài quan sát.
+    // Optimizer sẽ tự học cách điều chỉnh threshold hoặc né vùng index thấp.
+    if final_score <= min_thresh {
         return TacticalPlaybook::Wait;
     }
 
@@ -89,7 +58,25 @@ pub fn select_playbook(
 
         // 🌊 THẾ TRẬN TRENDING
         MarketRegime::Trending => {
-            if trend_dir == TrendDirection::Neutral || trend_angle.abs() > config.market_regime.trend.angle_parabolic {
+            // --- [BUG #7 - VẤN ĐỀ UNIT MISMATCH]: trend_angle vs angle_parabolic ---
+            // Vấn đề: tham số `trend_angle` truyền vào hàm này là trend_angle_ADJ
+            //   (giá trị percentile [0.0, 1.0]), KHÔNG PHẢI angle degrees.
+            //   Nhưng angle_parabolic trong config là degrees (60.0 - 85.0).
+            //   → So sánh: 0.035 > 60.0 → LUÔN FALSE → Parabolic filter không bao giờ kích hoạt.
+            //
+            // [FIX #7]: Dùng trend_angle_adj [0, 1] làm ngưỡng Parabolic thay vì degrees.
+            //   Quy ước mới: trend_angle_adj > 0.85 = xu hướng đang ở vùng parabolic
+            //   (tức là slope hiện tại nằm trong top 15% lịch sử → dốc bất thường)
+            //   → Không deploy TrendPullback khi đang Parabolic (rủi ro bắt đỉnh)
+            //
+            // Cũ (sai unit): trend_angle.abs() > config.market_regime.trend.angle_parabolic
+            // Mới (đúng):   trend_angle        > config.market_regime.parabolic.accel_angle_threshold
+            //                                   (accel_angle_threshold range: 0.8 - 2.5, tuy nhiên
+            //                                    vì trend_angle_adj max là 1.0, ta clamp tại 1.0)
+            let parabolic_thresh = config.market_regime.parabolic.accel_angle_threshold.min(1.0);
+            let is_parabolic = trend_angle > parabolic_thresh;
+
+            if trend_dir == TrendDirection::Neutral || is_parabolic {
                 return TacticalPlaybook::Wait;
             }
             TacticalPlaybook::TrendPullback

@@ -3,15 +3,15 @@
 use serde::{Deserialize, Serialize};
 
 /// Cấp độ 1: Cảm biến môi trường (Màng lọc an toàn).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MarketEnvironment {
-    Orderly, // Trật tự - Cho phép giao dịch
-    Chaotic, // Hỗn loạn - Đứng ngoài
+/// [FIXED Task 2.1]: Chuyển từ Enum nhị phân sang Struct xác suất để Optimizer có gradient học.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MarketEnvironment {
+    pub stability_index: f64, // 0.0 to 1.0. 1.0 = Lý tưởng (Orderly), 0.0 = Hỗn loạn (Chaotic)
 }
 
 impl Default for MarketEnvironment {
     fn default() -> Self {
-        Self::Orderly
+        Self { stability_index: 1.0 }
     }
 }
 

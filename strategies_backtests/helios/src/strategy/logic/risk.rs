@@ -12,8 +12,7 @@ pub fn manage_trailing_stop(
     config: &HeliosConfig,
     memory: &mut TacticalMemory,
     tick: &TickContext,
-    regime: MarketRegime,
-    trend_angle: f64,
+    trend_angle: f64, // NEW: Vẫn giữ angle để siết chặt khi Parabolic
     _atr_val: f64,
 ) {
     let risk_cfg = &config.risk_management.stop_management;
@@ -23,20 +22,18 @@ pub fn manage_trailing_stop(
     // Sử dụng ATR trung bình để mức dừng lỗ không bị giật (Noise) bởi 1-2 nến cá biệt.
     let smooth_atr = memory.volatility_benchmark;
 
-    // --- 🧭 CHIẾN THUẬT CO GIÃN (ELASTIC LOGIC) ---
-    // Mục tiêu: Nới rộng khi bùng nổ để "nuôi" trend, siết chặt khi hưng phấn quá đà để khóa lời.
-    let multiplier = match regime {
+    // --- 🧭 CHIẾN THUẬT CO GIÃN THEO PLAYBOOK (ADAPTIVE LOGIC) ---
+    // [FIXED Task 3.2]: Nhất quán theo mục tiêu ban đầu của lệnh thay vì thế trận tức thời.
+    let multiplier = match memory.opening_playbook {
         
-        // ⚡ ANOMALY (FLASH CRASH / SPIKE): Nới rộng để tránh bị văng bởi râu nến quét thanh khoản.
-        MarketRegime::Anomaly => risk_cfg.tsl_atr_loose,
+        // ⚡ ANOMALY / 🌪️ SQUEEZE: Nới rộng để tránh bị văng bởi nhiễu hoặc retest.
+        TacticalPlaybook::AnomalyFade | TacticalPlaybook::SqueezeAggressive | TacticalPlaybook::SqueezeConfirmed 
+            => risk_cfg.tsl_atr_loose,
 
-        // 🌪️ SQUEEZE BREAKOUT: Nới rộng để giá có không gian "retest" vùng phá vỡ.
-        MarketRegime::Squeeze => risk_cfg.tsl_atr_loose,
-
-        // 🌊 TRENDING: Điều tiết theo độ dốc xu hướng
-        MarketRegime::Trending => {
+        // 🌊 TREND / 🚀 MOMENTUM: Điều tiết theo độ dốc xu hướng
+        TacticalPlaybook::TrendPullback | TacticalPlaybook::MomentumIgnition => {
             if trend_angle.abs() > config.market_regime.trend.angle_parabolic {
-                // 🚀 PARABOLIC: Giá bay quá dốc (>75°), hưng phấn quá đà -> Siết chặt (TIGHT) để bảo vệ lời.
+                // 🚀 PARABOLIC: Giá bay quá dốc, hưng phấn quá đà -> Siết chặt (TIGHT) để bảo vệ lời.
                 risk_cfg.tsl_atr_tight
             } else {
                 // 📈 HEALTHY TREND: Sóng chạy bền vững -> Dùng mức bình thường (NORMAL).

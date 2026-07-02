@@ -37,6 +37,10 @@ pub struct TacticalMemory {
 
     /// Đánh dấu lệnh hiện tại đã được dời SL về điểm hòa vốn hay chưa (FIX #18)
     pub is_breakeven_active: bool,
+
+    /// Playbook đã kích hoạt lệnh hiện tại. 
+    /// [FIXED Task 3.2]: Giúp Trailing SL nhất quán theo mục tiêu ban đầu của lệnh.
+    pub opening_playbook: TacticalPlaybook,
 }
 
 impl Default for TacticalMemory {
@@ -52,6 +56,7 @@ impl Default for TacticalMemory {
             recovery_period_counter: 0,
             current_entry_index: None,
             is_breakeven_active: false,
+            opening_playbook: TacticalPlaybook::Wait,
         }
     }
 }

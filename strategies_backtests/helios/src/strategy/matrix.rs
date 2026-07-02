@@ -33,62 +33,106 @@ pub struct MarketMatrix {
 impl MarketMatrix {
     /// Tính toán ma trận từ dữ liệu cảm biến thô.
     pub fn from_sensors(config: &HeliosConfig, sensors: &HeliosSensors, volumes: &[f64], vol_ratio: f64) -> Self {
-        // 1. Trend Strength (ADX / 100)
-        let trend_strength = sensors.adx.iter().map(|&v| v / 100.0).collect();
+        let len = volumes.len();
+        
+        // --- [TỐI ƯU HÓA: LOOP FUSION] ---
+        // Gộp 6 vòng lặp map() ngang thành 1 vòng lặp dọc duy nhất để tối ưu L1 Cache.
+        let mut trend_strength = Vec::with_capacity(len);
+        let mut chaos = Vec::with_capacity(len);
+        let mut bb_width_norm = Vec::with_capacity(len);
+        let mut vol_raw = Vec::with_capacity(len);
+        let mut sqz_raw = Vec::with_capacity(len);
+        let mut adj_slope = Vec::with_capacity(len);
 
-        // 2. Trend Direction (Tanh Scale LinReg Slope)
-        let trend_dir = normalization::tanh_scale(&sensors.linreg_slope, 100.0);
+        for i in 0..len {
+            // 1. Trend Strength (ADX / 100)
+            trend_strength.push(sensors.adx[i] / 100.0);
+            
+            // 2. Chaos (NATR / 100)
+            chaos.push(sensors.natr[i] / 100.0);
+            
+            // 3. BB Width Norm
+            let bu = sensors.bb_upper[i];
+            let bl = sensors.bb_lower[i];
+            let bm = (bu + bl) / 2.0;
+            bb_width_norm.push(if bm > 0.0 { (bu - bl) / bm } else { 0.0 });
+            
+            // 4. Volume Force Raw
+            let v = volumes[i];
+            let ma = sensors.vol_ma_series[i];
+            vol_raw.push(if ma > 0.0 { (v * vol_ratio) / ma } else { 1.0 });
 
-        // 3. Trend Angle (Lấy trực tiếp từ cảm biến)
-        let trend_angle = sensors.linreg_angle.as_ref().clone();
+            // 5. Squeeze Raw (Overlap Logic)
+            let ku = sensors.kc_upper[i];
+            let kl = sensors.kc_lower[i];
+            let kc_w = ku - kl;
+            if kc_w < 1e-9 || bu.is_nan() || bl.is_nan() || ku.is_nan() || kl.is_nan() {
+                sqz_raw.push(0.0);
+            } else {
+                let overlap = (ku - bu) + (bl - kl);
+                sqz_raw.push((overlap / kc_w).max(0.0).min(1.0));
+            }
 
-        // 4. Trend Angle Adjusted (FIX #7)
-        let adj_slope = normalization::volatility_adjusted_slope(&sensors.linreg_slope, &sensors.atr_sl);
-        // Chuyển Adjusted Slope sang Angle (Degrees)
-        let trend_angle_adj = adj_slope.iter().map(|&s| s.atan().to_degrees()).collect();
+            // 6. Volatility Adjusted Slope
+            let s = sensors.linreg_slope[i];
+            let atr = sensors.atr_sl[i];
+            adj_slope.push(if s.is_nan() || atr.is_nan() || atr < 1e-9 { f64::NAN } else { s / atr });
+        }
 
-        // 5. Squeeze Intensity (BB / KC Compression)
-        let squeeze_intensity = normalization::calculate_squeeze_intensity(
-            &sensors.bb_upper,
-            &sensors.bb_lower,
-            &sensors.kc_upper,
-            &sensors.kc_lower,
-        );
-
-        // 6. BB Width Normalized
-        let bb_width_norm: Vec<f64> = sensors.bb_upper.iter().enumerate().map(|(i, &u)| {
-            let l = sensors.bb_lower[i];
-            let m = (u + l) / 2.0;
-            if m > 0.0 { (u - l) / m } else { 0.0 }
+        // --- [BƯỚC 2: ROLLING & Z-SCORE] ---
+        // Các phép toán yêu cầu cửa sổ trượt (trạng thái)
+        let adj_slope_pct = normalization::rolling_percentile(&adj_slope, config.matrix.trend_lookback);
+        
+        let trend_dir: Vec<f64> = adj_slope_pct.iter().map(|&v| {
+            if v.is_nan() { f64::NAN } else { 2.0 * v - 1.0 }
         }).collect();
 
-        // 7. Momentum (RSI / 100)
-        let momentum = sensors.rsi.iter().map(|&v| v / 100.0).collect();
+        let trend_angle = sensors.linreg_angle.as_ref().clone();
+        let trend_angle_adj = adj_slope_pct;
 
-        // 8. Liquidity (MFI / 100)
-        let liquidity = sensors.mfi.iter().map(|&v| v / 100.0).collect();
+        let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, config.matrix.squeeze_lookback);
+        let momentum = normalization::rolling_percentile(&sensors.rsi, config.matrix.momentum_lookback);
+        let liquidity = normalization::rolling_percentile(&sensors.mfi, config.matrix.momentum_lookback);
+        let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, config.matrix.squeeze_lookback);
+        let entropy = normalization::rolling_percentile(&sensors.efficiency_ratio, config.matrix.trend_lookback);
+        let volume_force = normalization::rolling_percentile(&vol_raw, config.matrix.volume_lookback);
 
-        // 9. Chaos (Sử dụng NATR làm thước đo biến động chuẩn hóa)
-        let chaos = sensors.natr.as_ref().clone();
+        let z_raw = normalization::calculate_z_score_series(&sensors.closes, config.indicators.z_score_lookback);
+        let price_z_score = normalization::tanh_scale(&z_raw, config.matrix.z_score_sensitivity);
 
-        // 10. Chaos Ratio (NATR / SMA(NATR, 100)) - FIX #3, #23
-        let chaos_ratio = sensors.chaos_ratio.as_ref().clone();
-
-        // 11. Entropy (Độ thẳng của xu hướng - Efficiency Ratio)
-        let entropy = sensors.efficiency_ratio.as_ref().clone();
-
-        // 12. Volume Force (Volume * Ratio / Volume MA)
-        let volume_force: Vec<f64> = volumes
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| {
-                let ma = sensors.vol_ma_series[i];
-                if ma > 0.0 { (v * vol_ratio) / ma } else { 1.0 }
-            })
-            .collect();
-
-        // 13. Price Z-Score (FIX #6)
-        let price_z_score = normalization::calculate_z_score_series(&sensors.closes, config.indicators.z_score_lookback);
+        // // --- 📊 LOG CHẨN ĐOÁN TOÀN DIỆN (FULL SYSTEM SURGERY) ---
+        // let total = sensors.closes.len();
+        // if total > 100 {
+        //     println!("\n===============================================================");
+        //     println!("   [HELIOS MATRIX DIAGNOSTIC: RAW VS NORMALIZED]");
+        //     println!("   Lookbacks: Trend={}, Sqz={}, Mom={}, Vol={}, Z={}", 
+        //         config.matrix.trend_lookback, config.matrix.squeeze_lookback,
+        //         config.matrix.momentum_lookback, config.matrix.volume_lookback,
+        //         config.indicators.z_score_lookback
+        //     );
+        //     println!("===============================================================");
+            
+        //     let sample_indices = [total / 10, total / 2, total - 5];
+        //     for &idx in &sample_indices {
+        //         println!("\n--- [BAR {:>5}] ---", idx);
+        //         println!("      TREND: Slope:{:.6} -> Dir:{:.4} | Angle:{:.1} -> Adj:{:.4}", 
+        //             sensors.linreg_slope[idx], trend_dir[idx], sensors.linreg_angle[idx], trend_angle_adj[idx]);
+                
+        //         println!("      MOM  : RSI:{:.1} -> Mom_Norm:{:.4} | ADX:{:.1} -> Strength:{:.4}", 
+        //             sensors.rsi[idx], momentum[idx], sensors.adx[idx], trend_strength[idx]);
+                
+        //         let bb_w = sensors.bb_upper[idx] - sensors.bb_lower[idx];
+        //         println!("      VOLAT: BBW:{:.2} -> Norm:{:.4} | Sqz_Raw:{:.4} -> Inten:{:.4}", 
+        //             bb_w, bb_width_norm[idx], sqz_raw[idx], squeeze_intensity[idx]);
+                
+        //         println!("      FORCE: Vol:{:.0} -> Force_Norm:{:.4} | MFI:{:.1} -> Liq:{:.4}", 
+        //             volumes[idx], volume_force[idx], sensors.mfi[idx], liquidity[idx]);
+                
+        //         println!("      POS  : Close:{:.2} -> Z_Norm:{:.4} | Chaos_Ratio:{:.4}", 
+        //             sensors.closes[idx], price_z_score[idx], chaos_ratio[idx]);
+        //     }
+        //     println!("===============================================================\n");
+        // }
 
         Self {
             trend_dir: Arc::new(trend_dir),

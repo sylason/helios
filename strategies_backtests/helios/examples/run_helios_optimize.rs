@@ -19,11 +19,11 @@ use helios::strategy::HeliosStrategy;
 #[derive(Debug, Deserialize)]
 struct FullOptimizerConfig {
     prospector: ProspectorConfig,
-    search_space: serde_json::Value,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== HELIOS STRATEGY: ADVANCED OPTIMIZATION (PROSPECTOR) ===");
+
 
     // 1. Khởi tạo đường dẫn DB (Auto-Resume Logic)
     let db_path = r"E:/Projects/Automations/trading_backtest/strategies_backtests/helios/examples/helios_prospector_v2.db";
@@ -79,12 +79,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Khởi tạo Prospector
     let mut prospector = Prospector::new(prospector_config)?;
 
-    // 6. Định nghĩa Job Đầu tiên (Chuyển đổi JSON lồng sâu thành mảng phẳng cho GA)
-    if !db_exists {
-        let mut flat_search_space = HashMap::new();
-        flatten_nested_params(&full_config.search_space, "".to_string(), &mut flat_search_space)?;
+    // 6. Định nghĩa Job Đầu tiên (Tự động trích xuất từ Struct qua Macro DNA v2.0)
+    let needs_initial_job = !db_exists || prospector.backlog_storage.get_max_job_id() == 0;
+    if needs_initial_job {
+        use ferro_trade::optimizer::params::DnaMappable;
+        let flat_search_space = helios::strategy::config::HeliosConfig::parameter_defs();
         
-        println!("Adding Initial Job... ({} parameters detected)", flat_search_space.len());
+        println!("Adding Initial Job... ({} parameters detected automatically from Struct)", flat_search_space.len());
         prospector.add_initial_job(flat_search_space);
     }
 
@@ -113,19 +114,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return -50.0;
         }
 
-
-        // // 3. Tính điểm số (Score)
-        // // Dùng ln(ret + 1) để GA không quá tập trung vào lợi nhuận đột biến
-        // let return_score = (ret + 1.0).ln();
-        // // let return_score = ret;
-        
-        // // Safety score: DD càng thấp điểm càng cao (tỉ lệ nghịch với bình phương DD)
-        // let stability_factor = (1.0 - (dd / 25.0)).powi(2);
-        
-        // // Profit Factor đại diện cho hiệu suất thực tế sau khi trừ phí
-        // let pf = stats.profit_factor.min(4.0); 
-
-        // return_score * stability_factor * pf
         ret
     };
 
@@ -170,23 +158,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         champs_lock.iter().take(10).cloned().collect::<Vec<_>>()
     };
 
-    // Chuẩn bị Mapping một lần duy nhất (Sắp xếp Alphabetical để khớp với DNA của GA)
-    let mut flat_params = HashMap::new();
-    flatten_nested_params(&full_config.search_space, "".to_string(), &mut flat_params)?;
-    let mut param_names: Vec<String> = flat_params.keys().cloned().collect();
-    param_names.sort();
-    
-    let mut mapping = HashMap::new();
-    for (idx, name) in param_names.iter().enumerate() {
-        mapping.insert(name.clone(), idx);
-    }
-
     for (rank_idx, c) in top_champs.into_iter().enumerate() {
         let rank = rank_idx + 1;
         if let Some(dna) = &c.dna {
             println!("\n>>> [RANK {}] Re-running for full trade extraction...", rank);
             
-            if let Ok(res) = backtest.run_with_dna::<HeliosStrategy>(dna, &mapping) {
+            // [NEW] Giải mã và in Parameters chi tiết để đối chiếu với DNA
+            let mut sorted_keys: Vec<_> = c.params.keys().collect();
+            sorted_keys.sort();
+            let params_str = sorted_keys.iter()
+                .map(|k| {
+                    let v = c.params.get(*k).unwrap();
+                    if let Some(val) = v.as_f64() {
+                        format!("{}: {:.4}", k, val)
+                    } else {
+                        format!("{}: {:?}", k, v)
+                    }
+                })
+                .collect::<Vec<String>>()
+                .join(", ");
+            
+            println!("   Params: {}", params_str);
+
+            if let Ok(res) = backtest.run_with_dna::<HeliosStrategy>(dna) {
                 println!("{:<5} | {:<10} | {:<12} | {:<10.2} | {:<10} | {:<20}", 
                     "ID", "Type", "Entry Bar", "PnL", "Duration", "Playbook Tag");
                 println!("{}", "-".repeat(85));
