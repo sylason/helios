@@ -40,7 +40,7 @@ pub fn analyze_environment(
     if is_all_ok {
         memory.state_duration_counter = (memory.state_duration_counter + 1).min(config.min_orderly_bars * 2);
     } else {
-        memory.state_duration_counter = memory.state_duration_counter.saturating_sub(3);
+        memory.state_duration_counter = memory.state_duration_counter.saturating_sub(1);
     }
 
     let persistence_factor = (memory.state_duration_counter as f64 / config.min_orderly_bars as f64).clamp(0.0, 1.0);

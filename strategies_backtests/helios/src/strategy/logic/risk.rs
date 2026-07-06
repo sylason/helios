@@ -32,7 +32,8 @@ pub fn manage_trailing_stop(
 
         // 🌊 TREND / 🚀 MOMENTUM: Điều tiết theo độ dốc xu hướng
         TacticalPlaybook::TrendPullback | TacticalPlaybook::MomentumIgnition => {
-            if trend_angle.abs() > config.market_regime.trend.angle_parabolic {
+            // FIX: trend_angle is [0, 1]. Compare with parabolic percentile threshold instead of degrees.
+            if trend_angle.abs() > config.market_regime.parabolic.accel_angle_threshold.min(1.0) {
                 // 🚀 PARABOLIC: Giá bay quá dốc, hưng phấn quá đà -> Siết chặt (TIGHT) để bảo vệ lời.
                 risk_cfg.tsl_atr_tight
             } else {

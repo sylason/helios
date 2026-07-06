@@ -60,7 +60,8 @@ pub fn analyze_regime(
     let is_currently_trending = memory.last_regime == MarketRegime::Trending;
     let threshold_buffer = if is_currently_trending { 0.8 } else { 1.0 };
 
-    let angle_norm = trend_angle.abs() / reg_cfg.trend.angle_healthy; 
+    // FIX: trend_angle is trend_angle_adj [0, 1]. We scale by 0.5 to normalize.
+    let angle_norm = trend_angle.abs() / 0.5; 
     let adx_norm = trend_strength / reg_cfg.trend.adx_moderate;
     
     let weight_sum = reg_cfg.confidence.weight_angle + reg_cfg.confidence.weight_adx;
@@ -80,10 +81,12 @@ pub fn analyze_regime(
     }
 
     // 5. PARABOLIC SCORE 🌋 (Soft-Capped)
-    scores.parabolic = (trend_angle.abs() / reg_cfg.parabolic.angle_threshold).tanh();
+    // FIX: Parabolic threshold uses 0.85 percentile instead of degrees.
+    scores.parabolic = (trend_angle.abs() / 0.85).tanh();
 
     // 6. RANGING SCORE 🧱 (Mặc định khi các thế trận khác yếu)
-    scores.ranging = (1.0 - scores.trend.max(scores.squeeze).max(scores.anomaly).max(scores.absorption)).max(0.01).min(1.0);
+    // FIX: Include parabolic in the max() chain so Parabolic can suppress Ranging.
+    scores.ranging = (1.0 - scores.trend.max(scores.squeeze).max(scores.anomaly).max(scores.absorption).max(scores.parabolic)).max(0.01).min(1.0);
 
     // --- 🧭 XÁC ĐỊNH NHÃN CHÍNH (PRIMARY REGIME) ---
     // Dùng để tương thích ngược với Trailing Stop và Tagging.

@@ -242,12 +242,20 @@ pub fn execute_tactical(
             // --- 🧪 XÁC NHẬN KIỆT SỨC (EXHAUSTION) ---
             let is_exhausted = volume_force < range_cfg.volume_max_threshold;
             
+            // --- 📍 VỊ TRÍ GIÁ TRONG HÀNH LANG ---
+            let price_position = if range_width > 0.0 {
+                (current_close - bb_lower) / range_width
+            } else {
+                0.5
+            };
+            
             // --- 🏹 NGÒI NỔ ĐỘNG LƯỢNG (MOMENTUM PIVOT) ---
             let is_rebounding_up = if i >= 1 { sensors.macd_hist[i] > sensors.macd_hist[i-1] } else { false };
             let is_rebounding_down = if i >= 1 { sensors.macd_hist[i] < sensors.macd_hist[i-1] } else { false };
 
             // LONG: ... AND Chưa có vị thế
-            if current_close < bb_lower && is_exhausted && stoch_k < range_cfg.stoch_oversold && is_rebounding_up && !tick.position().is_open() {
+            // FIX: Thay vì bắt buộc giá rớt khỏi BB (quá hiếm), ta chỉ cần giá nằm ở 25% phía dưới hành lang.
+            if price_position < 0.25 && is_exhausted && stoch_k < range_cfg.stoch_oversold && is_rebounding_up && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
@@ -260,7 +268,8 @@ pub fn execute_tactical(
                 // println!("[TACTICAL] Range_Osc LONG Triggered at bar {}", i);
             } 
             // SHORT: ... AND Chưa có vị thế
-            else if current_close > bb_upper && is_exhausted && stoch_k > range_cfg.stoch_overbought && is_rebounding_down && !tick.position().is_open() {
+            // FIX: Giá nằm ở 25% phía trên hành lang.
+            else if price_position > 0.75 && is_exhausted && stoch_k > range_cfg.stoch_overbought && is_rebounding_down && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;

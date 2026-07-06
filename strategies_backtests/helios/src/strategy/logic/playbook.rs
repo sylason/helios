@@ -79,7 +79,13 @@ pub fn select_playbook(
             if trend_dir == TrendDirection::Neutral || is_parabolic {
                 return TacticalPlaybook::Wait;
             }
-            TacticalPlaybook::TrendPullback
+            // MAPPING MOMENTUM IGNITION:
+            // Use matrix_rsi as a proxy for momentum strength
+            if matrix_rsi > 0.8 || matrix_rsi < 0.2 {
+                TacticalPlaybook::MomentumIgnition
+            } else {
+                TacticalPlaybook::TrendPullback
+            }
         },
 
         // 🧱 THẾ TRẬN RANGING
