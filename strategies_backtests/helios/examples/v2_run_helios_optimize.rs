@@ -11,7 +11,6 @@ use serde::Deserialize;
 use ferro_trade::backtest::BacktestBuilder;
 use ferro_trade::data::load_data;
 use ferro_trade::optimizer::prospector::{Prospector, ProspectorConfig};
-use ferro_trade::optimizer::config_parser::flatten_nested_params;
 use ferro_trade::stats::StatItem;
 use helios::strategy::HeliosStrategy;
 
@@ -19,6 +18,7 @@ use helios::strategy::HeliosStrategy;
 #[derive(Debug, Deserialize)]
 struct FullOptimizerConfig {
     prospector: ProspectorConfig,
+    cache_config: Option<ferro_trade::data::global_cache::CacheConfig>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,8 +40,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let df = load_data(common::DATA_PATH).expect("Failed to load data");
     println!("Loaded {} rows.", df.height());
 
-    // 3. Backtest Setup (Template cho mọi Worker)
-    let mut backtest = BacktestBuilder::new()
+    // 3. Load Cấu hình từ JSON (Nguồn chân lý duy nhất)
+    let config_path = "examples/helios_optimizer_config.json";
+    let file = File::open(config_path).expect("Could not open helios_optimizer_config.json");
+    let reader = BufReader::new(file);
+    let full_config: FullOptimizerConfig = serde_json::from_reader(reader).expect("JSON format error");
+
+    let mut prospector_config = full_config.prospector;
+    prospector_config.db_path = db_path.to_string();
+
+    println!("Config Loaded:");
+    println!("  Workers: Pop={}, Gen={}", prospector_config.worker_config.population_size, prospector_config.worker_config.n_generations);
+    println!("  Scout Method: {}", prospector_config.scout_method);
+    println!("  Exploration Strategy: {}", prospector_config.exploration_strategy);
+    println!("  Max Threads: {:?}", prospector_config.max_threads);
+
+    // 4. Backtest Setup (Template cho mọi Worker)
+    let backtest = BacktestBuilder::new()
         .data(df)
         .cash(common::INITIAL_CASH)
         .commission(common::COMMISSION)
@@ -51,6 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .exclusive_orders(true)
         .hedging(false)
         .finalize_trades(true)
+        .cache_config(full_config.cache_config.unwrap_or_default())
         .calculate_metrics(&[
             StatItem::ReturnPct, 
             StatItem::TotalTrades, 
@@ -63,18 +79,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             StatItem::ProfitFactor
         ])
         .build()?;
-
-    // 4. Load Cấu hình từ JSON (Nguồn chân lý duy nhất)
-    let config_path = "examples/helios_optimizer_config.json";
-    let file = File::open(config_path).expect("Could not open helios_optimizer_config.json");
-    let reader = BufReader::new(file);
-    let full_config: FullOptimizerConfig = serde_json::from_reader(reader).expect("JSON format error");
-
-    let mut prospector_config = full_config.prospector;
-    prospector_config.db_path = db_path.to_string();
-
-    println!("Config Loaded:");
-    println!("  Workers: Pop={}, Gen={}", prospector_config.worker_config.population_size, prospector_config.worker_config.n_generations);
 
     // 5. Khởi tạo Prospector
     let mut prospector = Prospector::new(prospector_config)?;

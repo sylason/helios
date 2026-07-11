@@ -102,10 +102,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
-                let tp = current_close + (sl_dist * risk.base_tp_rr);
                 
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("{}_L_{}", tag, score_tag))
                 );
                 // println!("[TACTICAL] {} LONG Triggered at bar {}", tag, i);
@@ -115,10 +114,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
-                let tp = current_close - (sl_dist * risk.base_tp_rr);
                 
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("{}_S_{}", tag, score_tag))
                 );
                 // println!("[TACTICAL] {} SHORT Triggered at bar {}", tag, i);
@@ -151,10 +149,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
-                let tp = current_close + (sl_dist * risk.base_tp_rr);
                 
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Trend_PB_L_{}", score_tag))
                 );
                 // println!("[TACTICAL] Trend_PB LONG Triggered at bar {}", i);
@@ -164,10 +161,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
-                let tp = current_close - (sl_dist * risk.base_tp_rr);
                 
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Trend_PB_S_{}", score_tag))
                 );
                 // println!("[TACTICAL] Trend_PB SHORT Triggered at bar {}", i);
@@ -205,10 +201,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
-                let tp = current_close + (sl_dist * risk.base_tp_rr);
                 
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Mom_L_{}", score_tag))
                 );
                 // println!("[TACTICAL] Momentum LONG Triggered at bar {}", i);
@@ -218,10 +213,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
-                let tp = current_close - (sl_dist * risk.base_tp_rr);
                 
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Mom_S_{}", score_tag))
                 );
                 // println!("[TACTICAL] Momentum SHORT Triggered at bar {}", i);
@@ -259,10 +253,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
-                let tp = (bb_upper + bb_lower) / 2.0; // Chốt lời tại trục giữa hành lang
                 
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Range_L_{}", score_tag))
                 );
                 // println!("[TACTICAL] Range_Osc LONG Triggered at bar {}", i);
@@ -273,10 +266,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
-                let tp = (bb_upper + bb_lower) / 2.0; // Chốt lời tại trục giữa hành lang
                 
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Range_S_{}", score_tag))
                 );
                 // println!("[TACTICAL] Range_Osc SHORT Triggered at bar {}", i);
@@ -292,13 +284,13 @@ pub fn execute_tactical(
             // --- 🏹 NGÒI NỔ ĐIỂM GÃY (MOMENTUM COLLAPSE) ---
             let lookback_n = rev_cfg.macd_lookback.max(1.0) as usize;
 
-            let is_momentum_collapsing_up = if i >= lookback_n {
+            let is_momentum_declining = if i >= lookback_n {
                 sensors.macd_hist[i] < sensors.macd_hist[i - lookback_n]
             } else {
                 false
             };
 
-            let is_momentum_collapsing_down = if i >= lookback_n {
+            let is_momentum_recovering = if i >= lookback_n {
                 sensors.macd_hist[i] > sensors.macd_hist[i - lookback_n]
             } else {
                 false
@@ -308,7 +300,7 @@ pub fn execute_tactical(
             let can_trigger = !tick.position().is_open() || score > 0.98;
 
             // LONG (Bắt đáy)
-            if can_trigger && matrix_rsi < (1.0 - rev_cfg.rsi_extreme) && price_z_score.abs() > rev_cfg.z_score_threshold && is_momentum_collapsing_down {
+            if can_trigger && matrix_rsi < (1.0 - rev_cfg.rsi_extreme) && price_z_score.abs() > rev_cfg.z_score_threshold && is_momentum_recovering {
                 if tick.position().is_open() {
                     // println!("[TACTICAL] EMERGENCY OVERRIDE: Closing old position for Climax LONG");
                     tick.close(None);
@@ -317,15 +309,14 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
-                let tp = current_close + (sl_dist * risk.base_tp_rr * 2.0);
                 
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Climax_Rev_L_{}", score_tag))
                 );
             }
             // SHORT (Bắt đỉnh)
-            else if can_trigger && matrix_rsi > rev_cfg.rsi_extreme && price_z_score.abs() > rev_cfg.z_score_threshold && is_momentum_collapsing_up {
+            else if can_trigger && matrix_rsi > rev_cfg.rsi_extreme && price_z_score.abs() > rev_cfg.z_score_threshold && is_momentum_declining {
                 if tick.position().is_open() {
                     // println!("[TACTICAL] EMERGENCY OVERRIDE: Closing old position for Climax SHORT");
                     tick.close(None);
@@ -334,10 +325,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
-                let tp = current_close - (sl_dist * risk.base_tp_rr * 2.0);
                 
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Climax_Rev_S_{}", score_tag))
                 );
             }
@@ -371,10 +361,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk_cfg.base_sl_atr * 0.7).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
-                let tp = current_close + (sl_dist * risk_cfg.base_tp_rr * 1.5);
                 
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Absorp_L_{}", score_tag))
                 );
                 // println!("[TACTICAL] Absorption LONG Triggered at bar {}", i);
@@ -384,10 +373,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk_cfg.base_sl_atr * 0.7).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
-                let tp = current_close - (sl_dist * risk_cfg.base_tp_rr * 1.5);
                 
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Absorp_S_{}", score_tag))
                 );
                 // println!("[TACTICAL] Absorption SHORT Triggered at bar {}", i);
@@ -451,10 +439,10 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
-                let tp = current_close + (sl_dist * 2.0); 
+                let _tp = current_close + (sl_dist * 2.0); 
                 
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Ano_Fade_L_{}", score_tag))
                 );
             } 
@@ -470,10 +458,9 @@ pub fn execute_tactical(
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
-                let tp = current_close - (sl_dist * 2.0);
                 
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Ano_Fade_S_{}", score_tag))
                 );
             }

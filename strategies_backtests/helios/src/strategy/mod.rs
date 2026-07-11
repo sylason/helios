@@ -1,7 +1,8 @@
 // strategies_backtests/helios/src/strategy/mod.rs
 
 pub mod config;
-pub mod logic;
+pub mod core_v2;
+pub mod core_v3;
 pub mod memory;
 pub mod sensors;
 pub mod matrix;
@@ -108,7 +109,7 @@ impl HeliosStrategy {
             println!("\n--- [HELIOS FINAL VERDICT (Bar {})] ---", last_idx);
             
             // 1. Kiểm tra Cầu chì
-            let env = logic::sensor::analyze_environment(
+            let env = core_v2::sensor::analyze_environment(
                 &self.config.environment_fuse,
                 &mut self.memory,
                 self.matrix.chaos[last_idx],
@@ -123,7 +124,7 @@ impl HeliosStrategy {
             );
 
             // 2. Kiểm tra Điểm số Thế trận
-            let (_, scores) = logic::regime::analyze_regime(
+            let (_, scores) = core_v2::regime::analyze_regime(
                 &self.config,
                 &mut self.memory,
                 self.matrix.squeeze_intensity[last_idx],
@@ -136,8 +137,8 @@ impl HeliosStrategy {
             );
             
             // 3. Quyết định Playbook
-            let trend_dir_enum = logic::regime::detect_trend_direction(self.matrix.trend_dir[last_idx]);
-            let playbook = logic::playbook::select_playbook(
+            let trend_dir_enum = core_v2::regime::detect_trend_direction(self.matrix.trend_dir[last_idx]);
+            let playbook = core_v2::playbook::select_playbook(
                 &self.config,
                 env,
                 &scores,
@@ -321,7 +322,7 @@ impl Strategy for HeliosStrategy {
         // --- 🏛️ QUY TRÌNH HỘI ĐỒNG (COUNCIL WORKFLOW) ---
 
         // 1. Nhận thức môi trường (Level 1: Environment Fuse)
-        let env = logic::sensor::analyze_environment(
+        let env = core_v2::sensor::analyze_environment(
             &self.config.environment_fuse,
             &mut self.memory,
             self.matrix.chaos[i],
@@ -331,7 +332,7 @@ impl Strategy for HeliosStrategy {
 
         // 2. Phân tích thế trận & Tính điểm (Level 2: Market Regime Scoring)
         // [CHỈ GỌI 1 LẦN]: Để tránh sai lệch bars_since_regime_change
-        let (_primary_regime, scores) = logic::regime::analyze_regime(
+        let (_primary_regime, scores) = core_v2::regime::analyze_regime(
             &self.config,
             &mut self.memory,
             self.matrix.squeeze_intensity[i],
@@ -345,7 +346,7 @@ impl Strategy for HeliosStrategy {
 
         // 3. Quản lý rủi ro & Trailing (Level 3: Risk Management)
         // Luôn chạy để bảo vệ các lệnh đang mở, kể cả khi môi trường bắt đầu xấu đi.
-        logic::risk::manage_trailing_stop(
+        core_v2::risk::manage_trailing_stop(
             &self.config,
             &mut self.memory,
             tick,
@@ -356,9 +357,9 @@ impl Strategy for HeliosStrategy {
         // 4. Lựa chọn chiến thuật (Level 3: Playbook Arbitrator)
         // [FIXED Task 2.2]: Loại bỏ 'Hard Stop'. Tầng Playbook sẽ tự 'Wait' nếu 
         // Stability Index thấp làm Final Score không đủ ngưỡng.
-        let trend_dir_enum = logic::regime::detect_trend_direction(self.matrix.trend_dir[i]);
+        let trend_dir_enum = core_v2::regime::detect_trend_direction(self.matrix.trend_dir[i]);
 
-        let playbook = logic::playbook::select_playbook(
+        let playbook = core_v2::playbook::select_playbook(
             &self.config,
             env,
             &scores,
@@ -369,7 +370,7 @@ impl Strategy for HeliosStrategy {
 
         // 5. Kích nổ Sniper (Level 4: Tactical Execution)
         if playbook != crate::types::TacticalPlaybook::Wait {
-            logic::tactical::execute_tactical(
+            core_v2::tactical::execute_tactical(
                 &self.config,
                 &mut self.memory,
                 playbook,

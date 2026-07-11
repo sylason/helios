@@ -204,7 +204,7 @@ pub struct MatrixConfig {
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct EnvironmentFuseConfig {
-    #[dna(min = 0.01, max = 0.15, step = 0.02)]
+    #[dna(min = 0.1, max = 0.9, step = 0.05)]
     pub er_threshold: f64,
     #[dna(min = 0.005, max = 0.065, step = 0.003)]
     pub chaos_z_threshold: f64,
@@ -272,7 +272,7 @@ pub struct RegimePhaseParams {
 pub struct RegimeAbsorptionParams {
     #[dna(min = 0.5, max = 0.99, step = 0.03)]
     pub volume_threshold: f64,
-    #[dna(min = 0.005, max = 0.05, step = 0.003)]
+    #[dna(min = 0.1, max = 0.4, step = 0.05)]
     pub range_width_max: f64,
     #[dna(min = 0.55, max = 0.95, step = 0.02)]
     pub bias_threshold: f64,
@@ -288,7 +288,7 @@ pub struct RegimeAnomalyParams {
 pub struct RegimeParabolicParams {
     #[dna(min = 50.0, max = 85.0, step = 2.0)]
     pub angle_threshold: f64,
-    #[dna(min = 0.8, max = 2.5, step = 0.1)]
+    #[dna(min = 0.8, max = 1.0, step = 0.02)]
     pub accel_angle_threshold: f64,
 }
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
@@ -328,7 +328,7 @@ pub struct TacticalSniperConfig {
 pub struct TacticalSqueezeParams {
     #[dna(min = 0.1, max = 2.5, step = 0.15)]
     pub break_confirm_mult: f64,
-    #[dna(min = 1.01, max = 1.25, step = 0.015)]
+    #[dna(min = 1.005, max = 1.05, step = 0.005)]
     pub vol_expansion_thresh: f64,
     #[dna(min = 0.5, max = 0.99, step = 0.03)]
     pub volume_confirm_thresh: f64,

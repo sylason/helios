@@ -59,7 +59,7 @@ Tài liệu này dùng để chúng ta "nướng" (grill) các quyết định t
 > [ ] Chọn A
 > [ ] Chọn B
 > [ ] Chọn C
-> *Bổ sung:* 
+> *Bổ sung:* tôi cần được tư vấn thêm phần này. Trước đây tôi trade futures derivative manual trên Binance với các asset BTHUSDT và ETHUSDT thì tôi biết đến tới giới hạn nhỏ nhất để vào lệnh cho từng asset khác nhau, bạn sẽ cần phải nghiên cứu về điểm này. và vì vốn tôi không nhiều, hiện tôi chỉ có thể vào lệnh ở mức size tối đa là 10$ 1 lệnh, khi vốn nhiều hơn sau các trade thành công thì ta sẽ mở rộng size theo thời gian. ví dụ như vốn > 100$ thì ta sẽ lấy khoảng 10% vốn. Thiết kế sau này, nếu ta có nhiều asset hơn thì ta sẽ phân chia vốn cấp cho từng asset trong bot, đây là phần nghiêng về quản lý bot rồi, nhưng tôi giải thích cho bạn hiểu. 
 > ...
 
 ---
@@ -79,7 +79,7 @@ Tài liệu này dùng để chúng ta "nướng" (grill) các quyết định t
 > [ ] Chọn A
 > [ ] Chọn B
 > [ ] Chọn C
-> *Bổ sung:* 
+> *Bổ sung:* tôi đồng ý đề xuất của bạn, và ta cũng phải bỏ TP tĩnh đi, nó đang giới hạn lại khả năng mở rộng lấy lời của mô hình của ta. trailing SL và breakeven của ta phải luôn cân nhắc khoản phí submissionn nữa. 
 > ...
 
 ---

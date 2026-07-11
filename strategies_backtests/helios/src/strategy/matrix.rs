@@ -39,7 +39,7 @@ impl MarketMatrix {
         // Gộp 6 vòng lặp map() ngang thành 1 vòng lặp dọc duy nhất để tối ưu L1 Cache.
         let mut trend_strength = Vec::with_capacity(len);
         let mut chaos = Vec::with_capacity(len);
-        let mut bb_width_norm = Vec::with_capacity(len);
+        let mut bb_width_raw = Vec::with_capacity(len);
         let mut vol_raw = Vec::with_capacity(len);
         let mut sqz_raw = Vec::with_capacity(len);
         let mut adj_slope = Vec::with_capacity(len);
@@ -55,7 +55,7 @@ impl MarketMatrix {
             let bu = sensors.bb_upper[i];
             let bl = sensors.bb_lower[i];
             let bm = (bu + bl) / 2.0;
-            bb_width_norm.push(if bm > 0.0 { (bu - bl) / bm } else { 0.0 });
+            bb_width_raw.push(if bm > 0.0 { (bu - bl) / bm } else { 0.0 });
             
             // 4. Volume Force Raw
             let v = volumes[i];
@@ -91,6 +91,7 @@ impl MarketMatrix {
         let trend_angle_adj = adj_slope_pct;
 
         let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, config.matrix.squeeze_lookback);
+        let bb_width_norm = normalization::rolling_percentile(&bb_width_raw, config.matrix.squeeze_lookback);
         let momentum = normalization::rolling_percentile(&sensors.rsi, config.matrix.momentum_lookback);
         let liquidity = normalization::rolling_percentile(&sensors.mfi, config.matrix.momentum_lookback);
         let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, config.matrix.squeeze_lookback);

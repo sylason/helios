@@ -14,3 +14,7 @@ pub const FRACTIONAL_UNIT: f64 = 0.0001;
 pub const RISK_SIZE_RATIO: f64 = 0.2;  // Vào lệnh 1/5 tổng tài sản
 pub const MIN_TRADE_AMOUNT: f64 = 10.0; // Tiền vào lệnh tối thiểu $10
 
+
+
+#[allow(dead_code)]
+fn main() {}

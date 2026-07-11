@@ -49,7 +49,8 @@ pub fn select_playbook(
         
         // 🌪️ THẾ TRẬN SQUEEZE
         MarketRegime::Squeeze => {
-            if matrix_rsi > config.market_regime.phase.accel_min || matrix_rsi < (1.0 - config.market_regime.phase.accel_min) {
+            let extreme_thresh = config.market_regime.phase.accel_min.max(0.5);
+            if matrix_rsi > extreme_thresh || matrix_rsi < (1.0 - extreme_thresh) {
                 TacticalPlaybook::SqueezeAggressive
             } else {
                 TacticalPlaybook::SqueezeConfirmed
@@ -79,9 +80,12 @@ pub fn select_playbook(
             if trend_dir == TrendDirection::Neutral || is_parabolic {
                 return TacticalPlaybook::Wait;
             }
-            // MAPPING MOMENTUM IGNITION:
-            // Use matrix_rsi as a proxy for momentum strength
-            if matrix_rsi > 0.8 || matrix_rsi < 0.2 {
+            let rsi_thresh = config.tactical_sniper.momentum.rsi_threshold;
+            let rsi_climax = config.tactical_sniper.momentum.rsi_climax;
+            let is_momentum = (matrix_rsi > rsi_thresh && matrix_rsi < rsi_climax) || 
+                              (matrix_rsi < (1.0 - rsi_thresh) && matrix_rsi > (1.0 - rsi_climax));
+            
+            if is_momentum {
                 TacticalPlaybook::MomentumIgnition
             } else {
                 TacticalPlaybook::TrendPullback

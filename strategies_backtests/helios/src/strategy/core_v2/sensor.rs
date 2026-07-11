@@ -21,7 +21,7 @@ pub fn analyze_environment(
 
     // --- 1. MÀNG LỌC HOẢNG LOẠN (VOLUME SPIKE) (FIX #25) ---
     // Nếu Volume vọt lên quá cao (gấp 5 lần trung bình), báo động Chaotic ngay.
-    if volume_force > 5.0 {
+    if volume_force > 0.95 {
         return MarketEnvironment { stability_index: 0.0 };
     }
     
