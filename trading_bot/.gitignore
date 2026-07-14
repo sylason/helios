@@ -1,0 +1,31 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Node.js (dành cho Web UI nếu có)
+node_modules/
+dist/
+build/
+npm-debug.log
+yarn-error.log
+
+# Môi trường và Bảo mật (Cực kỳ quan trọng)
+.env
+.env.*
+secrets.json
+config.local.json
+
+# Database & Data (Tránh đưa dữ liệu lịch sử hoặc file SQLite nặng lên Git)
+*.db
+*.sqlite
+*.sqlite3
+data/
+logs/
+*.log
+
+# Hệ điều hành & Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp

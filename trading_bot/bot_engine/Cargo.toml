@@ -1,0 +1,51 @@
+[package]
+name = "bot_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Binance Official SDK (Chính chủ)
+# Kích hoạt tính năng Futures (USDS-M) cho cả REST và WebSocket
+binance-sdk = { version = "46.0.0", default-features = false, features = [
+    "derivatives_trading_usds_futures",
+    "spot",
+    "rustls-tls",
+] }
+
+
+# Data Analysis
+polars = { version = "0.52", features = ["lazy", "temporal", "describe"] }
+ferro_trade = { path = "../../ferro_trade" }
+helios = { path = "../../strategies_backtests/v2_trading_bot_demo" }
+
+# Networking (Bổ sung cho SDK)
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+url = "2.5"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+dotenv = "0.15"
+uuid = { version = "1.8", features = ["v4", "serde"] }
+smallvec = "1.11.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+thiserror = "1.0"
+anyhow = "1.0.103"
+
+[profile.release]
+lto = "thin"
+codegen-units = 16

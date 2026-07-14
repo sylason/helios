@@ -1,0 +1,17 @@
+✔ Project name · bot_desktop_client
+✔ Identifier · com.trading_bot.bot_desktop_client.v1
+✔ Choose which language to use for your frontend · TypeScript / JavaScript - (pnpm, yarn, npm, deno, bun)
+✔ Choose your package manager · npm
+✔ Choose your UI template · React - (https://react.dev/)
+✔ Choose your UI flavor · TypeScript
+
+Template created! To get started run:
+  cd bot_desktop_client
+  npm install
+  npm run tauri android init
+
+For Desktop development, run:
+  npm run tauri dev
+
+For Android development, run:
+  npm run tauri android dev
