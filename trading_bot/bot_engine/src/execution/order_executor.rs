@@ -6,37 +6,38 @@ use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
 };
 use binance_sdk::derivatives_trading_usds_futures::rest_api::RestApi;
 use binance_sdk::config::ConfigurationRestApi;
+use chrono::Utc;
 
 use crate::models::market_info::MarketFilter;
 use crate::error::BotError;
 use ferro_trade::broker::actions::Action;
+use crate::data_engine::sqlite_impl::SqliteStore;
+use std::sync::Arc;
 
 pub struct OrderExecutor {
     rest_client: RestApi,
     market_filter: MarketFilter,
+    db_store: Arc<SqliteStore>,
 }
 
 impl OrderExecutor {
-    pub fn new(api_key: String, api_secret: String, use_testnet: bool, market_filter: MarketFilter) -> Self {
-        let rest_conf = if use_testnet {
-            ConfigurationRestApi::builder()
-                .base_path("https://testnet.binancefuture.com")
-                .api_key(api_key)
-                .api_secret(api_secret)
-                .build()
-                .unwrap()
+    pub fn new(api_key: String, api_secret: String, use_testnet: bool, market_filter: MarketFilter, db_store: Arc<SqliteStore>) -> Self {
+        let rest_conf = ConfigurationRestApi::builder()
+            .api_key(api_key)
+            .api_secret(api_secret)
+            .build()
+            .unwrap();
+            
+        let rest_client = if use_testnet {
+            binance_sdk::derivatives_trading_usds_futures::DerivativesTradingUsdsFuturesRestApi::testnet(rest_conf)
         } else {
-            ConfigurationRestApi::builder()
-                .api_key(api_key)
-                .api_secret(api_secret)
-                .build()
-                .unwrap()
+            binance_sdk::derivatives_trading_usds_futures::DerivativesTradingUsdsFuturesRestApi::production(rest_conf)
         };
-        let rest_client = binance_sdk::derivatives_trading_usds_futures::DerivativesTradingUsdsFuturesRestApi::production(rest_conf);
 
         Self {
             rest_client,
             market_filter,
+            db_store,
         }
     }
 
@@ -115,7 +116,26 @@ impl OrderExecutor {
             Ok(res) => {
                 let data = res.data().await.map_err(|e| BotError::from(e))?;
                 info!("✅ [{}] Khớp lệnh thành công! OrderID: {:?}", symbol, data.order_id);
-                // TODO: Ghi log vào SQLite TradeHistory ở đây
+                
+                // Ghi log vào SQLite TradeHistory
+                let order_id_str = data.order_id.map_or("UNKNOWN".to_string(), |id| id.to_string());
+                let side_str = match side {
+                    NewOrderSideEnum::Buy => "BUY",
+                    NewOrderSideEnum::Sell => "SELL",
+                };
+                let current_time = Utc::now().timestamp_millis();
+                
+                if let Err(e) = self.db_store.save_trade_history(
+                    &order_id_str,
+                    symbol,
+                    side_str,
+                    current_price,
+                    qty,
+                    current_time
+                ) {
+                    error!("❌ [{}] Lỗi ghi log giao dịch vào SQLite: {:?}", symbol, e);
+                }
+
                 Ok(())
             },
             Err(e) => {
@@ -139,7 +159,8 @@ mod tests {
             max_qty: 1000.0,
             min_notional: 5.0,
         };
-        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter);
+        let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store);
 
         // Giả sử có 100 USDT, Risk 1.0 (100%), đòn bẩy x1, giá BTC = 60000.5
         // Qty mong muốn: 100 / 60000.5 = 0.001666...
@@ -157,7 +178,8 @@ mod tests {
             max_qty: 10000000.0,
             min_notional: 5.0,
         };
-        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter);
+        let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store);
 
         // Giả sử rủi ro 10 USDT, đòn bẩy x10 (thành 100 USDT), giá DOGE = 0.12345
         // Qty mong muốn: 100 / 0.12345 = 810.04455...
@@ -169,7 +191,8 @@ mod tests {
     #[test]
     fn test_calculate_order_size_min_notional_fail() {
         let filter = MarketFilter::default();
-        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter);
+        let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store);
 
         // Rủi ro chỉ 1 USDT, đòn bẩy x1, giá 60000
         // Qty = 0.000016 -> làm tròn thành 0.0 (không đủ min qty) hoặc 0.000
@@ -180,5 +203,41 @@ mod tests {
             Err(BotError::MarketFilterError(_)) => (),
             _ => panic!("Phải trả về MarketFilterError"),
         }
+    }
+
+    #[tokio::test]
+    #[ignore] // Chỉ chạy thủ công khi cần test với Testnet thật
+    async fn test_integration_execute_order_testnet() {
+        dotenv::dotenv().ok();
+        let api_key = std::env::var("BINANCE_TESTNET_API_KEY").unwrap_or_default();
+        let api_secret = std::env::var("BINANCE_TESTNET_SECRET_KEY").unwrap_or_default();
+        
+        if api_key.is_empty() || api_secret.is_empty() {
+            println!("Skipping integration test due to missing BINANCE_TESTNET_API_KEY");
+            return;
+        }
+
+        let filter = MarketFilter {
+            tick_size: 0.00001,
+            step_size: 1.0,
+            min_qty: 1.0,
+            max_qty: 10000000.0,
+            min_notional: 5.0,
+        };
+        let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
+        let executor = OrderExecutor::new(api_key, api_secret, true, filter, db_store);
+
+        let action = Action::Buy {
+            size: 1.0, // Sử dụng 100% của mức rủi ro truyền vào
+            limit: None,
+            stop: None,
+            policy: None,
+            tag: None,
+        };
+        
+        // Tăng vốn lên 100 USDT để đảm bảo Notional (Risk) > 5 USDT bất chấp giá Market thay đổi
+        let res = executor.execute_action("DOGEUSDT", action, 0.12, 100.0, 0.0, 1.0).await;
+        
+        assert!(res.is_ok(), "Lỗi gửi lệnh E2E Testnet: {:?}", res.err());
     }
 }

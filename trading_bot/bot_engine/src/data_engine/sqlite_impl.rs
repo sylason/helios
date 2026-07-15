@@ -50,11 +50,37 @@ impl SqliteStore {
             [],
         ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
 
+        // 3. Tạo bảng lịch sử giao dịch (Trade History)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS trade_history (
+                order_id TEXT PRIMARY KEY,
+                symbol TEXT,
+                side TEXT,
+                price DOUBLE,
+                qty DOUBLE,
+                timestamp BIGINT
+            )",
+            [],
+        ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+
         info!("📂 SQLite initialized at: {}", db_path);
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    /// Lưu lịch sử giao dịch (Trade History)
+    pub fn save_trade_history(&self, order_id: &str, symbol: &str, side: &str, price: f64, qty: f64, timestamp: i64) -> Result<(), BotError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO trade_history (order_id, symbol, side, price, qty, timestamp) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![order_id, symbol, side, price, qty, timestamp],
+        ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+        
+        debug!("💾 [{}] Trade {} saved to DB.", symbol, order_id);
+        Ok(())
     }
 }
 
