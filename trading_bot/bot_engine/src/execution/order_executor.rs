@@ -12,16 +12,19 @@ use crate::models::market_info::MarketFilter;
 use crate::error::BotError;
 use ferro_trade::broker::actions::Action;
 use crate::data_engine::sqlite_impl::SqliteStore;
+use binance_sdk::common::models::{RateLimitType, Interval as BinanceInterval};
+use crate::models::weight_monitor::WeightMonitor;
 use std::sync::Arc;
 
 pub struct OrderExecutor {
     rest_client: RestApi,
     market_filter: MarketFilter,
     db_store: Arc<SqliteStore>,
+    monitor: Arc<WeightMonitor>,
 }
 
 impl OrderExecutor {
-    pub fn new(api_key: String, api_secret: String, use_testnet: bool, market_filter: MarketFilter, db_store: Arc<SqliteStore>) -> Self {
+    pub fn new(api_key: String, api_secret: String, use_testnet: bool, market_filter: MarketFilter, db_store: Arc<SqliteStore>, monitor: Arc<WeightMonitor>) -> Self {
         let rest_conf = ConfigurationRestApi::builder()
             .api_key(api_key)
             .api_secret(api_secret)
@@ -38,6 +41,7 @@ impl OrderExecutor {
             rest_client,
             market_filter,
             db_store,
+            monitor,
         }
     }
 
@@ -97,7 +101,27 @@ impl OrderExecutor {
             position_amt.abs()
         } else {
             let risk_usdt = available_balance * risk_percentage;
-            self.calculate_order_size(risk_usdt, current_price, leverage)?
+            let target_qty = self.calculate_order_size(risk_usdt, current_price, leverage)?;
+            
+            // Binance One-way Mode logic: to reverse a position, we must add the current position size
+            match side {
+                NewOrderSideEnum::Buy => {
+                    if position_amt < 0.0 {
+                        // Đang Short, muốn Buy -> Phải đóng Short trước rồi mới mở Long
+                        target_qty + position_amt.abs()
+                    } else {
+                        target_qty
+                    }
+                }
+                NewOrderSideEnum::Sell => {
+                    if position_amt > 0.0 {
+                        // Đang Long, muốn Sell -> Phải đóng Long trước rồi mới mở Short
+                        target_qty + position_amt
+                    } else {
+                        target_qty
+                    }
+                }
+            }
         };
 
         info!("🚀 [{}] Chuẩn bị gửi lệnh: {:?} Qty: {:.4} @ Market", symbol, side, qty);
@@ -112,8 +136,17 @@ impl OrderExecutor {
         .quantity(dec_qty)
         .build().map_err(|e| BotError::Internal(e.to_string()))?;
 
+        self.monitor.wait_if_needed(1).await;
         match self.rest_client.new_order(params).await {
             Ok(res) => {
+                if let Some(ref limits) = res.rate_limits {
+                    for limit in limits {
+                        if limit.rate_limit_type == RateLimitType::RequestWeight && limit.interval == BinanceInterval::Minute {
+                            self.monitor.update(limit.count);
+                        }
+                    }
+                }
+                self.monitor.report_status();
                 let data = res.data().await.map_err(|e| BotError::from(e))?;
                 info!("✅ [{}] Khớp lệnh thành công! OrderID: {:?}", symbol, data.order_id);
                 

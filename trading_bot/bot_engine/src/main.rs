@@ -16,7 +16,7 @@ use controller::asset_actor::AssetActor;
 use data_engine::binance_rest::InitialSync;
 use execution::ws_manager::WsManager;
 use std::collections::HashMap;
-use helios::strategy::HeliosStrategy;
+use helios::strategy::{HeliosStrategy, QuickCrossStrategy};
 use ferro_trade::strategy::Strategy;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -120,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ws_manager = WsManager::new(
         _config.api_key.clone(),
         _config.api_secret.clone(),
-        true, // use_testnet
+        _config.use_testnet,
         monitor.clone(),
         db_store.clone(),
         data_tx.clone(),
@@ -136,21 +136,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let account_manager = crate::execution::account_manager::AccountManager::new(
         _config.api_key.clone(),
         _config.api_secret.clone(),
-        true, // use_testnet
-        account_tx.clone()
+        _config.use_testnet,
+        account_tx.clone(),
+        monitor.clone()
     );
     if let Err(e) = account_manager.initialize_account(&symbol, 10).await {
         tracing::error!("❌ Lỗi khởi tạo tài khoản ban đầu: {}", e);
     }
 
-    // 9. Khởi chạy Asset Actor (Nhạc trưởng) với Helios Strategy
-    let helios = Box::new(HeliosStrategy::new(&HashMap::new()));
+    // 8.6 Khởi tạo Order Executor cho bot trade thật
+    let executor = Arc::new(crate::execution::order_executor::OrderExecutor::new(
+        _config.api_key.clone(),
+        _config.api_secret.clone(),
+        true, // use_testnet
+        market_filter.clone(),
+        db_store.clone(),
+        monitor.clone()
+    ));
+
+    // 9. Khởi chạy Asset Actor (Nhạc trưởng) với QuickCrossStrategy để test
+    let test_strategy = Box::new(QuickCrossStrategy::new());
     
     let account_rx = event_bus.account_tx.subscribe();
 
     let actor = AssetActor::new(
         symbol,
-        "helios_v1".to_string(), // strategy_id
+        "quick_cross".to_string(), // strategy_id
         db_store.clone(),
         db_store,
         monitor, // Truyền monitor vào Actor
@@ -161,7 +172,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         trade_tx,
         account_rx,
         market_filter,
-    ).with_strategy(helios);
+        Some(executor),
+        60.0, // allocated_capital
+        20.0, // leverage
+    ).with_strategy(test_strategy);
     
     let actor_handle = tokio::spawn(async move {
         actor.run().await;

@@ -12,13 +12,18 @@ use tokio::sync::broadcast;
 use crate::models::account_state::AccountEvent;
 use crate::error::BotError;
 
+use binance_sdk::common::models::{RateLimitType, Interval as BinanceInterval};
+use crate::models::weight_monitor::WeightMonitor;
+use std::sync::Arc;
+
 pub struct AccountManager {
     rest_client: RestApi,
     account_tx: broadcast::Sender<AccountEvent>,
+    monitor: Arc<WeightMonitor>,
 }
 
 impl AccountManager {
-    pub fn new(api_key: String, api_secret: String, use_testnet: bool, account_tx: broadcast::Sender<AccountEvent>) -> Self {
+    pub fn new(api_key: String, api_secret: String, use_testnet: bool, account_tx: broadcast::Sender<AccountEvent>, monitor: Arc<WeightMonitor>) -> Self {
         let rest_conf = if use_testnet {
             ConfigurationRestApi::builder()
                 .base_path("https://testnet.binancefuture.com")
@@ -33,11 +38,16 @@ impl AccountManager {
                 .build()
                 .unwrap()
         };
-        let rest_client = DerivativesTradingUsdsFuturesRestApi::production(rest_conf);
+        let rest_client = if use_testnet {
+            DerivativesTradingUsdsFuturesRestApi::testnet(rest_conf)
+        } else {
+            DerivativesTradingUsdsFuturesRestApi::production(rest_conf)
+        };
 
         Self {
             rest_client,
             account_tx,
+            monitor,
         }
     }
 
@@ -51,8 +61,17 @@ impl AccountManager {
             ChangeMarginTypeMarginTypeEnum::Isolated,
         ).build().map_err(|e| BotError::Internal(e.to_string()))?;
         
+        self.monitor.wait_if_needed(1).await;
         match self.rest_client.change_margin_type(margin_params).await {
             Ok(resp) => {
+                if let Some(ref limits) = resp.rate_limits {
+                    for limit in limits {
+                        if limit.rate_limit_type == RateLimitType::RequestWeight && limit.interval == BinanceInterval::Minute {
+                            self.monitor.update(limit.count);
+                        }
+                    }
+                }
+                self.monitor.report_status();
                 let _ = resp.data().await; // Lấy kết quả, lỗi thì bỏ qua (có thể do đã là ISOLATED)
                 info!("✅ Đã đổi Margin Type sang ISOLATED (hoặc đã ở trạng thái ISOLATED)");
             },
@@ -73,8 +92,17 @@ impl AccountManager {
             leverage as i64,
         ).build().map_err(|e| BotError::Internal(e.to_string()))?;
 
+        self.monitor.wait_if_needed(1).await;
         match self.rest_client.change_initial_leverage(leverage_params).await {
             Ok(resp) => {
+                if let Some(ref limits) = resp.rate_limits {
+                    for limit in limits {
+                        if limit.rate_limit_type == RateLimitType::RequestWeight && limit.interval == BinanceInterval::Minute {
+                            self.monitor.update(limit.count);
+                        }
+                    }
+                }
+                self.monitor.report_status();
                 match resp.data().await {
                     Ok(res) => {
                         if let Some(lev) = res.leverage {
@@ -95,8 +123,17 @@ impl AccountManager {
 
         // 3. Lấy Account Information (V2) để đồng bộ Balance và Position ban đầu
         let acc_params = AccountInformationV2Params::builder().build().map_err(|e| BotError::Internal(e.to_string()))?;
+        self.monitor.wait_if_needed(5).await; // Account Info V2 tốn 5 weight
         match self.rest_client.account_information_v2(acc_params).await {
             Ok(resp) => {
+                if let Some(ref limits) = resp.rate_limits {
+                    for limit in limits {
+                        if limit.rate_limit_type == RateLimitType::RequestWeight && limit.interval == BinanceInterval::Minute {
+                            self.monitor.update(limit.count);
+                        }
+                    }
+                }
+                self.monitor.report_status();
                 let acc_info = resp.data().await.map_err(|e| BotError::from(e))?;
                 // Cập nhật Wallet Balance và Available Balance cho USDT
                 if let Some(assets) = acc_info.assets {

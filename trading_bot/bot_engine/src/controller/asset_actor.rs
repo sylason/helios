@@ -31,6 +31,11 @@ pub struct AssetActor {
     // Khối 2: Account & Position State
     pub account_state: AccountState,
     pub position_state: PositionState,
+
+    // Khối 3: Order Executor
+    pub executor: Option<Arc<crate::execution::order_executor::OrderExecutor>>,
+    pub allocated_capital: f64,
+    pub leverage: f64,
 }
 
 impl AssetActor {
@@ -47,6 +52,9 @@ impl AssetActor {
         trade_tx: mpsc::Sender<TradeSignal>,
         account_rx: broadcast::Receiver<AccountEvent>,
         market_filter: crate::models::market_info::MarketFilter,
+        executor: Option<Arc<crate::execution::order_executor::OrderExecutor>>,
+        allocated_capital: f64,
+        leverage: f64,
     ) -> Self {
         Self {
             symbol: symbol.clone(),
@@ -63,10 +71,13 @@ impl AssetActor {
             status_tx,
             _trade_tx: trade_tx,
             strategy: None,
-            paper_trader: PaperTrader::new(symbol.clone(), 60.0, 0.0004), // 60 USDT, fee 0.04%
+            paper_trader: PaperTrader::new(symbol.clone(), allocated_capital, 0.0004),
             market_filter,
             account_state: AccountState::default(),
             position_state: PositionState::new(&symbol),
+            executor,
+            allocated_capital,
+            leverage,
         }
     }
 
@@ -257,7 +268,26 @@ impl AssetActor {
                 if !actions.is_empty() {
                     info!("🎯 [{}] Strategy generated {} actions on candle {}!", self.symbol, actions.len(), current_close);
                     for action in actions {
-                        self.paper_trader.process_action(action, current_close);
+                        // Vẫn giữ PaperTrader để chạy giả lập song song (lưu log console)
+                        self.paper_trader.process_action(action.clone(), current_close);
+                        
+                        // Bắn lệnh thật nếu có Executor
+                        if let Some(ref executor) = self.executor {
+                            let position_amt = self.position_state.position_amt;
+                            let allocated = self.allocated_capital;
+                            let leverage = self.leverage;
+                            let symbol = self.symbol.clone();
+                            
+                            // Ta cần Clone action vì execute_action là hàm async lấy giá trị Action
+                            let action_clone = action.clone();
+                            let executor_clone = executor.clone();
+                            
+                            tokio::spawn(async move {
+                                if let Err(e) = executor_clone.execute_action(&symbol, action_clone, current_close, allocated, position_amt, leverage).await {
+                                    error!("❌ [{}] Lỗi thực thi lệnh qua OrderExecutor: {:?}", symbol, e);
+                                }
+                            });
+                        }
                     }
                 } else {
                     debug!("🧠 [{}] Strategy evaluated. No actions generated on close {}.", self.symbol, current_close);

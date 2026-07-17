@@ -64,7 +64,11 @@ impl WsManager {
                 ConfigurationWebsocketStreams::builder().build().unwrap()
             };
 
-            let client = DerivativesTradingUsdsFuturesWsStreams::production(conf);
+            let client = if use_testnet {
+                DerivativesTradingUsdsFuturesWsStreams::testnet(conf)
+            } else {
+                DerivativesTradingUsdsFuturesWsStreams::production(conf)
+            };
 
             loop {
                 info!("Đang kết nối WebSocket Market Data...");
@@ -72,8 +76,13 @@ impl WsManager {
                     Ok(connection) => {
                         // [GAP FILLER]
                         let syncer = InitialSync::new(db_store.clone(), monitor_clone.clone());
-                        if let Err(e) = syncer.fill_gap(&symbol, 30).await {
-                            warn!("⚠️ Lỗi đồng bộ dữ liệu Gap Filler: {}", e);
+                        match syncer.fill_gap(&symbol, 30).await {
+                            Ok(gap_candles) => {
+                                for candle in gap_candles {
+                                    let _ = data_tx.send(candle);
+                                }
+                            }
+                            Err(e) => warn!("⚠️ Lỗi đồng bộ dữ liệu Gap Filler: {}", e),
                         }
 
                         let params = KlineCandlestickStreamsParams::builder(symbol_lower.clone(), timeframe.clone()).build().unwrap();
@@ -135,7 +144,11 @@ impl WsManager {
             } else {
                 ConfigurationRestApi::builder().api_key(api_key.clone()).api_secret(api_secret.clone()).build().unwrap()
             };
-            let rest_client = DerivativesTradingUsdsFuturesRestApi::production(rest_conf);
+            let rest_client = if use_testnet {
+                DerivativesTradingUsdsFuturesRestApi::testnet(rest_conf)
+            } else {
+                DerivativesTradingUsdsFuturesRestApi::production(rest_conf)
+            };
 
             loop {
                 // 1. Lấy listenKey
@@ -153,7 +166,11 @@ impl WsManager {
                 } else {
                     ConfigurationWebsocketStreams::builder().build().unwrap()
                 };
-                let ws_client = DerivativesTradingUsdsFuturesWsStreams::production(ws_conf);
+                let ws_client = if use_testnet {
+                    DerivativesTradingUsdsFuturesWsStreams::testnet(ws_conf)
+                } else {
+                    DerivativesTradingUsdsFuturesWsStreams::production(ws_conf)
+                };
 
                 if let Ok(connection) = ws_client.connect().await {
                     if let Ok(stream) = connection.user_data(listen_key.clone(), None).await {

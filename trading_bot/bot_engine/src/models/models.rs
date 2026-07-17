@@ -88,8 +88,15 @@ impl Asset {
         }
     }
 
-    /// Thêm nến mới và tự động xóa nến cũ nếu vượt quá 30 ngày
+    /// Thêm nến mới và tự động xóa nến cũ nếu vượt quá 30 ngày. Chống trùng lặp.
     pub fn push_candle(&mut self, candle: Candle) {
+        // Kiểm tra chống trùng lặp / nến cũ
+        if let Some(last) = self.ohlcv.back() {
+            if candle.timestamp <= last.timestamp {
+                return; // Bỏ qua nếu là nến cũ hoặc trùng lặp
+            }
+        }
+        
         if self.ohlcv.len() >= 43200 {
             self.ohlcv.pop_front();
         }
@@ -101,3 +108,73 @@ impl Asset {
         self.ohlcv.iter().cloned().collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gap_filler_deduplication() {
+        let mut asset = Asset::new("BTCUSDT".to_string());
+        
+        // Tạo hàm helper để tạo nến nhanh
+        let make_candle = |ts: i64| Candle {
+            symbol: "BTCUSDT".to_string(),
+            timestamp: ts,
+            open: 100.0,
+            high: 100.0,
+            low: 100.0,
+            close: 100.0,
+            volume: 10.0,
+        };
+
+        // 1. Khởi tạo mảng nến có khoảng trống (Gap) ở giữa (Mất mạng phút 2, 3)
+        asset.push_candle(make_candle(1000)); // Phút 1
+        asset.push_candle(make_candle(4000)); // Phút 4 (Có mạng lại)
+        asset.push_candle(make_candle(5000)); // Phút 5
+        
+        // Assert kiểm tra sự tồn tại của khoảng trống (Before)
+        let vec_before = asset.get_candles_vec();
+        assert_eq!(vec_before.len(), 3);
+        assert_eq!(vec_before[0].timestamp, 1000);
+        assert_eq!(vec_before[1].timestamp, 4000); // Rõ ràng mất 2000 và 3000
+        
+        // 2. Chạy hàm Gap Filler mô phỏng
+        // Gap Filler lấy được dữ liệu từ phút 1 đến phút 5 (có thể bao gồm cả nến trùng lặp)
+        let gap_candles = vec![
+            make_candle(1000), // Trùng
+            make_candle(2000), // Bù
+            make_candle(3000), // Bù
+            make_candle(4000), // Trùng
+            make_candle(5000), // Trùng
+        ];
+        
+        // Để trám nến đúng cách khi có gap ở giữa, push_candle truyền thống sẽ không tự sort.
+        // Tuy nhiên, AssetActor nhận nến từ data_tx theo thứ tự. 
+        // Khi Gap Filler chạy lúc reconnect, nó sẽ được bơm TRƯỚC KHI nến hiện tại (Phút 4, 5) đến!
+        // Vậy nên ta cần test đúng kịch bản thực tế: 
+        // Lúc mất mạng (sau 1000), khi có mạng lại, WS Manager CHƯA cho WS push vội, 
+        // mà nó gọi Gap Filler để đẩy 2000, 3000 trước.
+        
+        let mut real_asset = Asset::new("BTCUSDT".to_string());
+        real_asset.push_candle(make_candle(1000)); // Phút 1
+        // Đứt mạng
+        // Có mạng lại -> Chạy Gap Filler bơm nến cũ
+        for c in gap_candles {
+            real_asset.push_candle(c);
+        }
+        // WS nhận nến mới của hiện tại
+        real_asset.push_candle(make_candle(4000));
+        real_asset.push_candle(make_candle(5000));
+
+        // 3. Assert kiểm tra dữ liệu nến đã được lấp đầy và liên tục (After)
+        let vec_after = real_asset.get_candles_vec();
+        assert_eq!(vec_after.len(), 5);
+        assert_eq!(vec_after[0].timestamp, 1000);
+        assert_eq!(vec_after[1].timestamp, 2000);
+        assert_eq!(vec_after[2].timestamp, 3000);
+        assert_eq!(vec_after[3].timestamp, 4000);
+        assert_eq!(vec_after[4].timestamp, 5000);
+    }
+}
+

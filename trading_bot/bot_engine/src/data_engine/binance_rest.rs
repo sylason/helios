@@ -30,7 +30,7 @@ impl InitialSync {
     }
 
     /// Tải dữ liệu lịch sử nến 1m để lấp đầy khoảng trống (Gap Filler)
-    pub async fn fill_gap(&self, symbol: &str, default_limit_days: i64) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn fill_gap(&self, symbol: &str, default_limit_days: i64) -> Result<Vec<Candle>, Box<dyn std::error::Error>> {
         let symbol_upper = symbol.to_uppercase();
         let now = chrono::Utc::now().timestamp_millis();
         
@@ -46,6 +46,7 @@ impl InitialSync {
         
         let mut current_start = start_target;
         let mut total_fetched = 0;
+        let mut all_fetched_candles = Vec::new();
 
         loop {
             // 1. Kiểm tra Rate Limit trước khi gọi (Ước tính cost 5 cho klines)
@@ -114,6 +115,10 @@ impl InitialSync {
             if candles.is_empty() { break; }
 
             let count = candles.len();
+            
+            // Push clone to all_fetched_candles
+            all_fetched_candles.extend(candles.clone());
+            
             if let Err(e) = self.db.save_candles(candles).await {
                 error!("❌ Lỗi lưu batch nến vào DB: {}", e);
             }
@@ -129,7 +134,7 @@ impl InitialSync {
         }
 
         info!("✅ Hoàn tất đồng bộ lịch sử về hiện tại. Tổng số nến: {}", total_fetched);
-        Ok(())
+        Ok(all_fetched_candles)
     }
 
     /// Đảm bảo trong CSDL có đủ số ngày dữ liệu quá khứ. Nếu chưa đủ, fetch lùi về quá khứ.
