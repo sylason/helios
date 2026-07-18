@@ -268,13 +268,11 @@ impl AssetActor {
                 if !actions.is_empty() {
                     info!("🎯 [{}] Strategy generated {} actions on candle {}!", self.symbol, actions.len(), current_close);
                     for action in actions {
-                        // Vẫn giữ PaperTrader để chạy giả lập song song (lưu log console)
-                        self.paper_trader.process_action(action.clone(), current_close);
-                        
                         // Bắn lệnh thật nếu có Executor
                         if let Some(ref executor) = self.executor {
                             let position_amt = self.position_state.position_amt;
-                            let allocated = self.allocated_capital;
+                            // Tính vốn có thể sử dụng (an toàn): min(Số dư sàn, Ngân sách cấp)
+                            let usable_capital = self.allocated_capital.min(self.account_state.available_balance);
                             let leverage = self.leverage;
                             let symbol = self.symbol.clone();
                             
@@ -283,10 +281,13 @@ impl AssetActor {
                             let executor_clone = executor.clone();
                             
                             tokio::spawn(async move {
-                                if let Err(e) = executor_clone.execute_action(&symbol, action_clone, current_close, allocated, position_amt, leverage).await {
+                                if let Err(e) = executor_clone.execute_action(&symbol, action_clone, current_close, usable_capital, position_amt, leverage).await {
                                     error!("❌ [{}] Lỗi thực thi lệnh qua OrderExecutor: {:?}", symbol, e);
                                 }
                             });
+                        } else {
+                            // Chế độ Paper Trader: Chỉ chạy khi KHÔNG CÓ Executor
+                            self.paper_trader.process_action(action.clone(), current_close);
                         }
                     }
                 } else {

@@ -193,7 +193,8 @@ mod tests {
             min_notional: 5.0,
         };
         let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
-        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store);
+        let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store, monitor);
 
         // Giả sử có 100 USDT, Risk 1.0 (100%), đòn bẩy x1, giá BTC = 60000.5
         // Qty mong muốn: 100 / 60000.5 = 0.001666...
@@ -212,7 +213,8 @@ mod tests {
             min_notional: 5.0,
         };
         let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
-        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store);
+        let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store, monitor);
 
         // Giả sử rủi ro 10 USDT, đòn bẩy x10 (thành 100 USDT), giá DOGE = 0.12345
         // Qty mong muốn: 100 / 0.12345 = 810.04455...
@@ -225,7 +227,8 @@ mod tests {
     fn test_calculate_order_size_min_notional_fail() {
         let filter = MarketFilter::default();
         let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
-        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store);
+        let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store, monitor);
 
         // Rủi ro chỉ 1 USDT, đòn bẩy x1, giá 60000
         // Qty = 0.000016 -> làm tròn thành 0.0 (không đủ min qty) hoặc 0.000
@@ -258,7 +261,8 @@ mod tests {
             min_notional: 5.0,
         };
         let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
-        let executor = OrderExecutor::new(api_key, api_secret, true, filter, db_store);
+        let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
+        let executor = OrderExecutor::new(api_key, api_secret, true, filter, db_store, monitor);
 
         let action = Action::Buy {
             size: 1.0, // Sử dụng 100% của mức rủi ro truyền vào
