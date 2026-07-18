@@ -7,6 +7,7 @@ use crate::models::weight_monitor::WeightMonitor;
 use crate::optimizer::helios_bridge::HeliosBridge;
 use ferro_trade::strategy::Strategy;
 use crate::execution::paper_trader::PaperTrader;
+use ferro_trade::broker::actions::Action;
 
 use crate::models::account_state::{AccountState, PositionState, AccountEvent};
 
@@ -268,9 +269,23 @@ impl AssetActor {
                 if !actions.is_empty() {
                     info!("🎯 [{}] Strategy generated {} actions on candle {}!", self.symbol, actions.len(), current_close);
                     for action in actions {
+                        // --- ENFORCE EXCLUSIVE ORDER RULE ---
+                        // "Không vào lệnh Long khi đã có Long, không vào lệnh Short khi đã có Short"
+                        let position_amt = self.position_state.position_amt;
+                        if let Action::Buy { .. } = action {
+                            if position_amt > 0.0 {
+                                info!("ℹ️ [{}] Đang có vị thế Long ({}), bỏ qua tín hiệu Buy (Exclusive Order).", self.symbol, position_amt);
+                                continue;
+                            }
+                        } else if let Action::Sell { .. } = action {
+                            if position_amt < 0.0 {
+                                info!("ℹ️ [{}] Đang có vị thế Short ({}), bỏ qua tín hiệu Sell (Exclusive Order).", self.symbol, position_amt);
+                                continue;
+                            }
+                        }
+                        
                         // Bắn lệnh thật nếu có Executor
                         if let Some(ref executor) = self.executor {
-                            let position_amt = self.position_state.position_amt;
                             // Tính vốn có thể sử dụng (an toàn): min(Số dư sàn, Ngân sách cấp)
                             let usable_capital = self.allocated_capital.min(self.account_state.available_balance);
                             let leverage = self.leverage;
@@ -285,6 +300,7 @@ impl AssetActor {
                                     error!("❌ [{}] Lỗi thực thi lệnh qua OrderExecutor: {:?}", symbol, e);
                                 }
                             });
+
                         } else {
                             // Chế độ Paper Trader: Chỉ chạy khi KHÔNG CÓ Executor
                             self.paper_trader.process_action(action.clone(), current_close);

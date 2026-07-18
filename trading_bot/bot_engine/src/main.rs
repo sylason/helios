@@ -132,6 +132,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let (ws_cmd_tx, ws_cmd_rx) = tokio::sync::mpsc::channel(100);
     // ws_manager.start_websocket_api(ws_cmd_rx);
 
+    // Lấy account_rx sớm để không bị rớt mất message initial từ AccountManager
+    let account_rx = event_bus.account_tx.subscribe();
+
     // 8.5 Khởi tạo Account Manager (Gọi REST API 1 lần lúc startup)
     let account_manager = crate::execution::account_manager::AccountManager::new(
         _config.api_key.clone(),
@@ -156,8 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 9. Khởi chạy Asset Actor (Nhạc trưởng) với QuickCrossStrategy để test
     let test_strategy = Box::new(QuickCrossStrategy::new());
-    
-    let account_rx = event_bus.account_tx.subscribe();
+
 
     let actor = AssetActor::new(
         symbol,
