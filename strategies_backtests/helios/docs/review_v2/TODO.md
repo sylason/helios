@@ -1,31 +1,38 @@
-# 🛠️ HELIOS V2 — KẾ HOẠCH SỬA LỖI & NÂNG CẤP (REVIEW V2 TODO)
+# 🛠️ HELIOS V2 — DANH SÁCH TÁC VỤ CHI TIẾT (MASTER TODO LIST)
 
-> Tệp này dùng để theo dõi tiến độ sửa các lỗi logic, nghẽn cổ chai và xung đột liên tầng được phát hiện trong đợt Review V2. Các nhiệm vụ được sắp xếp theo mức độ nghiêm trọng.
+> File này ánh xạ toàn bộ 9 báo cáo Review V2 và các quyết định thiết kế (Grill-Me) thành các task code cụ thể, phân nhóm theo từng file source code để đảm bảo không bỏ sót bất kỳ logic nào.
 
-## 🔴 P0: Các lỗi gốc rễ (Root Causes) — Ưu tiên cao nhất
-Gây hiệu ứng "phễu cạn", bão hòa điểm số, làm tê liệt 5/7 Playbook.
+## 📁 1. `src/strategy/config.rs` (Cập nhật DNA & Tham số)
+- [ ] **[FIX - P0]** Cập nhật `adx_moderate` DNA xuống dải `[0.3, 0.7]` (percentile) để khớp với đầu vào chuẩn hóa (Báo cáo 03).
+- [ ] **[FIX - P0]** Cập nhật `chaos_z_threshold` DNA thành dải `[0.1, 0.9]` (percentile) (Báo cáo 02).
+- [ ] **[FIX - P2]** Giảm dải max của `be_profit_target_rr` xuống `[0.5, 2.5]` để Breakeven khả thi (Quyết định Grill-Me 5A).
+- [ ] **[ADD - P2]** Thêm `absorption_sl_factor` vào `RegimeAbsorptionParams` để bỏ magic number 0.7 (Báo cáo 05).
+- [ ] **[ADD - P2]** Thêm tham số `time_decay_bars` (vd: `[100, 300]`) vào `TacticalRiskParams` phục vụ Time-based Exit mềm (Quyết định Grill-Me 1B).
 
-- [ ] **Matrix:** Chuyển `trend_strength` (ADX) từ tuyến tính (`/100`) sang `rolling_percentile` để cân bằng hệ quy chiếu với các chỉ số khác.
-- [ ] **Matrix:** Chuyển `chaos` (NATR) từ tuyến tính (`/100`) sang `rolling_percentile`.
-- [ ] **Config:** Cập nhật dải DNA `adx_moderate` và `chaos_z_threshold` để tương thích với giá trị Percentile thay vì tuyến tính.
+## 📁 2. `src/strategy/matrix.rs` (Tầng Nhận thức)
+- [ ] **[FIX - P0]** Đưa `trend_strength` từ `ADX/100` (tuyến tính) về `rolling_percentile` (Giải quyết Root Cause - Báo cáo 03, 07).
+- [ ] **[FIX - P0]** Đưa `chaos` từ `NATR/100` về `rolling_percentile` (Báo cáo 02).
+- [ ] **[CLEAN - P3]** Xóa `trend_angle` thô khỏi struct `MarketMatrix` vì không được sử dụng ở đâu (Báo cáo 02).
 
-## 🟠 P1: Xung Đột & Tắc Nghẽn Chiến Thuật (High Impact)
-Gây triệt tiêu tín hiệu giữa các tầng, khiến lệnh không thể kích hoạt.
+## 📁 3. `src/strategy/logic/regime.rs` (Tầng Phân rã Thế trận)
+- [ ] **[FIX - P1]** Viết lại công thức `scores.ranging`. Bỏ logic `1.0 - max(all)` khiến Ranging luôn chết. Tính điểm độc lập dựa trên việc giá đi ngang (trend yếu) và biên độ dao động (Báo cáo 03, 07).
+- [ ] **[FIX - P1]** Gỡ bỏ cổng lọc IF quá khắt khe `bb_width_norm < range_width_max` của Absorption, đưa nó vào công thức tính score (Báo cáo 03, 07).
 
-- [ ] **Regime:** Sửa cơ chế tính điểm Ranging `1.0 - max(...)`. Hiện tại Trend luôn cao khiến Ranging luôn ~0. Cần công bằng hơn.
-- [ ] **Playbook/Regime:** Giải quyết "Parabolic Paradox". Hiện tại Parabolic cấm đánh TrendPullback, nhưng bản thân Parabolic không bao giờ thắng được Trend để ra lệnh ClimaxReversal. Cần mở khóa cho Parabolic hoạt động khi độ dốc quá cao.
-- [ ] **Tactical (Squeeze):** Xóa điều kiện raw hardcoded `macd_hist > -0.01` và thay bằng kiểm tra cấu trúc động lượng hợp lý (vì raw MACD khác nhau tùy giá coin).
+## 📁 4. `src/strategy/logic/playbook.rs` (Tầng Trọng tài Chiến thuật)
+- [ ] **[FIX - P1]** Nới lỏng điều kiện `RSI bias` cho `AbsorptionScout` để tránh trường hợp Regime thắng nhưng Playbook lại cấm (Báo cáo 04).
+- [ ] **[VERIFY - P1]** Duy trì logic Parabolic Wait (không vào lệnh TrendPullback khi giá quá dốc) theo triết lý "Tránh dao rơi" (Quyết định Grill-Me 4C).
+- [ ] **[VERIFY - P3]** Duy trì "Single-position lock" (không cho nhồi lệnh) để đảm bảo an toàn tuyệt đối (Quyết định Grill-Me 2A).
 
-## 🟡 P2: Quản Trị Rủi Ro & Lệnh (Risk Management)
-Gây nhiễu Trailing Stop, hoặc kẹt vốn quá lâu.
+## 📁 5. `src/strategy/logic/tactical.rs` (Tầng Bóp cò)
+- [ ] **[FIX - P1]** Squeeze Trigger: Thay thế `macd_hist > -0.01` (magic number khác biệt theo coin) bằng logic `macd_hist[i] > macd_hist[i-1]` để kiểm tra xu hướng động lượng (Báo cáo 05).
+- [ ] **[FIX - P2]** Absorption Trigger: Thay `0.7` cứng bằng tham số cấu hình DNA `absorption_sl_factor` (Báo cáo 05).
+- [ ] **[OPTIMIZE - P3]** RangeOscillator: Giảm bớt số lượng điều kiện AND (hiện có 5) xuống mức hợp lý để dễ kích hoạt hơn (Báo cáo 05).
+- [ ] **[OPTIMIZE - P3]** AnomalyFade: Bỏ bớt điều kiện nến rút chân (râu nến) nhiễu, giảm số lượng AND để tăng cơ hội vào lệnh (Báo cáo 05).
 
-- [ ] **Mod/Risk:** Sửa `smooth_atr` (hiện đang lấy ATR tức thời nến hiện tại). Cần áp dụng EMA/SMA nhẹ để làm mượt, tránh Trailing Stop bị giật theo nến 1-phút.
-- [ ] **Mod/Risk:** Đổi logic theo dõi `peak_price` từ High/Low sang Close để bảo vệ Trailing Stop khỏi hiện tượng quét râu nến (whipsaw wicks).
-- [ ] **Config/Risk:** Giảm ngưỡng `be_profit_target_rr` (vốn đang học ra mức 6.6R) xuống mức khả thi hơn để Breakeven thực sự hoạt động.
-- [ ] **Tactical (Absorption):** Xóa hệ số Stoploss hardcoded `0.7` và thay bằng biến lấy từ cấu hình DNA (`range_sl_factor` hoặc tạo biến mới).
-- [ ] **Risk:** Bổ sung cơ chế Timeout (Time-based Exit). Các lệnh ngâm quá lâu (>100-200 nến) mà không lãi/lỗ sẽ bị đóng để giải phóng slot (tránh Zombie Trade).
+## 📁 6. `src/strategy/mod.rs` (Tầng Điểu phối & Bộ nhớ)
+- [ ] **[FIX - P2]** Làm mượt ATR: Thay `volatility_benchmark = current_atr` bằng Exponential Moving Average (EMA) để Trailing Stop không bị giật (Báo cáo 06).
+- [ ] **[FIX - P2]** Dời `peak_price` tracking từ `High/Low` sang giá `Close` để tránh bị cắt lỗ oan bởi râu nến quét (Quyết định Grill-Me 3A).
+- [ ] **[ADD - P2]** Lưu vết thời gian: Theo dõi số nến đã mở của lệnh hiện tại vào `TacticalMemory` (cho Time-based Exit).
 
-## 🟢 P3: Tối Ưu Hóa & Dọn Dẹp (Cleanup & Tweak)
-- [ ] **Matrix:** Xóa `trend_angle` (đơn vị độ thô) khỏi `MarketMatrix` vì không còn được sử dụng ở bất kỳ đâu (tiết kiệm bộ nhớ).
-- [ ] **Tactical (Anomaly/Range):** Đơn giản hóa các điều kiện bóp cò (bớt số lượng AND lại). Anomaly cần tới 4 điều kiện khắt khe khiến nó gần như tuyệt chủng.
-- [ ] **Tactical:** Suy nghĩ về cơ chế bỏ "Single Position Lock" (`!tick.position().is_open()`). Nếu xu hướng thuận lợi, có nên cho phép nhồi lệnh khác Tactical thay vì bị khóa cứng chỉ 1 lệnh hay không?
+## 📁 7. `src/strategy/logic/risk.rs` (Tầng Quản trị Rủi ro)
+- [ ] **[FEAT - P2]** Thêm Time-based Exit Mềm (Time Decay SL). Nếu lệnh mở vượt quá `time_decay_bars`, tự động thu hẹp `tsl_atr_multiplier` (siết Trailing Stop liên tục) để ép giá cắn SL trong hòa vốn hoặc dời dần về Entry (Quyết định Grill-Me 1B).

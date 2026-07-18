@@ -41,6 +41,9 @@ pub struct TacticalMemory {
     /// Playbook đã kích hoạt lệnh hiện tại. 
     /// [FIXED Task 3.2]: Giúp Trailing SL nhất quán theo mục tiêu ban đầu của lệnh.
     pub opening_playbook: TacticalPlaybook,
+
+    /// Bộ đếm số nến đã trôi qua kể từ khi mở lệnh (dùng cho Time Decay SL)
+    pub holding_bars_counter: usize,
 }
 
 impl Default for TacticalMemory {
@@ -57,6 +60,7 @@ impl Default for TacticalMemory {
             current_entry_index: None,
             is_breakeven_active: false,
             opening_playbook: TacticalPlaybook::Wait,
+            holding_bars_counter: 0,
         }
     }
 }

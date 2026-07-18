@@ -13,7 +13,6 @@ pub struct MarketMatrix {
     // --- 🧭 Hướng & Sức mạnh (Directional) ---
     pub trend_dir: Arc<Vec<f64>>,      // -1.0 (Bearish) to 1.0 (Bullish)
     pub trend_strength: Arc<Vec<f64>>, // 0.0 to 1.0 (ADX Scaled)
-    pub trend_angle: Arc<Vec<f64>>,    // -90.0 to 90.0 (Degrees)
     pub trend_angle_adj: Arc<Vec<f64>>, // NEW: Góc hiệu chỉnh theo ATR (FIX #7)
     
     // --- 🌪️ Năng lượng & Biến động (Chaos) ---
@@ -37,19 +36,19 @@ impl MarketMatrix {
         
         // --- [TỐI ƯU HÓA: LOOP FUSION] ---
         // Gộp 6 vòng lặp map() ngang thành 1 vòng lặp dọc duy nhất để tối ưu L1 Cache.
-        let mut trend_strength = Vec::with_capacity(len);
-        let mut chaos = Vec::with_capacity(len);
+        let mut adx_raw = Vec::with_capacity(len);
+        let mut natr_raw = Vec::with_capacity(len);
         let mut bb_width_raw = Vec::with_capacity(len);
         let mut vol_raw = Vec::with_capacity(len);
         let mut sqz_raw = Vec::with_capacity(len);
         let mut adj_slope = Vec::with_capacity(len);
 
         for i in 0..len {
-            // 1. Trend Strength (ADX / 100)
-            trend_strength.push(sensors.adx[i] / 100.0);
+            // 1. Trend Strength (ADX Raw)
+            adx_raw.push(sensors.adx[i]);
             
-            // 2. Chaos (NATR / 100)
-            chaos.push(sensors.natr[i] / 100.0);
+            // 2. Chaos (NATR Raw)
+            natr_raw.push(sensors.natr[i]);
             
             // 3. BB Width Norm
             let bu = sensors.bb_upper[i];
@@ -87,9 +86,10 @@ impl MarketMatrix {
             if v.is_nan() { f64::NAN } else { 2.0 * v - 1.0 }
         }).collect();
 
-        let trend_angle = sensors.linreg_angle.as_ref().clone();
         let trend_angle_adj = adj_slope_pct;
 
+        let trend_strength = normalization::rolling_percentile(&adx_raw, config.matrix.trend_lookback);
+        let chaos = normalization::rolling_percentile(&natr_raw, config.matrix.squeeze_lookback);
         let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, config.matrix.squeeze_lookback);
         let bb_width_norm = normalization::rolling_percentile(&bb_width_raw, config.matrix.squeeze_lookback);
         let momentum = normalization::rolling_percentile(&sensors.rsi, config.matrix.momentum_lookback);
@@ -101,44 +101,9 @@ impl MarketMatrix {
         let z_raw = normalization::calculate_z_score_series(&sensors.closes, config.indicators.z_score_lookback);
         let price_z_score = normalization::tanh_scale(&z_raw, config.matrix.z_score_sensitivity);
 
-        // // --- 📊 LOG CHẨN ĐOÁN TOÀN DIỆN (FULL SYSTEM SURGERY) ---
-        // let total = sensors.closes.len();
-        // if total > 100 {
-        //     println!("\n===============================================================");
-        //     println!("   [HELIOS MATRIX DIAGNOSTIC: RAW VS NORMALIZED]");
-        //     println!("   Lookbacks: Trend={}, Sqz={}, Mom={}, Vol={}, Z={}", 
-        //         config.matrix.trend_lookback, config.matrix.squeeze_lookback,
-        //         config.matrix.momentum_lookback, config.matrix.volume_lookback,
-        //         config.indicators.z_score_lookback
-        //     );
-        //     println!("===============================================================");
-            
-        //     let sample_indices = [total / 10, total / 2, total - 5];
-        //     for &idx in &sample_indices {
-        //         println!("\n--- [BAR {:>5}] ---", idx);
-        //         println!("      TREND: Slope:{:.6} -> Dir:{:.4} | Angle:{:.1} -> Adj:{:.4}", 
-        //             sensors.linreg_slope[idx], trend_dir[idx], sensors.linreg_angle[idx], trend_angle_adj[idx]);
-                
-        //         println!("      MOM  : RSI:{:.1} -> Mom_Norm:{:.4} | ADX:{:.1} -> Strength:{:.4}", 
-        //             sensors.rsi[idx], momentum[idx], sensors.adx[idx], trend_strength[idx]);
-                
-        //         let bb_w = sensors.bb_upper[idx] - sensors.bb_lower[idx];
-        //         println!("      VOLAT: BBW:{:.2} -> Norm:{:.4} | Sqz_Raw:{:.4} -> Inten:{:.4}", 
-        //             bb_w, bb_width_norm[idx], sqz_raw[idx], squeeze_intensity[idx]);
-                
-        //         println!("      FORCE: Vol:{:.0} -> Force_Norm:{:.4} | MFI:{:.1} -> Liq:{:.4}", 
-        //             volumes[idx], volume_force[idx], sensors.mfi[idx], liquidity[idx]);
-                
-        //         println!("      POS  : Close:{:.2} -> Z_Norm:{:.4} | Chaos_Ratio:{:.4}", 
-        //             sensors.closes[idx], price_z_score[idx], chaos_ratio[idx]);
-        //     }
-        //     println!("===============================================================\n");
-        // }
-
         Self {
             trend_dir: Arc::new(trend_dir),
             trend_strength: Arc::new(trend_strength),
-            trend_angle: Arc::new(trend_angle),
             trend_angle_adj: Arc::new(trend_angle_adj),
             squeeze_intensity: Arc::new(squeeze_intensity),
             bb_width_norm: Arc::new(bb_width_norm),

@@ -76,17 +76,25 @@ pub fn analyze_regime(
     scores.squeeze = (squeeze_intensity / reg_cfg.squeeze.threshold).tanh();
 
     // 4. ABSORPTION SCORE 🧽 (Soft-Capped)
-    if bb_width_norm < reg_cfg.absorption.range_width_max {
-        scores.absorption = (volume_force / reg_cfg.absorption.volume_threshold).tanh();
-    }
+    // Hấp thụ xảy ra khi giá nén (bb_width nhỏ) nhưng khối lượng lớn (volume_force cao)
+    // Chuyển điều kiện IF thành hàm nhân mềm (Soft Gate)
+    let width_fitness = if bb_width_norm < reg_cfg.absorption.range_width_max {
+        1.0
+    } else {
+        // Nếu BB width lớn hơn mức cho phép, giảm dần điểm số
+        (reg_cfg.absorption.range_width_max / bb_width_norm.max(0.01)).powi(2)
+    };
+    scores.absorption = ((volume_force / reg_cfg.absorption.volume_threshold) * width_fitness).tanh();
 
     // 5. PARABOLIC SCORE 🌋 (Soft-Capped)
     // FIX: Parabolic threshold uses 0.85 percentile instead of degrees.
     scores.parabolic = (trend_angle.abs() / 0.85).tanh();
 
-    // 6. RANGING SCORE 🧱 (Mặc định khi các thế trận khác yếu)
-    // FIX: Include parabolic in the max() chain so Parabolic can suppress Ranging.
-    scores.ranging = (1.0 - scores.trend.max(scores.squeeze).max(scores.anomaly).max(scores.absorption).max(scores.parabolic)).max(0.01).min(1.0);
+    // 6. RANGING SCORE 🧱 (Thế trận đi ngang)
+    // Ranging cao khi trend yếu và không có biến động bất thường
+    let lack_of_trend = 1.0 - trend_strength.min(1.0);
+    let lack_of_chaos = 1.0 - chaos_ratio.min(1.0);
+    scores.ranging = (lack_of_trend * 0.7 + lack_of_chaos * 0.3).max(0.01).min(1.0);
 
     // --- 🧭 XÁC ĐỊNH NHÃN CHÍNH (PRIMARY REGIME) ---
     // Dùng để tương thích ngược với Trailing Stop và Tagging.

@@ -291,23 +291,27 @@ impl Strategy for HeliosStrategy {
         let current_atr = self.sensors.atr_sl[i];
 
         // --- 🧬 MAHORAGA ADAPTATION (Cập nhật bộ nhớ) ---
-        self.memory.volatility_benchmark = current_atr; 
+        let prev_atr = self.memory.volatility_benchmark;
+        if prev_atr == 0.0 {
+            self.memory.volatility_benchmark = current_atr;
+        } else {
+            self.memory.volatility_benchmark = prev_atr * 0.9 + current_atr * 0.1;
+        }
 
         // Theo dõi Peak Price cho Trailing Stop (FIX #16)
         let pos = tick.position();
         if pos.is_open() {
-            let high = tick.highs()[i];
-            let low = tick.lows()[i];
-
             let current_peak = self.memory.peak_price.unwrap_or(current_close);
             if pos.is_long {
-                self.memory.peak_price = Some(current_peak.max(high));
+                self.memory.peak_price = Some(current_peak.max(current_close));
             } else {
-                self.memory.peak_price = Some(current_peak.min(low));
+                self.memory.peak_price = Some(current_peak.min(current_close));
             }
+            self.memory.holding_bars_counter += 1;
         } else {
             self.memory.peak_price = None;
             self.memory.is_breakeven_active = false;
+            self.memory.holding_bars_counter = 0;
         }
 
         // Đếm ngược thời gian hồi phục (Boxing Recovery)
@@ -332,7 +336,7 @@ impl Strategy for HeliosStrategy {
 
         // 2. Phân tích thế trận & Tính điểm (Level 2: Market Regime Scoring)
         // [CHỈ GỌI 1 LẦN]: Để tránh sai lệch bars_since_regime_change
-        let (_primary_regime, scores) = core_v2::regime::analyze_regime(
+        let (primary_regime, scores) = core_v2::regime::analyze_regime(
             &self.config,
             &mut self.memory,
             self.matrix.squeeze_intensity[i],
@@ -350,7 +354,7 @@ impl Strategy for HeliosStrategy {
             &self.config,
             &mut self.memory,
             tick,
-            self.matrix.trend_angle_adj[i], // FIX #7
+            primary_regime,
             current_atr,
         );
         

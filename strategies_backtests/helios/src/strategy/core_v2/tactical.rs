@@ -31,23 +31,17 @@ pub fn execute_tactical(
     let price_z_score = matrix.price_z_score[i];
     let kama_mid = sensors.kama_mid[i];
     let stoch_k = sensors.stoch_k[i] / 100.0;
-    let macd_hist = sensors.macd_hist[i];
+    let _macd_hist = sensors.macd_hist[i];
     let sl_min_pct = config.risk_management.risk_base.sl_min_dist_pct; // [FIXED]: Lấy đúng trường sl_min_dist_pct
     let bb_upper = sensors.bb_upper[i]; 
     let bb_lower = sensors.bb_lower[i]; 
 
     // --- 💰 QUẢN LÝ VỐN "NHIỀU MẠNG" (MULTI-LIFE SIZING) ---
-    // [FIXED Task 3.1]: Loại bỏ Dynamic Sizing theo Score để bảo toàn tài nguyên.
-    // Helios sử dụng size cố định để chịu được chuỗi thua lỗ (như số mạng trong game).
-    let equity = tick.equity;
-    
-    let size_fraction = if equity < 100.0 {
-        // Cố định 1/5 vốn (5 mạng) cho tài khoản nhỏ
-        Some(0.2)
-    } else {
-        // Cố định 1/10 vốn (10 mạng) cho tài khoản lớn, đảm bảo lệnh tối thiểu ~20$
-        Some(0.1)
-    };
+    // [FIXED]: Sử dụng DNA config percent_per_trade thay vì hardcode.
+    // Lượng % margin sẽ được truyền vào Engine, và sau này ở trading_bot
+    // sẽ được convert thành absolute volume của crypto.
+    let _equity = tick.equity;
+    let size_fraction = Some(config.risk_management.risk_base.percent_per_trade);
 
     // Lấy Raw Score của Playbook đang chạy để gắn vào tag
     let raw_score = match playbook {
@@ -81,8 +75,12 @@ pub fn execute_tactical(
             // Tính độ rộng nến hiện tại và nến trước đó
             let curr_u = sensors.bb_upper[i];
             let curr_l = sensors.bb_lower[i];
-            let prev_u = sensors.bb_upper[i-1];
-            let prev_l = sensors.bb_lower[i-1];
+            
+            // [EXPERIMENT] Sử dụng i-15 thay vì i-1 để bảo toàn tầm nhìn Vĩ mô 15 phút, giải quyết lỗi 'Bậc thang'.
+            // Chờ người dùng xác nhận hiệu quả sau khi backtest.
+            let lookback_idx = if i >= 15 { i - 15 } else { 0 };
+            let prev_u = sensors.bb_upper[lookback_idx];
+            let prev_l = sensors.bb_lower[lookback_idx];
             
             let current_w = (curr_u - curr_l) / ((curr_u + curr_l) / 2.0);
             let prev_w = (prev_u - prev_l) / ((prev_u + prev_l) / 2.0);
@@ -95,10 +93,13 @@ pub fn execute_tactical(
             // Tránh bẫy phá vỡ giả khi không có thanh khoản.
             let is_volume_strong = volume_force > sqz_cfg.volume_confirm_thresh;
 
+            let _is_macd_improving_up = if i >= 1 { sensors.macd_hist[i] > sensors.macd_hist[i-1] } else { false };
+            let _is_macd_improving_down = if i >= 1 { sensors.macd_hist[i] < sensors.macd_hist[i-1] } else { false };
+
             // --- 🏹 BÓP CÒ (TRIGGER LOGIC) ---
             
-            // LONG: Biến động nở + Volume mạnh + Giá nằm trên trục KAMA + Động lượng MACD không quá xấu
-            if is_expanding && is_volume_strong && current_close > kama_mid && macd_hist > -0.01 && !tick.position().is_open() {
+            // LONG: Biến động nở + Volume mạnh + Giá nằm trên trục KAMA
+            if is_expanding && is_volume_strong && current_close > kama_mid && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
@@ -107,10 +108,9 @@ pub fn execute_tactical(
                     Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("{}_L_{}", tag, score_tag))
                 );
-                // println!("[TACTICAL] {} LONG Triggered at bar {}", tag, i);
             } 
-            // SHORT: Biến động nở + Volume mạnh + Giá nằm dưới trục KAMA + Động lượng MACD không quá xấu
-            else if is_expanding && is_volume_strong && current_close < kama_mid && macd_hist < 0.01 && !tick.position().is_open() {
+            // SHORT: Biến động nở + Volume mạnh + Giá nằm dưới trục KAMA
+            else if is_expanding && is_volume_strong && current_close < kama_mid && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
@@ -119,7 +119,6 @@ pub fn execute_tactical(
                     Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("{}_S_{}", tag, score_tag))
                 );
-                // println!("[TACTICAL] {} SHORT Triggered at bar {}", tag, i);
             }
         },
 
@@ -144,8 +143,8 @@ pub fn execute_tactical(
                 false
             };
 
-            // LONG: Giá > KAMA AND Stoch < Threshold (Vùng rẻ) AND MACD quay đầu AND Chưa có vị thế
-            if current_close > kama_mid && stoch_k < pb_cfg.stoch_pullback_thresh && is_momentum_turning_up && !tick.position().is_open() {
+            // LONG: Giá > KAMA AND MACD quay đầu AND Chưa có vị thế
+            if current_close > kama_mid && is_momentum_turning_up && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
@@ -154,10 +153,9 @@ pub fn execute_tactical(
                     Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Trend_PB_L_{}", score_tag))
                 );
-                // println!("[TACTICAL] Trend_PB LONG Triggered at bar {}", i);
             } 
-            // SHORT: Giá < KAMA AND Stoch > Threshold (Vùng đắt) AND MACD quay đầu AND Chưa có vị thế
-            else if current_close < kama_mid && stoch_k > (1.0 - pb_cfg.stoch_pullback_thresh) && is_momentum_turning_down && !tick.position().is_open() {
+            // SHORT: Giá < KAMA AND MACD quay đầu AND Chưa có vị thế
+            else if current_close < kama_mid && is_momentum_turning_down && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
@@ -166,7 +164,6 @@ pub fn execute_tactical(
                     Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
                     Some(format!("Trend_PB_S_{}", score_tag))
                 );
-                // println!("[TACTICAL] Trend_PB SHORT Triggered at bar {}", i);
             }
         },
 
@@ -190,9 +187,10 @@ pub fn execute_tactical(
                 false
             };
 
-            // --- 🛑 MÀNG LỌC QUÁ NHIỆT (CLIMAX PREVENTER) ---
-            let is_rsi_safe_long = matrix_rsi > mom_cfg.rsi_threshold && matrix_rsi < mom_cfg.rsi_climax;
-            let is_rsi_safe_short = matrix_rsi < (1.0 - mom_cfg.rsi_threshold) && matrix_rsi > (1.0 - mom_cfg.rsi_climax);
+            // --- 🛑 MÀNG LỌC ĐỘNG LƯỢNG KÍCH HOẠT ---
+            // Bỏ chặn trần Climax để không bỏ lỡ các con sóng Parabolic siêu mạnh.
+            let is_rsi_safe_long = matrix_rsi > mom_cfg.rsi_threshold;
+            let is_rsi_safe_short = matrix_rsi < (1.0 - mom_cfg.rsi_threshold);
 
             // --- 🏹 BÓP CÒ (TRIGGER LOGIC) ---
             
@@ -237,7 +235,7 @@ pub fn execute_tactical(
             let is_exhausted = volume_force < range_cfg.volume_max_threshold;
             
             // --- 📍 VỊ TRÍ GIÁ TRONG HÀNH LANG ---
-            let price_position = if range_width > 0.0 {
+            let _price_position = if range_width > 0.0 {
                 (current_close - bb_lower) / range_width
             } else {
                 0.5
@@ -248,27 +246,32 @@ pub fn execute_tactical(
             let is_rebounding_down = if i >= 1 { sensors.macd_hist[i] < sensors.macd_hist[i-1] } else { false };
 
             // LONG: ... AND Chưa có vị thế
-            // FIX: Thay vì bắt buộc giá rớt khỏi BB (quá hiếm), ta chỉ cần giá nằm ở 25% phía dưới hành lang.
-            if price_position < 0.25 && is_exhausted && stoch_k < range_cfg.stoch_oversold && is_rebounding_up && !tick.position().is_open() {
+            // FIX: Bỏ price_position để nới lỏng điều kiện bóp cò (chỉ cần Stoch và Exhaustion).
+            if is_exhausted && stoch_k < range_cfg.stoch_oversold && is_rebounding_up && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
                 
+                // Sử dụng Lựa chọn B: TP tĩnh tại Band trên (Ping-Pong)
+                let tp = sensors.bb_upper[i];
+                
                 tick.buy(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
                     Some(format!("Range_L_{}", score_tag))
                 );
                 // println!("[TACTICAL] Range_Osc LONG Triggered at bar {}", i);
             } 
             // SHORT: ... AND Chưa có vị thế
-            // FIX: Giá nằm ở 25% phía trên hành lang.
-            else if price_position > 0.75 && is_exhausted && stoch_k > range_cfg.stoch_overbought && is_rebounding_down && !tick.position().is_open() {
+            else if is_exhausted && stoch_k > range_cfg.stoch_overbought && is_rebounding_down && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
                 let sl_dist = (atr_raw * risk.base_sl_atr * sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
                 
+                // Sử dụng Lựa chọn B: TP tĩnh tại Band dưới (Ping-Pong)
+                let tp = sensors.bb_lower[i];
+
                 tick.sell(size_fraction, None, None, 
-                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: None }), 
+                    Some(RiskPolicy::FixedPrice { sl_price: Some(sl), tp_price: Some(tp) }), 
                     Some(format!("Range_S_{}", score_tag))
                 );
                 // println!("[TACTICAL] Range_Osc SHORT Triggered at bar {}", i);
@@ -359,7 +362,7 @@ pub fn execute_tactical(
             // LONG: ... AND Chưa có vị thế
             if is_shark_present && is_breaking_out_up && matrix_rsi > config.market_regime.absorption.bias_threshold && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
-                let sl_dist = (atr_raw * risk_cfg.base_sl_atr * 0.7).max(current_close * sl_min_pct);
+                let sl_dist = (atr_raw * risk_cfg.base_sl_atr * risk_cfg.absorption_sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close - sl_dist;
                 
                 tick.buy(size_fraction, None, None, 
@@ -371,7 +374,7 @@ pub fn execute_tactical(
             // SHORT: ... AND Chưa có vị thế
             else if is_shark_present && is_breaking_out_down && matrix_rsi < (1.0 - config.market_regime.absorption.bias_threshold) && !tick.position().is_open() {
                 memory.opening_playbook = playbook; // [FIXED Task 3.2]
-                let sl_dist = (atr_raw * risk_cfg.base_sl_atr * 0.7).max(current_close * sl_min_pct);
+                let sl_dist = (atr_raw * risk_cfg.base_sl_atr * risk_cfg.absorption_sl_factor).max(current_close * sl_min_pct);
                 let sl = current_close + sl_dist;
                 
                 tick.sell(size_fraction, None, None, 
@@ -412,13 +415,13 @@ pub fn execute_tactical(
             let close = tick.closes()[i];
             let body_range = high - low;
             
-            let is_bullish_rejection = if body_range > 0.0 {
+            let _is_bullish_rejection = if body_range > 0.0 {
                 (close - low) / body_range > ano_cfg.min_rejection_pct
             } else {
                 false
             };
 
-            let is_bearish_rejection = if body_range > 0.0 {
+            let _is_bearish_rejection = if body_range > 0.0 {
                 (high - close) / body_range > ano_cfg.min_rejection_pct
             } else {
                 false
@@ -427,9 +430,9 @@ pub fn execute_tactical(
             // CƠ CHẾ EMERGENCY OVERRIDE: Cho phép lật vị thế nếu Score > 0.98
             let can_trigger = !tick.position().is_open() || score > 0.98;
 
-            // LONG: Z-Score cực thấp AND RSI cực thấp AND MACD hồi lên AND Có râu nến dưới
+            // LONG: Z-Score cực thấp AND RSI cực thấp AND MACD hồi lên
             if can_trigger && price_z_score.abs() > ano_cfg.z_score_threshold && matrix_rsi < (1.0 - ano_cfg.rsi_climax) 
-               && is_momentum_turning_up && is_bullish_rejection 
+               && is_momentum_turning_up 
             {
                 if tick.position().is_open() {
                     // println!("[TACTICAL] EMERGENCY OVERRIDE: Closing old position for Anomaly LONG");
@@ -446,9 +449,9 @@ pub fn execute_tactical(
                     Some(format!("Ano_Fade_L_{}", score_tag))
                 );
             } 
-            // SHORT: Z-Score cực cao AND RSI cực cao AND MACD hồi xuống AND Có râu nến trên
+            // SHORT: Z-Score cực cao AND RSI cực cao AND MACD hồi xuống
             else if can_trigger && price_z_score.abs() > ano_cfg.z_score_threshold && matrix_rsi > ano_cfg.rsi_climax 
-                    && is_momentum_turning_down && is_bearish_rejection 
+                    && is_momentum_turning_down 
             {
                 if tick.position().is_open() {
                     // println!("[TACTICAL] EMERGENCY OVERRIDE: Closing old position for Anomaly SHORT");
