@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let needs_initial_job = !db_exists || prospector.backlog_storage.get_max_job_id() == 0;
     if needs_initial_job {
         use ferro_trade::optimizer::params::DnaMappable;
-        let flat_search_space = helios::strategy::config::HeliosConfig::parameter_defs();
+        let flat_search_space = helios::strategy::core_v3::config::HeliosConfigV3::parameter_defs();
         
         println!("Adding Initial Job... ({} parameters detected automatically from Struct)", flat_search_space.len());
         prospector.add_initial_job(flat_search_space);
@@ -148,9 +148,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{:<5} | {:<10.2} | {:<10.2} | {:<8.0} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.4} | {:<10.4}", 
             i+1, ret, dd, trades, win_rate, best, worst, pf, sharpe, sortino);
         
-        if let Some(dna) = &c.dna {
-            println!("  DNA: {:?}\n", dna);
-        }
+        // if let Some(dna) = &c.dna {
+        //     println!("  DNA: {:?}\n", dna);
+        // }
         println!("{}", "-".repeat(120));
     }
 
@@ -160,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Lấy danh sách Top 10 từ Champions
     let top_champs = {
         let champs_lock = prospector.champions.read();
-        champs_lock.iter().take(10).cloned().collect::<Vec<_>>()
+        champs_lock.iter().take(1).cloned().collect::<Vec<_>>()
     };
 
     for (rank_idx, c) in top_champs.into_iter().enumerate() {
@@ -168,22 +168,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(dna) = &c.dna {
             println!("\n>>> [RANK {}] Re-running for full trade extraction...", rank);
             
-            // [NEW] Giải mã và in Parameters chi tiết để đối chiếu với DNA
-            let mut sorted_keys: Vec<_> = c.params.keys().collect();
-            sorted_keys.sort();
-            let params_str = sorted_keys.iter()
-                .map(|k| {
-                    let v = c.params.get(*k).unwrap();
-                    if let Some(val) = v.as_f64() {
-                        format!("{}: {:.4}", k, val)
-                    } else {
-                        format!("{}: {:?}", k, v)
-                    }
-                })
-                .collect::<Vec<String>>()
-                .join(", ");
+            // // [NEW] Giải mã và in Parameters chi tiết để đối chiếu với DNA
+            // let mut sorted_keys: Vec<_> = c.params.keys().collect();
+            // sorted_keys.sort();
+            // let params_str = sorted_keys.iter()
+            //     .map(|k| {
+            //         let v = c.params.get(*k).unwrap();
+            //         if let Some(val) = v.as_f64() {
+            //             format!("{}: {:.4}", k, val)
+            //         } else {
+            //             format!("{}: {:?}", k, v)
+            //         }
+            //     })
+            //     .collect::<Vec<String>>()
+            //     .join(", ");
             
-            println!("   Params: {}", params_str);
+            // println!("   Params: {}", params_str);
 
             if let Ok(res) = backtest.run_with_dna::<HeliosStrategyV3>(dna) {
                 println!("{:<5} | {:<10} | {:<12} | {:<10.2} | {:<10} | {:<20}", 

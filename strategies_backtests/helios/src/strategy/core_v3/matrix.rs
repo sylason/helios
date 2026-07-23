@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use crate::strategy::sensors::HeliosSensors;
 use crate::utils::normalization;
-use crate::strategy::config::HeliosConfig;
+use crate::strategy::core_v3::config::HeliosConfigV3;
 
 /// [LEVEL 2: MARKET MATRIX V3]
 /// Chứa các dữ liệu đã được chuẩn hóa (Normalized 0.x hoặc -1.0 to 1.0).
@@ -22,7 +22,7 @@ pub struct MarketMatrixV3 {
     pub chaos_ratio: Arc<Vec<f64>>,       // NATR / SMA(NATR)
     pub entropy: Arc<Vec<f64>>,           // 0.0 to 1.0 (Efficiency Ratio)
     pub liquidity: Arc<Vec<f64>>,         // 0.0 to 1.0 (MFI Scaled)
-    pub volume_force: Arc<Vec<f64>>,      // 0.0 to 2.0+ (Volume / Vol_MA)
+    pub volume_force: Arc<Vec<f64>>,      // 0.0 to 1.0 (Percentile)
     pub bb_width_norm: Arc<Vec<f64>>,     // (Upper - Lower) / Middle
     
     // --- 🌊 Động lượng (Velocity) ---
@@ -34,13 +34,15 @@ pub struct MarketMatrixV3 {
     pub squeeze_multiplier: Arc<Vec<f64>>, // Sức nén Volatility
     pub range_multiplier: Arc<Vec<f64>>,   // Phần bù của Trend (Sideway)
     pub anomaly_multiplier: Arc<Vec<f64>>, // Sự kết hợp của Chaos và Z-Score (Climax)
+    pub reversal_multiplier: Arc<Vec<f64>>, // Kiệt sức: Phân kỳ, Z-Score cao
+    pub absorption_multiplier: Arc<Vec<f64>>, // Gom hàng: Squeeze + Volume cao
+    pub volatility_expansion_multiplier: Arc<Vec<f64>>, // Bung nén: Dành riêng cho Momentum Ignition
 }
 
 impl MarketMatrixV3 {
-    pub fn from_sensors(config: &HeliosConfig, sensors: &HeliosSensors, volumes: &[f64], vol_ratio: f64) -> Self {
+    pub fn from_sensors(config: &HeliosConfigV3, sensors: &HeliosSensors, volumes: &[f64], vol_ratio: f64) -> Self {
         let len = volumes.len();
         
-        let mut trend_strength = Vec::with_capacity(len);
         let mut chaos = Vec::with_capacity(len);
         let mut bb_width_norm = Vec::with_capacity(len);
         let mut vol_raw = Vec::with_capacity(len);
@@ -48,7 +50,6 @@ impl MarketMatrixV3 {
         let mut adj_slope = Vec::with_capacity(len);
 
         for i in 0..len {
-            trend_strength.push(sensors.adx[i] / 100.0);
             chaos.push(sensors.natr[i] / 100.0);
             
             let bu = sensors.bb_upper[i];
@@ -78,6 +79,7 @@ impl MarketMatrixV3 {
         let adj_slope_pct = normalization::rolling_percentile(&adj_slope, config.matrix.trend_lookback);
         let trend_dir: Vec<f64> = adj_slope_pct.iter().map(|&v| if v.is_nan() { f64::NAN } else { 2.0 * v - 1.0 }).collect();
 
+        let trend_strength = normalization::rolling_percentile(&sensors.adx, config.matrix.trend_lookback);
         let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, config.matrix.squeeze_lookback);
         let momentum = normalization::rolling_percentile(&sensors.rsi, config.matrix.momentum_lookback);
         let liquidity = normalization::rolling_percentile(&sensors.mfi, config.matrix.momentum_lookback);
@@ -93,6 +95,9 @@ impl MarketMatrixV3 {
         let mut squeeze_multiplier = Vec::with_capacity(len);
         let mut range_multiplier = Vec::with_capacity(len);
         let mut anomaly_multiplier = Vec::with_capacity(len);
+        let mut reversal_multiplier = Vec::with_capacity(len);
+        let mut absorption_multiplier = Vec::with_capacity(len);
+        let mut volatility_expansion_multiplier = Vec::with_capacity(len);
 
         for i in 0..len {
             // Trend mạnh lên khi ADX cao và Trend Angle ổn định
@@ -105,9 +110,33 @@ impl MarketMatrixV3 {
             // Squeeze phụ thuộc trực tiếp vào Squeeze Intensity
             squeeze_multiplier.push(squeeze_intensity[i]);
 
-            // Anomaly (bùng nổ hoặc kiệt sức) khi giá lệch chuẩn mạnh và hỗn loạn cao
             let z_abs = price_z_score[i].abs(); // 0.0 to 1.0
-            anomaly_multiplier.push((z_abs * chaos_ratio[i]).max(0.0).min(1.0));
+            let momentum_extremity = (momentum[i] - 0.5).abs() * 2.0; // 0.0 to 1.0
+
+            // [EXPERIMENTAL FEATURE] Tái cấu trúc Matrix Multiplier thành Additive Scoring
+            // Loại bỏ hoàn toàn phép nhân giữa các phân số để tránh làm suy giảm tín hiệu thị trường.
+            // Nếu kết quả không tốt, ta sẽ revert lại code.
+            
+            // Anomaly: Trọng số chính ở Z-Score (lệch chuẩn), hỗ trợ bởi Chaos
+            let anomaly_score = (z_abs * 0.7) + (chaos_ratio[i] * 0.3);
+            anomaly_multiplier.push(anomaly_score.max(0.0).min(1.0));
+
+            // Reversal: Bắt buộc không có Trend mạnh (VETO cứng). Bắt đáy dựa vào Momentum hoặc Z-Score.
+            let rev_score = if t_mul > 0.5 { 
+                0.0 
+            } else { 
+                (momentum_extremity * 0.5) + (z_abs * 0.5) 
+            };
+            reversal_multiplier.push(rev_score.max(0.0).min(1.0));
+
+            // Absorption: Gom hàng, kết hợp sức nén (Squeeze) và áp lực khối lượng (Volume Force)
+            let abs_score = (squeeze_intensity[i] * 0.5) + (volume_force[i] * 0.5);
+            absorption_multiplier.push(abs_score.max(0.0).min(1.0));
+
+            // Volatility Expansion (Momentum): Bùng nổ (Chaos hoặc Volume đều có thể mồi lửa).
+            // Tránh tình trạng Volume nổ mà Chaos chưa nổ bị phép nhân dìm về 0.
+            let vol_exp_score = (chaos_ratio[i] * 0.5) + (volume_force[i] * 0.5);
+            volatility_expansion_multiplier.push(vol_exp_score.max(0.0).min(1.0));
         }
 
         Self {
@@ -128,6 +157,9 @@ impl MarketMatrixV3 {
             squeeze_multiplier: Arc::new(squeeze_multiplier),
             range_multiplier: Arc::new(range_multiplier),
             anomaly_multiplier: Arc::new(anomaly_multiplier),
+            reversal_multiplier: Arc::new(reversal_multiplier),
+            absorption_multiplier: Arc::new(absorption_multiplier),
+            volatility_expansion_multiplier: Arc::new(volatility_expansion_multiplier),
         }
     }
 }

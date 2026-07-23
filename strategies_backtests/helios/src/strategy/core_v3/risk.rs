@@ -1,7 +1,7 @@
 // src/strategy/core_v3/risk.rs
 
 use ferro_trade::strategy::TickContext;
-use crate::strategy::config::HeliosConfig;
+use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::sensors::HeliosSensors;
 
@@ -49,7 +49,7 @@ impl RiskManager {
 
     /// Quản lý Trailing Stop cho tất cả các lệnh đang mở (Adaptive Loose Trailing)
     pub fn manage_trailing_stop(
-        config: &HeliosConfig,
+        config: &HeliosConfigV3,
         matrix: &MarketMatrixV3,
         tick: &TickContext,
         sensors: &HeliosSensors,
@@ -63,45 +63,102 @@ impl RiskManager {
             return;
         }
 
-        // Kiểm tra biến động (Anomaly)
-        let anomaly_threshold = config.market_regime.anomaly.z_score_threshold;
+        let anomaly_threshold = config.tactical_sniper.anomaly.z_score_threshold;
         let current_anomaly = matrix.anomaly_multiplier[i]; 
-
         let is_volatile = current_anomaly > anomaly_threshold;
         
-        // Nới lỏng (loose) khi bão tố (breakout/crash) để tránh cắn SL sớm
-        let multiplier = if is_volatile {
-            risk_cfg.tsl_atr_loose
-        } else {
-            risk_cfg.tsl_atr_normal
-        };
+        let current_squeeze = matrix.squeeze_multiplier[i];
+        let is_squeeze = current_squeeze > 0.8; // High squeeze intensity
 
         for trade in tick.trades.iter().filter(|t| t.is_open()) {
             let entry_bar = trade.entry_bar;
+            let duration = i - entry_bar;
             
+            // 1. Base Multiplier by Playbook Tag
+            let base_multiplier = if let Some(ref tag_str) = trade.tag {
+                match tag_str.as_str() {
+                    "RANGE_OSC" => risk_cfg.tsl_atr_tight,
+                    "MOMENTUM_IGN" | "ANOMALY_BREAKOUT" => risk_cfg.tsl_atr_loose,
+                    "TREND_PB" | "ABSORPTION" => risk_cfg.tsl_atr_normal,
+                    _ => risk_cfg.tsl_atr_normal,
+                }
+            } else {
+                risk_cfg.tsl_atr_normal
+            };
+
+            // Tìm đỉnh lợi nhuận cao nhất (High Watermark) và vị trí nến tạo đỉnh
             let highs = tick.highs();
             let lows = tick.lows();
             
-            let peak = if trade.is_long() {
-                // Peak là High cao nhất từ lúc vào lệnh
+            let (peak_val, peak_bar) = if trade.is_long() {
                 let mut max_high = highs[entry_bar];
+                let mut max_bar = entry_bar;
                 for j in entry_bar..=i {
-                    if highs[j] > max_high { max_high = highs[j]; }
+                    if highs[j] > max_high { 
+                        max_high = highs[j]; 
+                        max_bar = j;
+                    }
                 }
-                max_high
+                (max_high, max_bar)
             } else {
-                // Peak là Low thấp nhất từ lúc vào lệnh
                 let mut min_low = lows[entry_bar];
+                let mut min_bar = entry_bar;
                 for j in entry_bar..=i {
-                    if lows[j] < min_low { min_low = lows[j]; }
+                    if lows[j] < min_low { 
+                        min_low = lows[j]; 
+                        min_bar = j;
+                    }
                 }
-                min_low
+                (min_low, min_bar)
             };
 
-            let new_sl = if trade.is_long() {
-                peak - (current_atr * multiplier)
+            // Đếm số nến đi ngang kể từ đỉnh, TẠM DỪNG đếm nếu thị trường đang nén lò xo (Squeeze)
+            let mut effective_stagnant_bars = 0;
+            for j in peak_bar..=i {
+                if matrix.squeeze_multiplier[j] <= 0.8 {
+                    effective_stagnant_bars += 1;
+                }
+            }
+
+            // Tính số chu kỳ đếm ngược đã trôi qua
+            let time_countdown_bars = risk_cfg.time_countdown_bars;
+            let decay_cycles = effective_stagnant_bars / time_countdown_bars;
+            
+            // Lệnh lỗ mà ngâm quá 1 chu kỳ thì cắt luôn
+            let current_pnl = trade.pl(Some(tick.closes()[i]));
+            if decay_cycles > 0 && current_pnl <= 0.0 {
+                tick.close(None);
+                continue;
+            }
+
+            // Tính toán hệ số nhân Multiplier hiện tại (Bao gồm Progressive Decay)
+            let mut current_multiplier = if is_volatile {
+                // Rule 1: Explosive market. Give it room to breathe (avoid whipsaw).
+                if base_multiplier < risk_cfg.tsl_atr_loose {
+                    risk_cfg.tsl_atr_loose
+                } else {
+                    base_multiplier
+                }
             } else {
-                peak + (current_atr * multiplier)
+                base_multiplier
+            };
+
+            // Áp dụng Progressive Decay: Lệnh ngâm càng lâu, siết SL càng chặt
+            if decay_cycles > 0 {
+                // Nhân hệ số siết (ví dụ 0.8) cho mỗi chu kỳ trôi qua
+                let progressive_factor = risk_cfg.tighten_step_multiplier.powi(decay_cycles as i32);
+                current_multiplier *= progressive_factor;
+                
+                // Đảm bảo không bóp chặt quá mức tối thiểu
+                if current_multiplier < risk_cfg.tsl_atr_tight {
+                    current_multiplier = risk_cfg.tsl_atr_tight;
+                }
+            }
+
+            let new_sl = if trade.is_long() {
+                peak_val - (current_atr * current_multiplier)
+            } else {
+                peak_val + (current_atr * current_multiplier)
             };
 
             let should_update = if trade.is_long() {

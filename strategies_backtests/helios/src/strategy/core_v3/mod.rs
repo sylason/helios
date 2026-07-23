@@ -4,6 +4,7 @@ pub mod arbiter;
 pub mod matrix;
 pub mod scanners;
 pub mod risk;
+pub mod config;
 
 use std::collections::HashMap;
 
@@ -11,8 +12,9 @@ use ferro_trade::optimizer::params::ParamValue;
 use ferro_trade::optimizer::DnaMappable;
 use ferro_trade::strategy::{InitContext, Strategy, TickContext};
 use ferro_trade::indicators::factory::BulkIndicatorFactory;
+use ferro_trade::broker::policies::RiskPolicy;
 
-use crate::strategy::config::HeliosConfig;
+use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{HeliosArbiter, SignalType};
@@ -21,7 +23,7 @@ use crate::strategy::core_v3::risk::RiskManager;
 /// Chiến lược Helios V3 - Signal-First Architecture
 #[derive(Clone, Debug)]
 pub struct HeliosStrategyV3 {
-    pub config: HeliosConfig,
+    pub config: HeliosConfigV3,
     pub sensors: HeliosSensors,
     pub matrix: MarketMatrixV3,
     pub debug_mode: bool,
@@ -30,7 +32,7 @@ pub struct HeliosStrategyV3 {
 impl Strategy for HeliosStrategyV3 {
     fn new(_params: &HashMap<String, ParamValue>) -> Self {
         Self {
-            config: HeliosConfig::default(),
+            config: HeliosConfigV3::default(),
             sensors: HeliosSensors::default(),
             matrix: MarketMatrixV3::default(),
             debug_mode: std::env::var("HELIOS_DEBUG").is_ok(),
@@ -138,36 +140,50 @@ impl Strategy for HeliosStrategyV3 {
             return; 
         }
 
-        let mut arbiter = HeliosArbiter::new(self.config.market_regime.priority.min_score_threshold); 
+        let mut arbiter = HeliosArbiter::new(self.config.min_approval_confidence); 
         
         arbiter.add_scanner(Box::new(scanners::trend_pb::TrendPBScanner));
         arbiter.add_scanner(Box::new(scanners::momentum_ignition::MomentumIgnitionScanner));
         arbiter.add_scanner(Box::new(scanners::range_osc::RangeOscScanner));
+        arbiter.add_scanner(Box::new(scanners::reversal::ReversalScanner));
+        arbiter.add_scanner(Box::new(scanners::anomaly::AnomalyScanner));
+        arbiter.add_scanner(Box::new(scanners::absorption::AbsorptionScanner));
 
-        let decision = arbiter.process_tick(tick, &self.sensors, &self.matrix, self.debug_mode);
+        let decision = arbiter.process_tick(tick, &self.sensors, &self.matrix, &self.config, self.debug_mode);
 
         if decision.is_approved {
             if let Some(signal) = decision.final_signal {
-                let _price = tick.closes()[i];
-                
                 // Tính Size (% Initial Margin)
-                // Đảm bảo thỏa mãn Min Order Size (Binance: ~21 USDT với đòn bẩy 20x)
-                let _size = RiskManager::calculate_size(tick.equity, 0.10, 21.0, 20.0);
+                let size = RiskManager::calculate_size(
+                    tick.equity, 
+                    self.config.risk_management.risk_base.percent_per_trade, 
+                    21.0, 
+                    20.0
+                );
                 
                 let is_long = signal == SignalType::Long;
-                let initial_sl = RiskManager::get_initial_sl(
-                    tick,
-                    &self.sensors,
-                    is_long,
-                    self.config.risk_management.stop_management.tsl_atr_normal
-                );
+                
+                // SL sẽ lấy từ scanner nếu có, nếu không lấy default ATR
+                let initial_sl = decision.final_sl.unwrap_or_else(|| {
+                    RiskManager::get_initial_sl(
+                        tick,
+                        &self.sensors,
+                        is_long,
+                        self.config.risk_management.stop_management.tsl_atr_normal
+                    )
+                });
+                
+                let tag = decision.winning_scanner.map(|s| s.to_string());
+
+                let policy = Some(RiskPolicy::FixedPrice { 
+                    sl_price: Some(initial_sl), 
+                    tp_price: decision.final_tp 
+                });
 
                 if is_long {
-                    // tick.buy(Some(size), None, Some(initial_sl), None, None);
-                    tick.buy(Some(0.2), None, Some(initial_sl), None, None);
+                    tick.buy(Some(size), None, None, policy, tag);
                 } else {
-                    // tick.sell(Some(size), None, Some(initial_sl), None, None);
-                    tick.sell(Some(0.2), None, Some(initial_sl), None, None);
+                    tick.sell(Some(size), None, None, policy, tag);
                 }
             }
         }

@@ -36,7 +36,7 @@
     "scout_method": "lhs",
     "exploration_strategy": "random_restart",
     "max_threads": 7,
-    "max_random_restarts": 3
+    "max_random_restarts": 4
   },
   "cache_config": {
     "resampled_data_limit": 100,

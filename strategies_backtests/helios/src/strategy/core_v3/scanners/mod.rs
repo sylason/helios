@@ -3,3 +3,6 @@
 pub mod trend_pb;
 pub mod momentum_ignition;
 pub mod range_osc;
+pub mod reversal;
+pub mod anomaly;
+pub mod absorption;
