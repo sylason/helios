@@ -5,7 +5,7 @@ use crate::models::account_state::AccountEvent;
 /// "Hệ thần kinh trung ương" của Bot
 pub struct EventBus {
     /// Kênh truyền dữ liệu nến 1m (Data Bus)
-    pub data_tx: broadcast::Sender<Candle>,
+    pub data_tx: broadcast::Sender<(Candle, bool)>,
     
     /// Kênh truyền tín hiệu giao dịch (Trade Bus)
     pub trade_tx: mpsc::Sender<TradeSignal>,

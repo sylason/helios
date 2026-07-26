@@ -32,6 +32,7 @@ impl ProspectorRunner {
     /// Chạy 1 chu kỳ tối ưu hóa dựa trên 30 ngày dữ liệu gần nhất
     pub async fn run_optimization_cycle(
         symbol: &str,
+        strategy_id: &str,
         db: Arc<SqliteStore>,
         config_path: &str, // VD: "../../strategies_backtests/helios/examples/helios_optimizer_config.json"
         prospector_db_path: &str,
@@ -141,7 +142,7 @@ impl ProspectorRunner {
 
                 let opt_dna = OptimizedDna {
                     symbol: symbol.to_string(),
-                    strategy_id: "helios_v1".to_string(), // Tạm fix ID
+                    strategy_id: strategy_id.to_string(),
                     dna: dna,
                     mapping: HashMap::new(), // Không cần mapping với DNA v2
                     fitness: *ret,

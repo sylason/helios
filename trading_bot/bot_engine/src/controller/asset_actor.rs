@@ -11,6 +11,17 @@ use ferro_trade::broker::actions::Action;
 
 use crate::models::account_state::{AccountState, PositionState, AccountEvent};
 
+#[derive(Debug, Clone)]
+pub struct LivePositionState {
+    pub symbol: String,
+    pub position_amt: f64,
+    pub entry_price: f64,
+    pub entry_timestamp: i64,
+    pub live_entry_bar: usize,
+    pub current_sl_price: Option<f64>,
+    pub opening_playbook_tag: Option<String>,
+}
+
 pub struct AssetActor {
     symbol: String,
     strategy_id: String,
@@ -20,7 +31,7 @@ pub struct AssetActor {
     strategy_repo: Arc<dyn StrategyRepository>,
     monitor: Arc<WeightMonitor>,
     dna_rx: tokio::sync::watch::Receiver<Option<crate::models::models::OptimizedDna>>,
-    data_rx: broadcast::Receiver<Candle>,
+    data_rx: broadcast::Receiver<(Candle, bool)>,
     account_rx: broadcast::Receiver<AccountEvent>,
     emergency_rx: mpsc::Receiver<EmergencyCmd>,
     status_tx: mpsc::Sender<StatusUpdate>,
@@ -32,6 +43,7 @@ pub struct AssetActor {
     // Khối 2: Account & Position State
     pub account_state: AccountState,
     pub position_state: PositionState,
+    pub live_position: Option<LivePositionState>,
 
     // Khối 3: Order Executor
     pub executor: Option<Arc<crate::execution::order_executor::OrderExecutor>>,
@@ -47,7 +59,7 @@ impl AssetActor {
         strategy_repo: Arc<dyn StrategyRepository>,
         monitor: Arc<WeightMonitor>,
         dna_rx: tokio::sync::watch::Receiver<Option<crate::models::models::OptimizedDna>>,
-        data_tx: broadcast::Sender<Candle>,
+        data_tx: broadcast::Sender<(Candle, bool)>,
         emergency_rx: mpsc::Receiver<EmergencyCmd>,
         status_tx: mpsc::Sender<StatusUpdate>,
         trade_tx: mpsc::Sender<TradeSignal>,
@@ -76,6 +88,7 @@ impl AssetActor {
             market_filter,
             account_state: AccountState::default(),
             position_state: PositionState::new(&symbol),
+            live_position: None,
             executor,
             allocated_capital,
             leverage,
@@ -139,9 +152,9 @@ impl AssetActor {
                 }
 
                 // Lắng nghe nến real-time từ MarketData
-                Ok(candle) = self.data_rx.recv() => {
+                Ok((candle, is_historical)) = self.data_rx.recv() => {
                     if candle.symbol == self.symbol {
-                        self.on_new_candle(candle).await;
+                        self.on_new_candle(candle, is_historical).await;
                     }
                 }
             }
@@ -182,6 +195,32 @@ impl AssetActor {
                     self.position_state.unrealized_profit = unrealized_profit;
                     info!("📈 [{}] Position Update: Amt = {:.4}, Entry = {:.2}, uPnL = {:.2}", 
                           self.symbol, position_amt, entry_price, unrealized_profit);
+
+                    // Đồng bộ LivePositionState cho Trailing SL
+                    if position_amt != 0.0 {
+                        let current_bar = self.asset.get_candles_vec().len().saturating_sub(1);
+                        if let Some(ref mut live_pos) = self.live_position {
+                            live_pos.position_amt = position_amt;
+                            live_pos.entry_price = entry_price;
+                        } else {
+                            let current_time = chrono::Utc::now().timestamp_millis();
+                            self.live_position = Some(LivePositionState {
+                                symbol: symbol.clone(),
+                                position_amt,
+                                entry_price,
+                                entry_timestamp: current_time,
+                                live_entry_bar: current_bar,
+                                current_sl_price: None,
+                                opening_playbook_tag: None,
+                            });
+                            info!("🛡️ [{}] Khởi tạo LivePositionState mới cho Trailing SL (entry_bar: {})", symbol, current_bar);
+                        }
+                    } else {
+                        if self.live_position.is_some() {
+                            info!("🧹 [{}] Vị thế đã đóng trên Binance. Clear LivePositionState.", symbol);
+                        }
+                        self.live_position = None;
+                    }
                 }
             }
         }
@@ -228,8 +267,8 @@ impl AssetActor {
         Ok(())
     }
 
-    async fn on_new_candle(&mut self, candle: Candle) {
-        debug!("📬 [{}] Received new candle: {}", self.symbol, candle.timestamp);
+    async fn on_new_candle(&mut self, candle: Candle, is_historical: bool) {
+        debug!("📬 [{}] Received new candle: {} (historical: {})", self.symbol, candle.timestamp, is_historical);
         
         // 1. Đẩy vào Rolling Buffer (Trí nhớ 30 ngày)
         self.asset.push_candle(candle.clone());
@@ -262,13 +301,20 @@ impl AssetActor {
                 }
             }
 
-            // Gọi HeliosBridge::analyze để trích xuất tín hiệu (Actions) cho nến HIỆN TẠI
+            // Gọi HeliosBridge::evaluate_live_tick để đánh giá tín hiệu và dời Trailing SL cho nến HIỆN TẠI
             if let Some(ref mut strategy) = self.strategy {
-                let (actions, _stats_opt) = HeliosBridge::analyze(&self.symbol, &rolling_buffer, strategy.as_mut());
+                let actions = HeliosBridge::evaluate_live_tick(&self.symbol, &rolling_buffer, self.live_position.as_ref(), strategy.as_mut());
                 
                 if !actions.is_empty() {
                     info!("🎯 [{}] Strategy generated {} actions on candle {}!", self.symbol, actions.len(), current_close);
                     for action in actions {
+                        // Cập nhật giá SL nội bộ nếu có Action::UpdateTradeSlTp
+                        if let Action::UpdateTradeSlTp { new_sl_price: Some(sl), .. } = action {
+                            if let Some(ref mut pos) = self.live_position {
+                                pos.current_sl_price = Some(sl);
+                            }
+                        }
+
                         // --- ENFORCE EXCLUSIVE ORDER RULE ---
                         // "Không vào lệnh Long khi đã có Long, không vào lệnh Short khi đã có Short"
                         let position_amt = self.position_state.position_amt;
@@ -284,10 +330,12 @@ impl AssetActor {
                             }
                         }
                         
-                        // Bắn lệnh thật nếu có Executor
-                        if let Some(ref executor) = self.executor {
-                            // Tính vốn có thể sử dụng (an toàn): min(Số dư sàn, Ngân sách cấp)
-                            let usable_capital = self.allocated_capital.min(self.account_state.available_balance);
+                        // Bắn lệnh thật nếu có Executor (VÀ nến không phải là nến lịch sử lấy từ Gap Filler)
+                        if is_historical {
+                            info!("🕰️ [{}] Nến Lịch sử. Bỏ qua Action {:?} (Gap Filler Order Spam Prevention).", self.symbol, action);
+                        } else if let Some(ref executor) = self.executor {
+                            // Sử dụng chiến thuật quản lý vốn lũy tiến (10% của Available Balance)
+                            let usable_capital = self.account_state.available_balance * 0.1;
                             let leverage = self.leverage;
                             let symbol = self.symbol.clone();
                             

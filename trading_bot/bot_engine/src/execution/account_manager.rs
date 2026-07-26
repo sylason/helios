@@ -7,6 +7,10 @@ use binance_sdk::derivatives_trading_usds_futures::{
     },
     DerivativesTradingUsdsFuturesRestApi
 };
+use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
+    CancelAllOpenOrdersParams, CancelAllAlgoOpenOrdersParams, NewOrderParams, NewOrderSideEnum
+};
+use rust_decimal::prelude::FromPrimitive;
 use tracing::{info, error};
 use tokio::sync::broadcast;
 use crate::models::account_state::AccountEvent;
@@ -166,6 +170,10 @@ impl AccountManager {
                                 unrealized_profit,
                             });
                             info!("📊 Cập nhật vị thế ban đầu: Mở {} {}, Giá: {}, PNL: {}", position_amt, symbol, entry_price, unrealized_profit);
+                            
+                            // CLEAN SLATE: Dọn dẹp bàn cờ (hủy lệnh + đóng vị thế)
+                            let _ = self.cancel_all_orders(symbol).await;
+                            let _ = self.force_close_all_positions(symbol, position_amt).await;
                         }
                     }
                 }
@@ -177,5 +185,66 @@ impl AccountManager {
         }
 
         Ok(())
+    }
+
+    /// Clean Slate: Hủy tất cả các lệnh chờ (cả thường lẫn Algo)
+    pub async fn cancel_all_orders(&self, symbol: &str) -> Result<(), BotError> {
+        self.monitor.wait_if_needed(1).await;
+        let p1 = CancelAllOpenOrdersParams::builder(symbol.to_string()).build().unwrap();
+        match self.rest_client.cancel_all_open_orders(p1).await {
+            Ok(_) => info!("🧹 [{}] Đã hủy toàn bộ lệnh Limit/Stop chờ khớp.", symbol),
+            Err(e) => error!("❌ [{}] Lỗi hủy lệnh thường: {}", symbol, e),
+        }
+
+        self.monitor.wait_if_needed(1).await;
+        let p2 = CancelAllAlgoOpenOrdersParams::builder(symbol.to_string()).build().unwrap();
+        match self.rest_client.cancel_all_algo_open_orders(p2).await {
+            Ok(_) => info!("🧹 [{}] Đã hủy toàn bộ lệnh Algo (Trailing SL/TP).", symbol),
+            Err(e) => error!("❌ [{}] Lỗi hủy lệnh Algo: {}", symbol, e),
+        }
+
+        Ok(())
+    }
+
+    /// Clean Slate: Ép đóng vị thế đang mở
+    pub async fn force_close_all_positions(&self, symbol: &str, position_amt: f64) -> Result<(), BotError> {
+        if position_amt == 0.0 {
+            info!("✅ [{}] Không có vị thế mở, bàn cờ đã sạch sẽ.", symbol);
+            return Ok(());
+        }
+
+        let side = if position_amt > 0.0 {
+            NewOrderSideEnum::Sell
+        } else {
+            NewOrderSideEnum::Buy
+        };
+
+        let qty = rust_decimal::Decimal::from_f64(position_amt.abs())
+            .ok_or_else(|| BotError::Internal("Lỗi parse khối lượng".to_string()))?;
+
+        let params = NewOrderParams::builder(symbol.to_string(), side.clone(), "MARKET".to_string())
+            .quantity(qty)
+            .build().map_err(|e| BotError::Internal(e.to_string()))?;
+
+        self.monitor.wait_if_needed(1).await;
+        info!("🧹 [{}] Đang ép đóng vị thế tồn đọng: {:?} {}", symbol, side, qty);
+        match self.rest_client.new_order(params).await {
+            Ok(_) => {
+                self.monitor.report_status();
+                info!("✅ [{}] Dọn dẹp thành công!", symbol);
+                // Phát event reset vị thế về 0 cho internal state
+                let _ = self.account_tx.send(AccountEvent::PositionUpdate {
+                    symbol: symbol.to_string(),
+                    position_amt: 0.0,
+                    entry_price: 0.0,
+                    unrealized_profit: 0.0,
+                });
+                Ok(())
+            },
+            Err(e) => {
+                error!("❌ [{}] Lỗi ép đóng vị thế: {}", symbol, e);
+                Err(e.into())
+            }
+        }
     }
 }

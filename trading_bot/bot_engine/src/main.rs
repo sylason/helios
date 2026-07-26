@@ -23,8 +23,12 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // KHAI BÁO STRATEGY ID ĐANG DÙNG (Dùng để định danh log và db)
+    let strategy_id = "helios_v2";
+
     // 1. Khởi tạo Logger (Console + File)
-    let file_appender = tracing_appender::rolling::daily("logs", "trading_bot.log");
+    let log_filename = format!("{}_bot.log", strategy_id);
+    let file_appender = tracing_appender::rolling::daily("logs", &log_filename);
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::registry()
@@ -45,7 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Khởi tạo Database (SQLite)
     std::fs::create_dir_all("storage")?;
-    let db_store = Arc::new(SqliteStore::new("storage/trading_bot.db")?);
+    let db_path = format!("storage/{}.db", strategy_id);
+    let db_store = Arc::new(SqliteStore::new(&db_path)?);
     info!("📂 Database SQLite đã khởi tạo.");
 
     // 5. Bước quan trọng: Đảm bảo dữ liệu 33 ngày cho Optimizer (Backward Sync)
@@ -96,13 +101,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Optimizer chạy ngay lập tức vì ta đã đảm bảo xong 33 ngày data
         loop {
             // Chạy optimizer
-            let config_path = "../../strategies_backtests/helios/examples/helios_optimizer_config.json";
-            let db_opt_path = "storage/prospector.db";
+            let config_path = r#"E:\Projects\Automations\trading_backtest\strategies_backtests\v2_trading_bot_demo\examples\helios_optimizer_config.json"#;
+            let db_opt_path = format!("storage/{}_prospector.db", strategy_id);
             if let Err(e) = crate::optimizer::prospector_runner::ProspectorRunner::run_optimization_cycle(
                 &symbol_opt,
+                strategy_id,
                 db_for_opt.clone(),
                 config_path,
-                db_opt_path,
+                &db_opt_path,
                 Some(dna_tx.clone())
             ).await {
                 tracing::error!("❌ Lỗi chạy Optimizer ngầm: {}", e);
@@ -143,7 +149,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         account_tx.clone(),
         monitor.clone()
     );
-    if let Err(e) = account_manager.initialize_account(&symbol, 10).await {
+    if let Err(e) = account_manager.initialize_account(&symbol, 20).await {
         tracing::error!("❌ Lỗi khởi tạo tài khoản ban đầu: {}", e);
     }
 
@@ -151,19 +157,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let executor = Arc::new(crate::execution::order_executor::OrderExecutor::new(
         _config.api_key.clone(),
         _config.api_secret.clone(),
-        true, // use_testnet
+        _config.use_testnet, // Đã sửa: lấy cấu hình đồng bộ từ .env thay vì hardcode true
         market_filter.clone(),
         db_store.clone(),
         monitor.clone()
     ));
 
     // 9. Khởi chạy Asset Actor (Nhạc trưởng) với QuickCrossStrategy để test
-    let test_strategy = Box::new(QuickCrossStrategy::new());
+    // let test_strategy = Box::new(QuickCrossStrategy::new());
+    let test_strategy = Box::new(HeliosStrategy::new(&std::collections::HashMap::new()));
 
 
     let actor = AssetActor::new(
         symbol,
-        "quick_cross".to_string(), // strategy_id
+        strategy_id.to_string(), // strategy_id
         db_store.clone(),
         db_store,
         monitor, // Truyền monitor vào Actor

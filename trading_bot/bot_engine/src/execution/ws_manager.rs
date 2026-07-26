@@ -24,7 +24,7 @@ pub struct WsManager {
     use_testnet: bool,
     weight_monitor: Arc<WeightMonitor>,
     db_store: Arc<SqliteStore>,
-    data_tx: broadcast::Sender<Candle>,
+    data_tx: broadcast::Sender<(Candle, bool)>,
     account_tx: broadcast::Sender<AccountEvent>,
 }
 
@@ -35,7 +35,7 @@ impl WsManager {
         use_testnet: bool, 
         weight_monitor: Arc<WeightMonitor>,
         db_store: Arc<SqliteStore>,
-        data_tx: broadcast::Sender<Candle>,
+        data_tx: broadcast::Sender<(Candle, bool)>,
         account_tx: broadcast::Sender<AccountEvent>,
     ) -> Self {
         Self {
@@ -79,7 +79,7 @@ impl WsManager {
                         match syncer.fill_gap(&symbol, 30).await {
                             Ok(gap_candles) => {
                                 for candle in gap_candles {
-                                    let _ = data_tx.send(candle);
+                                    let _ = data_tx.send((candle, true)); // is_historical = true
                                 }
                             }
                             Err(e) => warn!("⚠️ Lỗi đồng bộ dữ liệu Gap Filler: {}", e),
@@ -109,7 +109,7 @@ impl WsManager {
                                             };
 
                                             debug!("📊 Nến mới đóng [WS]: {:?}", candle);
-                                            let _ = tx.send(candle);
+                                            let _ = tx.send((candle, false)); // is_historical = false
                                         }
                                     }
                                 });

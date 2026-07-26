@@ -2,7 +2,9 @@ use tracing::{info, error};
 use rust_decimal::prelude::FromPrimitive;
 
 use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
-    TradeApi, NewOrderParams, NewOrderSideEnum
+    TradeApi, NewOrderParams, NewOrderSideEnum,
+    NewAlgoOrderParams, NewAlgoOrderWorkingTypeEnum,
+    CancelAllAlgoOpenOrdersParams, NewAlgoOrderSideEnum
 };
 use binance_sdk::derivatives_trading_usds_futures::rest_api::RestApi;
 use binance_sdk::config::ConfigurationRestApi;
@@ -77,9 +79,49 @@ impl OrderExecutor {
         leverage: f64
     ) -> Result<(), BotError> {
         
+        let mut sl_price_to_set = None;
+
+        // Xử lý riêng Action::UpdateTradeSlTp
+        if let Action::UpdateTradeSlTp { new_sl_price, .. } = &action {
+            let p_cancel = CancelAllAlgoOpenOrdersParams::builder(symbol.to_string()).build().unwrap();
+            self.monitor.wait_if_needed(1).await;
+            if let Err(e) = self.rest_client.cancel_all_algo_open_orders(p_cancel).await {
+                error!("❌ [{}] Lỗi hủy Algo Orders cũ: {}", symbol, e);
+            } else {
+                info!("🧹 [{}] Đã hủy Algo SL cũ để cập nhật mới.", symbol);
+            }
+
+            if let Some(sl) = new_sl_price {
+                let sl_side = if position_amt > 0.0 { NewAlgoOrderSideEnum::Sell } else { NewAlgoOrderSideEnum::Buy };
+                let p_sl = NewAlgoOrderParams::builder(
+                    "CONDITIONAL".to_string(),
+                    symbol.to_string(),
+                    sl_side,
+                    "STOP_MARKET".to_string()
+                )
+                .trigger_price(rust_decimal::Decimal::from_f64(*sl).unwrap())
+                .close_position(Some("true".to_string()))
+                .working_type(NewAlgoOrderWorkingTypeEnum::MarkPrice)
+                .build().unwrap();
+                
+                self.monitor.wait_if_needed(1).await;
+                match self.rest_client.new_algo_order(p_sl).await {
+                    Ok(_) => info!("🛡️ [{}] Đã cập nhật Trailing SL mới tại: {}", symbol, sl),
+                    Err(e) => error!("❌ [{}] Lỗi đặt Trailing SL mới: {}", symbol, e),
+                }
+            }
+            return Ok(());
+        }
+
         let (side, is_close_all, risk_percentage) = match action {
-            Action::Buy { size, .. } => (NewOrderSideEnum::Buy, false, size),
-            Action::Sell { size, .. } => (NewOrderSideEnum::Sell, false, size),
+            Action::Buy { size, stop, .. } => {
+                sl_price_to_set = stop;
+                (NewOrderSideEnum::Buy, false, size)
+            },
+            Action::Sell { size, stop, .. } => {
+                sl_price_to_set = stop;
+                (NewOrderSideEnum::Sell, false, size)
+            },
             Action::ClosePosition { .. } | Action::CloseLongs { .. } | Action::CloseShorts { .. } => {
                 // Đảo ngược vị thế hiện tại để đóng lệnh
                 if position_amt > 0.0 {
@@ -167,6 +209,30 @@ impl OrderExecutor {
                     current_time
                 ) {
                     error!("❌ [{}] Lỗi ghi log giao dịch vào SQLite: {:?}", symbol, e);
+                }
+
+                // Nếu Strategy có báo StopLoss ngay lúc vào lệnh, ta đặt luôn Algo Order
+                if let Some(sl) = sl_price_to_set {
+                    let sl_side = match side {
+                        NewOrderSideEnum::Buy => NewAlgoOrderSideEnum::Sell,
+                        NewOrderSideEnum::Sell => NewAlgoOrderSideEnum::Buy,
+                    };
+                    let p_sl = NewAlgoOrderParams::builder(
+                        "CONDITIONAL".to_string(),
+                        symbol.to_string(),
+                        sl_side,
+                        "STOP_MARKET".to_string()
+                    )
+                    .trigger_price(rust_decimal::Decimal::from_f64(sl).unwrap())
+                    .close_position(Some("true".to_string()))
+                    .working_type(NewAlgoOrderWorkingTypeEnum::MarkPrice)
+                    .build().unwrap();
+                    
+                    self.monitor.wait_if_needed(1).await;
+                    match self.rest_client.new_algo_order(p_sl).await {
+                        Ok(_) => info!("🛡️ [{}] Đã đặt Hard SL bảo vệ tại: {}", symbol, sl),
+                        Err(e) => error!("❌ [{}] Lỗi đặt Hard SL: {}", symbol, e),
+                    }
                 }
 
                 Ok(())

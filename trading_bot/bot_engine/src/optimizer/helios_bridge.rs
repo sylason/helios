@@ -146,6 +146,115 @@ impl HeliosBridge {
         (last_actions, stats_opt)
     }
 
+    /// Đánh giá tín hiệu ở nến HIỆN TẠI (i = full_len - 1) với Vị thế thật từ Binance WebSocket
+    pub fn evaluate_live_tick(
+        symbol: &str,
+        candles: &[Candle],
+        live_position: Option<&crate::controller::asset_actor::LivePositionState>,
+        strategy: &mut dyn Strategy,
+    ) -> Vec<Action> {
+        if candles.is_empty() {
+            return Vec::new();
+        }
+
+        let df = match Self::candles_to_df(candles) {
+            Ok(df) => df,
+            Err(e) => {
+                error!("❌ HeliosBridge: Lỗi chuyển đổi DataFrame: {}", e);
+                return Vec::new();
+            }
+        };
+
+        let cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
+        let raw_cache = match ferro_trade::data::RawDataCache::new(&df) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("❌ HeliosBridge: Lỗi tạo RawDataCache: {}", e);
+                return Vec::new();
+            }
+        };
+        let data_view = ferro_trade::data::DataView::new(df, raw_cache);
+        
+        let base_times = &data_view.raw_cache().datetime;
+        let base_df = data_view.get_full_df();
+        for tf_str in &["3m", "5m", "15m", "1h", "4h"] {
+            if let Ok(tf) = std::str::FromStr::from_str(tf_str) {
+                if let Ok(df_res) = ferro_trade::utils::resample::resample_ohlcv(tf_str, base_df) {
+                    if let Ok(flat_ohlcv) = ferro_trade::utils::resample::df_to_resampled_ohlcv(&df_res) {
+                        let flat_arc = Arc::new(flat_ohlcv);
+                        cache.put_resampled_ohlcv(tf, flat_arc.clone());
+                        let table = Arc::new(ferro_trade::utils::resample::create_lookup_table(base_times, &flat_arc.datetime));
+                        cache.put_lookup(tf, table);
+                    }
+                }
+            }
+        }
+
+        let mut indicator_manager = IndicatorManager::new();
+        let mut init_context = InitContext {
+            raw_data: data_view.raw_cache(),
+            data_view: &data_view,
+            cache: &cache,
+            indicator_manager: &mut indicator_manager,
+        };
+
+        strategy.init(&mut init_context);
+
+        let warmup = indicator_manager.warmup_period;
+        let full_len = data_view.get_full_df().height();
+        
+        if full_len <= warmup {
+            return Vec::new();
+        }
+
+        let last_idx = full_len - 1;
+
+        // Tiêm vị thế thật từ Binance vào TickContext
+        let mut live_trades = Vec::new();
+        let mut live_position_snapshot = ferro_trade::broker::position::Position::default();
+
+        if let Some(pos) = live_position {
+            if pos.position_amt != 0.0 {
+                let mut trade = ferro_trade::broker::trade::Trade::new(
+                    1,
+                    pos.position_amt,
+                    pos.entry_price,
+                    pos.live_entry_bar.min(last_idx),
+                    None,
+                    pos.opening_playbook_tag.clone(),
+                );
+                trade.sl_price = pos.current_sl_price;
+                live_trades.push(trade);
+
+                live_position_snapshot = ferro_trade::broker::position::Position {
+                    size: pos.position_amt,
+                    pnl: 0.0,
+                    pnl_pct: 0.0,
+                    is_long: pos.position_amt > 0.0,
+                    is_short: pos.position_amt < 0.0,
+                };
+            }
+        }
+
+        let actions_buffer = RefCell::new(SmallVec::<[Action; 4]>::new());
+
+        {
+            let tick_context = TickContext {
+                i: last_idx,
+                equity: 10000.0,
+                data_view: &data_view,
+                indicator_manager: &indicator_manager,
+                trades: &live_trades,
+                actions: &actions_buffer,
+                position: live_position_snapshot,
+            };
+            strategy.next(&tick_context);
+        }
+
+        let actions = actions_buffer.into_inner();
+        actions.to_vec()
+    }
+
     /// Chuyá»ƒn Ä‘á»•i danh sÃ¡ch Candle (shared model) sang DataFrame (ferro_trade format)
     fn candles_to_df(candles: &[Candle]) -> PolarsResult<DataFrame> {
         let n = candles.len();

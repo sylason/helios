@@ -8,7 +8,7 @@ use tracing::{error, info, debug};
 use crate::models::models::Candle;
 
 /// Khởi chạy luồng dữ liệu nến 1m cho ETHUSDT
-pub async fn start_kline_stream(symbol: String, data_tx: broadcast::Sender<Candle>) {
+pub async fn start_kline_stream(symbol: String, data_tx: broadcast::Sender<(Candle, bool)>) {
     let symbol_lower = symbol.to_lowercase();
     
     // 1. Cấu hình & Client
@@ -58,7 +58,7 @@ pub async fn start_kline_stream(symbol: String, data_tx: broadcast::Sender<Candl
                 debug!("📊 Nến mới đóng: {:?}", candle);
                 
                 // Gửi dữ liệu nến vào Hệ thần kinh (EventBus)
-                if let Err(e) = data_tx.send(candle) {
+                if let Err(e) = data_tx.send((candle, false)) {
                     error!("❌ Lỗi gửi nến vào Bus: {}", e);
                 }
             }
