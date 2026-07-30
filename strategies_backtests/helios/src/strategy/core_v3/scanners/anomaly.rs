@@ -40,31 +40,55 @@ impl TacticalScanner for AnomalyScanner {
             let rsi_high = ano_cfg.rsi_climax * 100.0;
             let rsi_low = (1.0 - ano_cfg.rsi_climax) * 100.0;
             
-            // [EXPERIMENTAL FEATURE] Nới lỏng Anomaly: Chuyển Rejection từ điều kiện bắt buộc (VETO) sang điểm cộng (SCORE).
-            // Giữ lại linh hồn bắt râu bằng cách cộng điểm nếu có râu.
+            // [EXPERIMENTAL FEATURE] Soft Activation (Probabilistic Scoring)
+            // Chấm điểm liên tục thay vì dùng lệnh AND cắt cụt.
             
-            // Short Anomaly (Flash pump and reject)
-            if z_score > z_thresh && rsi > rsi_high {
-                raw_score = 0.8 + upper_rejection * 0.2;
+            let z_short_activation = if 1.0 > z_thresh { ((z_score - z_thresh) / (1.0 - z_thresh)).max(0.0).min(1.0) } else { 0.0 };
+            let rsi_short_activation = if 100.0 > rsi_high { ((rsi - rsi_high) / (100.0 - rsi_high)).max(0.0).min(1.0) } else { 0.0 };
+            
+            let z_long_activation = if 1.0 > z_thresh { (((-z_score) - z_thresh) / (1.0 - z_thresh)).max(0.0).min(1.0) } else { 0.0 };
+            let rsi_long_activation = if rsi_low > 0.0 { ((rsi_low - rsi) / rsi_low).max(0.0).min(1.0) } else { 0.0 };
+            
+            let z_w = ano_cfg.z_vs_rsi_weight.max(0.0).min(1.0);
+            let rsi_w = 1.0 - z_w;
+            let wick_buffer_mult = ano_cfg.wick_sl_buffer_atr;
+
+            let short_base = (z_short_activation * z_w) + (rsi_short_activation * rsi_w);
+            let long_base = (z_long_activation * z_w) + (rsi_long_activation * rsi_w);
+            
+            let mut suggested_sl = None;
+            let current_atr = sensors.atr_sl[i];
+
+            let pattern_w = ano_cfg.pattern_vs_wick_weight.max(0.0).min(1.0);
+            let wick_w = 1.0 - pattern_w;
+
+            let min_rej = ano_cfg.min_rejection_pct;
+
+            if short_base > long_base && short_base > 0.0 && upper_rejection >= min_rej {
+                raw_score = short_base * pattern_w + upper_rejection * wick_w;
                 signal_type = Some(SignalType::Short);
-            }
-            // Long Anomaly (Flash crash and reject)
-            else if z_score < -z_thresh && rsi < rsi_low {
-                raw_score = 0.8 + lower_rejection * 0.2;
+                if !current_atr.is_nan() && current_atr > 0.0 {
+                    suggested_sl = Some(high + current_atr * wick_buffer_mult);
+                }
+            } else if long_base > short_base && long_base > 0.0 && lower_rejection >= min_rej {
+                raw_score = long_base * pattern_w + lower_rejection * wick_w;
                 signal_type = Some(SignalType::Long);
+                if !current_atr.is_nan() && current_atr > 0.0 {
+                    suggested_sl = Some(low - current_atr * wick_buffer_mult);
+                }
+            }
+            
+            if let Some(sig) = signal_type {
+                return Some(Proposal {
+                    signal_type: sig,
+                    raw_score: raw_score.min(1.0).max(0.0),
+                    scanner_id: self.id(),
+                    suggested_sl,
+                    suggested_tp: None,
+                });
             }
         }
         
-        if let Some(sig) = signal_type {
-            Some(Proposal {
-                signal_type: sig,
-                raw_score: raw_score.min(1.0).max(0.0),
-                scanner_id: self.id(),
-                suggested_sl: None,
-                suggested_tp: None,
-            })
-        } else {
-            None
-        }
+        None
     }
 }

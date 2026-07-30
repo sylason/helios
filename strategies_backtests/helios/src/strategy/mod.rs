@@ -32,6 +32,7 @@ pub struct HeliosStrategy {
 
 impl HeliosStrategy {
     /// [DEBUG] In toàn bộ cấu hình để kiểm tra DNA nạp vào có đúng không.
+    #[allow(dead_code)]
     fn print_full_config(&self) {
         println!("\n==================================================");
         println!("      [HELIOS STRATEGY CONFIG DIAGNOSTIC]");
@@ -42,6 +43,7 @@ impl HeliosStrategy {
 
     /// [DEBUG] Hệ thống chẩn đoán tập trung cho giai đoạn Init.
     /// Gom tất cả các lệnh trace_v và in ấn vào đây để dễ dàng bật/tắt.
+    #[allow(dead_code)]
     fn run_init_diagnostics(&mut self, ctx: &InitContext, raw_closes: &[f64], _raw_volumes: &[f64]) {
         let trace_v = |category: &str, name: &str, data: &[f64]| {
             let len = data.len();
@@ -163,6 +165,7 @@ impl HeliosStrategy {
     }
 
     /// [DEBUG] In mẫu dữ liệu indicator: Tên, Độ dài, Vị trí bắt đầu, Số lượng, và Giá trị.
+    #[allow(dead_code)]
     fn print_indicator_samples(&self, name: &str, data: &[f64], start: usize, count: usize) {
         let len = data.len();
         let end = (start + count).min(len);
@@ -385,5 +388,12 @@ impl Strategy for HeliosStrategy {
                 env, // [NEW Task 3.2]: Truyền môi trường để log thẻ điểm
             );
         }
+    }
+}
+
+impl Default for HeliosStrategy {
+    fn default() -> Self {
+        use std::collections::HashMap;
+        Self::new(&HashMap::new())
     }
 }

@@ -117,25 +117,23 @@ impl MarketMatrixV3 {
             // Loại bỏ hoàn toàn phép nhân giữa các phân số để tránh làm suy giảm tín hiệu thị trường.
             // Nếu kết quả không tốt, ta sẽ revert lại code.
             
-            // Anomaly: Trọng số chính ở Z-Score (lệch chuẩn), hỗ trợ bởi Chaos
-            let anomaly_score = (z_abs * 0.7) + (chaos_ratio[i] * 0.3);
+            let mw = &config.matrix_weights;
+            
+            let ano_z_w = mw.anomaly_z_weight.max(0.0).min(1.0);
+            let anomaly_score = (z_abs * ano_z_w) + (chaos_ratio[i] * (1.0 - ano_z_w));
             anomaly_multiplier.push(anomaly_score.max(0.0).min(1.0));
 
-            // Reversal: Bắt buộc không có Trend mạnh (VETO cứng). Bắt đáy dựa vào Momentum hoặc Z-Score.
-            let rev_score = if t_mul > 0.5 { 
-                0.0 
-            } else { 
-                (momentum_extremity * 0.5) + (z_abs * 0.5) 
-            };
+            let rev_m_w = mw.reversal_momentum_weight.max(0.0).min(1.0);
+            let rev_trend_factor = if t_mul > 0.80 { 0.50 } else { 1.0 - t_mul };
+            let rev_score = rev_trend_factor * ((momentum_extremity * rev_m_w) + (z_abs * (1.0 - rev_m_w)));
             reversal_multiplier.push(rev_score.max(0.0).min(1.0));
 
-            // Absorption: Gom hàng, kết hợp sức nén (Squeeze) và áp lực khối lượng (Volume Force)
-            let abs_score = (squeeze_intensity[i] * 0.5) + (volume_force[i] * 0.5);
+            let abs_sqz_w = mw.absorption_squeeze_weight.max(0.0).min(1.0);
+            let abs_score = (squeeze_intensity[i] * abs_sqz_w) + (volume_force[i] * (1.0 - abs_sqz_w));
             absorption_multiplier.push(abs_score.max(0.0).min(1.0));
 
-            // Volatility Expansion (Momentum): Bùng nổ (Chaos hoặc Volume đều có thể mồi lửa).
-            // Tránh tình trạng Volume nổ mà Chaos chưa nổ bị phép nhân dìm về 0.
-            let vol_exp_score = (chaos_ratio[i] * 0.5) + (volume_force[i] * 0.5);
+            let vol_chaos_w = mw.vol_exp_chaos_weight.max(0.0).min(1.0);
+            let vol_exp_score = (chaos_ratio[i] * vol_chaos_w) + (volume_force[i] * (1.0 - vol_chaos_w));
             volatility_expansion_multiplier.push(vol_exp_score.max(0.0).min(1.0));
         }
 

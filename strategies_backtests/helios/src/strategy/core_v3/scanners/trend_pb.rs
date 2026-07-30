@@ -30,19 +30,37 @@ impl TacticalScanner for TrendPBScanner {
         let mut signal_type = None;
         
         let stoch_pb = pb_cfg.stoch_pullback_thresh * 100.0;
-        let kama_upper = kama * (1.0 + pb_cfg.kama_tolerance_pct);
-        let kama_lower = kama * (1.0 - pb_cfg.kama_tolerance_pct);
         
-        if dir > 0.5 { // Bullish Trend
-            // Tìm cơ hội mua khi giá hồi về KAMA và Stoch Oversold
-            if close <= kama_upper && stoch_k < stoch_pb && stoch_k > stoch_d {
-                raw_score = 0.8 + (stoch_pb - stoch_k) / 150.0; // Điểm cộng nếu càng oversold sâu
+        // [EXPERIMENTAL FEATURE] Soft Activation
+        let stoch_long_activation = if stoch_pb > 0.0 { ((stoch_pb - stoch_k) / stoch_pb).max(0.0).min(1.0) } else { 0.0 };
+        let stoch_short_activation = if 100.0 - stoch_pb < 100.0 { ((stoch_k - (100.0 - stoch_pb)) / stoch_pb).max(0.0).min(1.0) } else { 0.0 };
+        
+        let kama_long_dist = if close > kama { close - kama } else { 0.0 };
+        let kama_short_dist = if close < kama { kama - close } else { 0.0 };
+        
+        let kama_tol_abs = kama * pb_cfg.kama_tolerance_pct;
+        
+        let kama_long_activation = if kama_tol_abs > 0.0 { (1.0 - (kama_long_dist / (kama_tol_abs * 2.0))).max(0.0).min(1.0) } else { 0.0 };
+        let kama_short_activation = if kama_tol_abs > 0.0 { (1.0 - (kama_short_dist / (kama_tol_abs * 2.0))).max(0.0).min(1.0) } else { 0.0 };
+        
+        let dir_thresh = pb_cfg.trend_dir_threshold;
+        let st_w = pb_cfg.stoch_vs_kama_weight.max(0.0).min(1.0);
+        let k_w = 1.0 - st_w;
+        
+        let rsi = sensors.rsi[i];
+        let rsi_buy_max = pb_cfg.rsi_buy_thresh * 100.0;
+        let rsi_sell_min = (1.0 - pb_cfg.rsi_buy_thresh) * 100.0;
+
+        if dir > dir_thresh { // Bullish Trend
+            let score = (stoch_long_activation * st_w) + (kama_long_activation * k_w);
+            if score > 0.0 && stoch_k > stoch_d && rsi <= rsi_buy_max {
+                raw_score = score;
                 signal_type = Some(SignalType::Long);
             }
-        } else if dir < -0.5 { // Bearish Trend
-            // Tìm cơ hội bán khi giá hồi lên KAMA và Stoch Overbought
-            if close >= kama_lower && stoch_k > (100.0 - stoch_pb) && stoch_k < stoch_d {
-                raw_score = 0.8 + (stoch_k - (100.0 - stoch_pb)) / 150.0;
+        } else if dir < -dir_thresh { // Bearish Trend
+            let score = (stoch_short_activation * st_w) + (kama_short_activation * k_w);
+            if score > 0.0 && stoch_k < stoch_d && rsi >= rsi_sell_min {
+                raw_score = score;
                 signal_type = Some(SignalType::Short);
             }
         }

@@ -24,27 +24,65 @@ impl TacticalScanner for ReversalScanner {
         let rsi_high = rev_cfg.rsi_extreme * 100.0;
         let rsi_low = (1.0 - rev_cfg.rsi_extreme) * 100.0;
         
-        // [EXPERIMENTAL FEATURE] Nới lỏng Reversal: Loại bỏ chặn Volume, giao lại việc lọc cho MarketMatrix.
-        // Chỉ cần Z-Score lệch chuẩn và RSI cực đoan là nhả đạn.
-        
         let z_thresh = rev_cfg.z_score_threshold; 
         
-        if z_score > z_thresh && rsi > rsi_high {
-            raw_score = 0.8 + ((z_score - z_thresh) / 2.0); 
-            signal_type = Some(SignalType::Short);
-        }
-        else if z_score < -z_thresh && rsi < rsi_low {
-            raw_score = 0.8 + (((-z_score) - z_thresh) / 2.0);
-            signal_type = Some(SignalType::Long);
+        // 1. Reversal yêu cầu khối lượng phải cạn kiệt (Volume Force <= exhaustion_vol_drop) để tránh bắt dao rơi khi volume đang bùng nổ
+        if matrix.volume_force[i] > rev_cfg.exhaustion_vol_drop {
+            return None;
         }
         
+        let z_short_activation = if 1.0 > z_thresh { ((z_score - z_thresh) / (1.0 - z_thresh)).max(0.0).min(1.0) } else { 0.0 };
+        let rsi_short_activation = if 100.0 > rsi_high { ((rsi - rsi_high) / (100.0 - rsi_high)).max(0.0).min(1.0) } else { 0.0 };
+        
+        let z_long_activation = if 1.0 > z_thresh { (((-z_score) - z_thresh) / (1.0 - z_thresh)).max(0.0).min(1.0) } else { 0.0 };
+        let rsi_long_activation = if rsi_low > 0.0 { ((rsi_low - rsi) / rsi_low).max(0.0).min(1.0) } else { 0.0 };
+        
+        let z_w = rev_cfg.z_vs_rsi_weight.max(0.0).min(1.0);
+        let rsi_w = 1.0 - z_w;
+        let wick_buffer_mult = rev_cfg.wick_sl_buffer_atr;
+
+        let min_disp_mult = rev_cfg.min_reversal_displacement;
+        let kama_mid = sensors.kama_mid[i];
+        let close_price = tick.closes()[i];
+        let current_atr = sensors.atr_sl[i];
+
+        // 1. Kiểm tra Bắt buộc: Giá phải bị nén chệch xa trung vị kama_mid tối thiểu min_disp_mult * ATR
+        if kama_mid.is_nan() || current_atr.is_nan() || current_atr <= 0.0 || kama_mid <= 0.0 {
+            return None;
+        }
+        let displacement = (close_price - kama_mid).abs();
+        if displacement < (current_atr * min_disp_mult) {
+            return None;
+        }
+
+        let short_base = (z_short_activation * z_w) + (rsi_short_activation * rsi_w);
+        let long_base = (z_long_activation * z_w) + (rsi_long_activation * rsi_w);
+        
+        let high = tick.highs()[i];
+        let low = tick.lows()[i];
+        let mut suggested_sl = None;
+        
+        if short_base > long_base && short_base > 0.0 {
+            raw_score = short_base; 
+            signal_type = Some(SignalType::Short);
+            suggested_sl = Some(high + current_atr * wick_buffer_mult);
+        }
+        else if long_base > short_base && long_base > 0.0 {
+            raw_score = long_base;
+            signal_type = Some(SignalType::Long);
+            suggested_sl = Some(low - current_atr * wick_buffer_mult);
+        }
+        
+        // LUÔN LUÔN GÁN TAKE PROFIT TẠI KAMA_MID (đã được đảm bảo khoảng cách >= min_disp_mult * ATR)
+        let suggested_tp = Some(kama_mid);
+
         if let Some(sig) = signal_type {
             Some(Proposal {
                 signal_type: sig,
                 raw_score: raw_score.min(1.0).max(0.0),
                 scanner_id: self.id(),
-                suggested_sl: None,
-                suggested_tp: None,
+                suggested_sl,
+                suggested_tp,
             })
         } else {
             None

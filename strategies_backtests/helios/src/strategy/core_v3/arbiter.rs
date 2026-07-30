@@ -82,14 +82,14 @@ impl HeliosArbiter {
                     _ => 1.0,
                 };
                 
-                // [EXPERIMENTAL FEATURE] The Additive Logic & Hard Veto
-                // 1. Hard Veto: Nếu môi trường hoàn toàn không phù hợp (multiplier < 0.2), chặn ngay lập tức.
-                let confidence = if multiplier < 0.2 {
+                let min_veto = config.arbiter.min_multiplier_veto;
+                let s_weight = config.arbiter.scanner_weight.max(0.0).min(1.0);
+                let m_weight = 1.0 - s_weight;
+                
+                let confidence = if multiplier < min_veto {
                     0.0
                 } else {
-                    // 2. Additive Weighted Scoring: 
-                    // Phép cộng trọng số (60% Scanner, 40% Môi trường) để tránh cối xay thịt thập phân.
-                    (proposal.raw_score * 0.6) + (multiplier * 0.4)
+                    (proposal.raw_score * s_weight) + (multiplier * m_weight)
                 };
                 
                 // if debug_mode {

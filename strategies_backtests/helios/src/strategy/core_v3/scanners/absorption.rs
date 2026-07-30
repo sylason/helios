@@ -17,12 +17,27 @@ impl TacticalScanner for AbsorptionScanner {
         
         let vol_force = matrix.volume_force[i];
         let squeeze = matrix.squeeze_intensity[i];
+        let trend_mul = matrix.trend_multiplier[i];
+
+        // Nếu Trend đang quá mạnh, từ chối Absorption để nhường vị thế cho các Playbook Trend/Reversal
+        if trend_mul > abs_cfg.trend_filter_threshold {
+            return None;
+        }
         
-        if vol_force >= abs_cfg.vol_min_threshold && squeeze > 0.5 {
+        // [EXPERIMENTAL FEATURE] Soft Activation (Probabilistic Scoring)
+        let vol_thresh = abs_cfg.vol_min_threshold;
+        let vol_activation = if 1.0 > vol_thresh { ((vol_force - vol_thresh) / (1.0 - vol_thresh)).max(0.0).min(1.0) } else { 0.0 };
+        let squeeze_activation = squeeze.max(0.0).min(1.0);
+        let v_w = abs_cfg.vol_vs_squeeze_weight.max(0.0).min(1.0);
+        let sq_w = 1.0 - v_w;
+        
+        let raw_score = (vol_activation * v_w) + (squeeze_activation * sq_w);
+        
+        let min_activation = abs_cfg.min_activation_score;
+        
+        if raw_score >= min_activation && raw_score > 0.0 {
             let macd = sensors.macd_main[i];
             let macd_signal = sensors.macd_signal[i];
-            
-            let raw_score = 0.7 + ((vol_force - abs_cfg.vol_min_threshold) / 2.0);
             
             let signal_type = if macd > macd_signal {
                 SignalType::Long

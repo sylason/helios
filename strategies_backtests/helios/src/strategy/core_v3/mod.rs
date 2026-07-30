@@ -27,6 +27,9 @@ pub struct HeliosStrategyV3 {
     pub sensors: HeliosSensors,
     pub matrix: MarketMatrixV3,
     pub debug_mode: bool,
+    pub cooldown_bars_remaining: usize,
+    pub was_position_open: bool,
+    pub equity_at_entry: f64,
 }
 
 impl Strategy for HeliosStrategyV3 {
@@ -36,6 +39,9 @@ impl Strategy for HeliosStrategyV3 {
             sensors: HeliosSensors::default(),
             matrix: MarketMatrixV3::default(),
             debug_mode: std::env::var("HELIOS_DEBUG").is_ok(),
+            cooldown_bars_remaining: 0,
+            was_position_open: false,
+            equity_at_entry: 0.0,
         }
     }
 
@@ -124,6 +130,17 @@ impl Strategy for HeliosStrategyV3 {
             return;
         }
 
+        let pos = tick.position();
+        let is_pos_open = pos.is_open();
+
+        // Đánh giá khi vừa đóng vị thế: Nếu thua lỗ thì bật Cooldown Recovery Period
+        if self.was_position_open && !is_pos_open {
+            if tick.equity < self.equity_at_entry {
+                self.cooldown_bars_remaining = self.config.risk_management.stop_management.cooldown_duration_bars;
+            }
+        }
+        self.was_position_open = is_pos_open;
+
         // 1. Quản lý Rủi ro / Trailing Stop (Chạy mỗi nến)
         RiskManager::manage_trailing_stop(
             &self.config,
@@ -133,11 +150,15 @@ impl Strategy for HeliosStrategyV3 {
             self.debug_mode
         );
 
-        let pos = tick.position();
-        
         // 2. Chặn đánh nhồi lệnh: Nếu đã có lệnh mở thì không dò tín hiệu mới
-        if pos.is_open() {
+        if is_pos_open {
             return; 
+        }
+
+        // 3. Thời gian tạm dừng đếm ngược hồi phục sau lệnh thua (Cooldown Recovery Period)
+        if self.cooldown_bars_remaining > 0 {
+            self.cooldown_bars_remaining -= 1;
+            return;
         }
 
         let mut arbiter = HeliosArbiter::new(self.config.min_approval_confidence); 
@@ -163,15 +184,33 @@ impl Strategy for HeliosStrategyV3 {
                 
                 let is_long = signal == SignalType::Long;
                 
-                // SL sẽ lấy từ scanner nếu có, nếu không lấy default ATR
-                let initial_sl = decision.final_sl.unwrap_or_else(|| {
+                let tag_name = decision.winning_scanner.unwrap_or("");
+                let playbook_max_sl_pct = match tag_name {
+                    "TREND_PB" => self.config.tactical_sniper.pullback.max_initial_sl_pct,
+                    "MOMENTUM_IGN" => self.config.tactical_sniper.momentum.max_initial_sl_pct,
+                    "RANGE_OSC" => self.config.tactical_sniper.range.max_initial_sl_pct,
+                    "REVERSAL" => self.config.tactical_sniper.reversal.max_initial_sl_pct,
+                    "ANOMALY" | "ANOMALY_BREAKOUT" => self.config.tactical_sniper.anomaly.max_initial_sl_pct,
+                    "ABSORPTION" => self.config.tactical_sniper.absorption.max_initial_sl_pct,
+                    _ => 0.05,
+                };
+
+                let min_initial_sl_pct = self.config.risk_management.stop_management.min_initial_sl_pct;
+
+                let raw_sl = decision.final_sl.unwrap_or_else(|| {
                     RiskManager::get_initial_sl(
                         tick,
                         &self.sensors,
                         is_long,
-                        self.config.risk_management.stop_management.tsl_atr_normal
+                        self.config.risk_management.stop_management.tsl_atr_normal,
+                        playbook_max_sl_pct,
+                        min_initial_sl_pct,
                     )
                 });
+                
+                // Bắt buộc áp dụng Hard Cap SL & Sàn SL tối thiểu của Playbook cho MỌI lệnh mới mở
+                let price = tick.closes()[tick.i];
+                let initial_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, playbook_max_sl_pct, min_initial_sl_pct);
                 
                 let tag = decision.winning_scanner.map(|s| s.to_string());
 
@@ -179,6 +218,8 @@ impl Strategy for HeliosStrategyV3 {
                     sl_price: Some(initial_sl), 
                     tp_price: decision.final_tp 
                 });
+
+                self.equity_at_entry = tick.equity;
 
                 if is_long {
                     tick.buy(Some(size), None, None, policy, tag);

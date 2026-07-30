@@ -26,25 +26,45 @@ impl RiskManager {
         // 4. Trả về tỷ lệ phần trăm (size_fraction) so với Equity hiện tại
         let size_fraction = target_margin / equity;
         
-        // Giới hạn an toàn tối đa 95% vốn để trừ hao phí và trượt giá
-        size_fraction.min(0.95)
+        // Giới hạn an toàn tối đa 20% tổng tài sản (1/5 vốn) cho đơn lệnh Exclusive
+        size_fraction.min(0.20)
     }
 
-    /// Tính giá cắt lỗ khởi tạo
+    /// Hàm khống chế trần SL ban đầu theo % tối đa cho phép và sàn SL tối thiểu chống trượt giá
+    pub fn clamp_sl_price(price: f64, sl_price: f64, is_long: bool, max_initial_sl_pct: f64, min_initial_sl_pct: f64) -> f64 {
+        let cap_pct = if max_initial_sl_pct <= 0.0 { 0.02 } else { max_initial_sl_pct };
+        let min_pct = if min_initial_sl_pct <= 0.0 { 0.002 } else { min_initial_sl_pct };
+
+        if is_long {
+            let max_allowed_sl = price * (1.0 - min_pct);
+            let min_allowed_sl = price * (1.0 - cap_pct);
+            sl_price.min(max_allowed_sl).max(min_allowed_sl)
+        } else {
+            let min_allowed_sl = price * (1.0 + min_pct);
+            let max_allowed_sl = price * (1.0 + cap_pct);
+            sl_price.max(min_allowed_sl).min(max_allowed_sl)
+        }
+    }
+
+    /// Tính giá cắt lỗ khởi tạo với Hard Max Cap % để khống chế rủi ro tối đa
     pub fn get_initial_sl(
         tick: &TickContext,
         sensors: &HeliosSensors,
         is_long: bool,
-        multiplier: f64
+        multiplier: f64,
+        max_initial_sl_pct: f64,
+        min_initial_sl_pct: f64,
     ) -> f64 {
         let i = tick.i;
         let current_atr = sensors.atr_sl[i];
         let price = tick.closes()[i];
-        if is_long {
+        let raw_sl = if is_long {
             price - (current_atr * multiplier)
         } else {
             price + (current_atr * multiplier)
-        }
+        };
+
+        Self::clamp_sl_price(price, raw_sl, is_long, max_initial_sl_pct, min_initial_sl_pct)
     }
 
     /// Quản lý Trailing Stop cho tất cả các lệnh đang mở (Adaptive Loose Trailing)
@@ -66,34 +86,35 @@ impl RiskManager {
         let anomaly_threshold = config.tactical_sniper.anomaly.z_score_threshold;
         let current_anomaly = matrix.anomaly_multiplier[i]; 
         let is_volatile = current_anomaly > anomaly_threshold;
-        
-        let current_squeeze = matrix.squeeze_multiplier[i];
-        let is_squeeze = current_squeeze > 0.8; // High squeeze intensity
 
         for trade in tick.trades.iter().filter(|t| t.is_open()) {
             let entry_bar = trade.entry_bar;
-            let duration = i - entry_bar;
+            let _duration = i - entry_bar;
             
-            // 1. Base Multiplier by Playbook Tag
-            let base_multiplier = if let Some(ref tag_str) = trade.tag {
+            // 1. Base Multiplier & Playbook Max SL Pct
+            let (base_multiplier, playbook_max_sl_pct) = if let Some(ref tag_str) = trade.tag {
                 match tag_str.as_str() {
-                    "RANGE_OSC" => risk_cfg.tsl_atr_tight,
-                    "MOMENTUM_IGN" | "ANOMALY_BREAKOUT" => risk_cfg.tsl_atr_loose,
-                    "TREND_PB" | "ABSORPTION" => risk_cfg.tsl_atr_normal,
-                    _ => risk_cfg.tsl_atr_normal,
+                    "RANGE_OSC" => (risk_cfg.tsl_atr_tight, config.tactical_sniper.range.max_initial_sl_pct),
+                    "MOMENTUM_IGN" => (risk_cfg.tsl_atr_loose, config.tactical_sniper.momentum.max_initial_sl_pct),
+                    "ANOMALY" | "ANOMALY_BREAKOUT" => (risk_cfg.tsl_atr_loose, config.tactical_sniper.anomaly.max_initial_sl_pct),
+                    "TREND_PB" => (risk_cfg.tsl_atr_normal, config.tactical_sniper.pullback.max_initial_sl_pct),
+                    "REVERSAL" => (risk_cfg.tsl_atr_tight, config.tactical_sniper.reversal.max_initial_sl_pct),
+                    "ABSORPTION" => (risk_cfg.tsl_atr_normal, config.tactical_sniper.absorption.max_initial_sl_pct),
+                    _ => (risk_cfg.tsl_atr_normal, 0.05),
                 }
             } else {
-                risk_cfg.tsl_atr_normal
+                (risk_cfg.tsl_atr_normal, 0.05)
             };
 
-            // Tìm đỉnh lợi nhuận cao nhất (High Watermark) và vị trí nến tạo đỉnh
+            // 2. Tìm đỉnh lợi nhuận cao nhất (High Watermark) kể từ nến thứ 2 (tránh bẫy râu nến entry_bar)
             let highs = tick.highs();
             let lows = tick.lows();
             
+            let start_b = (entry_bar + 1).min(i);
             let (peak_val, peak_bar) = if trade.is_long() {
-                let mut max_high = highs[entry_bar];
-                let mut max_bar = entry_bar;
-                for j in entry_bar..=i {
+                let mut max_high = highs[start_b];
+                let mut max_bar = start_b;
+                for j in start_b..=i {
                     if highs[j] > max_high { 
                         max_high = highs[j]; 
                         max_bar = j;
@@ -101,9 +122,9 @@ impl RiskManager {
                 }
                 (max_high, max_bar)
             } else {
-                let mut min_low = lows[entry_bar];
-                let mut min_bar = entry_bar;
-                for j in entry_bar..=i {
+                let mut min_low = lows[start_b];
+                let mut min_bar = start_b;
+                for j in start_b..=i {
                     if lows[j] < min_low { 
                         min_low = lows[j]; 
                         min_bar = j;
@@ -112,28 +133,23 @@ impl RiskManager {
                 (min_low, min_bar)
             };
 
-            // Đếm số nến đi ngang kể từ đỉnh, TẠM DỪNG đếm nếu thị trường đang nén lò xo (Squeeze)
-            let mut effective_stagnant_bars = 0;
-            for j in peak_bar..=i {
-                if matrix.squeeze_multiplier[j] <= 0.8 {
-                    effective_stagnant_bars += 1;
-                }
-            }
+            // 3. Đếm số nến đi ngang kể từ đỉnh
+            let effective_stagnant_bars = if i >= peak_bar { i - peak_bar } else { 0 };
 
             // Tính số chu kỳ đếm ngược đã trôi qua
-            let time_countdown_bars = risk_cfg.time_countdown_bars;
+            let time_countdown_bars = risk_cfg.time_countdown_bars.max(1);
             let decay_cycles = effective_stagnant_bars / time_countdown_bars;
             
-            // Lệnh lỗ mà ngâm quá 1 chu kỳ thì cắt luôn
             let current_pnl = trade.pl(Some(tick.closes()[i]));
+
+            // Lệnh lỗ mà ngâm quá 1 chu kỳ decay thì cắt luôn
             if decay_cycles > 0 && current_pnl <= 0.0 {
                 tick.close(None);
                 continue;
             }
 
             // Tính toán hệ số nhân Multiplier hiện tại (Bao gồm Progressive Decay)
-            let mut current_multiplier = if is_volatile {
-                // Rule 1: Explosive market. Give it room to breathe (avoid whipsaw).
+            let mut current_multiplier = if is_volatile && current_pnl > 0.0 {
                 if base_multiplier < risk_cfg.tsl_atr_loose {
                     risk_cfg.tsl_atr_loose
                 } else {
@@ -143,22 +159,37 @@ impl RiskManager {
                 base_multiplier
             };
 
+            let is_trend_or_momentum = if let Some(ref tag_str) = trade.tag {
+                tag_str == "TREND_PB" || tag_str == "MOMENTUM_IGN" || tag_str == "ABSORPTION"
+            } else {
+                false
+            };
+
             // Áp dụng Progressive Decay: Lệnh ngâm càng lâu, siết SL càng chặt
             if decay_cycles > 0 {
-                // Nhân hệ số siết (ví dụ 0.8) cho mỗi chu kỳ trôi qua
                 let progressive_factor = risk_cfg.tighten_step_multiplier.powi(decay_cycles as i32);
                 current_multiplier *= progressive_factor;
                 
-                // Đảm bảo không bóp chặt quá mức tối thiểu
-                if current_multiplier < risk_cfg.tsl_atr_tight {
-                    current_multiplier = risk_cfg.tsl_atr_tight;
+                let mega_pnl_trigger = risk_cfg.mega_trend_pnl_trigger;
+                let max_mega_cycles = risk_cfg.mega_trend_max_cycles;
+                let min_tight = if is_trend_or_momentum && current_pnl > mega_pnl_trigger && decay_cycles <= max_mega_cycles {
+                    risk_cfg.tsl_atr_normal
+                } else {
+                    risk_cfg.tsl_atr_tight
+                };
+
+                if current_multiplier < min_tight {
+                    current_multiplier = min_tight;
                 }
             }
 
             let new_sl = if trade.is_long() {
                 peak_val - (current_atr * current_multiplier)
             } else {
-                peak_val + (current_atr * current_multiplier)
+                // Với Short: khống chế new_sl không bao giờ bị nổ vọt qua mức lỗ tối đa cho phép của Playbook
+                let calculated_sl = peak_val + (current_atr * current_multiplier);
+                let max_short_sl = trade.entry_price * (1.0 + playbook_max_sl_pct);
+                calculated_sl.min(max_short_sl)
             };
 
             let should_update = if trade.is_long() {
@@ -170,8 +201,7 @@ impl RiskManager {
             if should_update {
                 tick.update_trade_sl_tp(trade.id, Some(new_sl), trade.tp_price);
                 if debug_mode {
-                    // println!("[Bar {}] Trailing Stop Updated: Trade ID {} | New SL: {:.2} | Peak: {:.2} | Volatile: {}", 
-                    //     i, trade.id, new_sl, peak, is_volatile);
+                    // println!("[Bar {}] Trailing Stop Updated: Trade ID {} | New SL: {:.2}", i, trade.id, new_sl);
                 }
             }
         }
