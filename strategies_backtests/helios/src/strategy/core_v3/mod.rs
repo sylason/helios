@@ -17,19 +17,16 @@ use ferro_trade::broker::policies::RiskPolicy;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
-use crate::strategy::core_v3::arbiter::{HeliosArbiter, SignalType};
+use crate::strategy::core_v3::arbiter::{HeliosArbiter, SignalType, ScannerId};
 use crate::strategy::core_v3::risk::RiskManager;
 
-/// Chiến lược Helios V3 - Signal-First Architecture
+/// Chiến lược Helios V3.3 - Clean Quant Architecture
 #[derive(Clone, Debug)]
 pub struct HeliosStrategyV3 {
     pub config: HeliosConfigV3,
     pub sensors: HeliosSensors,
     pub matrix: MarketMatrixV3,
     pub debug_mode: bool,
-    pub cooldown_bars_remaining: usize,
-    pub was_position_open: bool,
-    pub equity_at_entry: f64,
 }
 
 impl Strategy for HeliosStrategyV3 {
@@ -39,9 +36,6 @@ impl Strategy for HeliosStrategyV3 {
             sensors: HeliosSensors::default(),
             matrix: MarketMatrixV3::default(),
             debug_mode: std::env::var("HELIOS_DEBUG").is_ok(),
-            cooldown_bars_remaining: 0,
-            was_position_open: false,
-            equity_at_entry: 0.0,
         }
     }
 
@@ -50,23 +44,25 @@ impl Strategy for HeliosStrategyV3 {
     }
 
     fn init(&mut self, ctx: &mut InitContext) {
-        let raw_closes = ctx.closes();
-        let raw_volumes = ctx.volumes();
         let ind = &self.config.indicators;
 
         if ind.natr.period == 0 || ind.mfi.period == 0 || ind.vol_ma.period == 0 || 
            ind.kama.short_period == 0 || ind.kama.long_period == 0 ||
-           ind.adx.period == 0 || ind.rsi.period == 0 || ind.bbands.period == 0 ||
-           ind.macd.fast == 0 || ind.macd.slow == 0 || ind.atr.period == 0 {
-            println!("!!! [SAFETY V3] CRITICAL PERIOD IS ZERO, ABORTING INIT !!!");
+           ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 {
+            println!("!!! [SAFETY V3.3] CRITICAL PERIOD IS ZERO, ABORTING INIT !!!");
             return;
         }
 
         let mut s = HeliosSensors::default();
         
+        s.closes = ctx.closes().clone();
+        s.highs = ctx.highs().clone();
+        s.lows = ctx.lows().clone();
+        s.volumes = ctx.volumes().clone();
+
         s.natr = ctx.natr(ind.natr.timeframe, "NATR", ind.natr.period);
         s.chaos_ratio = ctx.chaos_ratio(ind.natr.timeframe, "ChaosRatio", ind.natr.period);
-        s.vol_ma_series = ctx.volume_sma(ind.vol_ma.timeframe, "VOL_MA", ind.vol_ma.period);
+        s.vol_sma = ctx.volume_sma(ind.vol_ma.timeframe, "VOL_SMA", ind.vol_ma.period);
         s.efficiency_ratio = ctx.efficiency_ratio(ind.kama.timeframe, "ER", ind.kama.short_period);
 
         let (mfi, _tp, _mf, _pmf, _nmf) = ctx.mfi(ind.mfi.timeframe, "MFI", ind.mfi.period);
@@ -75,53 +71,74 @@ impl Strategy for HeliosStrategyV3 {
         let (adx, _pdi, _mdi, _adxr) = ctx.adx(ind.adx.timeframe, "ADX", ind.adx.period);
         s.adx = adx;
 
-        s.linreg_slope = ctx.linreg_slope(ind.linreg.timeframe, "Slope", ind.linreg.period);
-        s.linreg_angle = ctx.linreg_angle(ind.linreg.timeframe, "Angle", ind.linreg.period);
         s.kama_mid = ctx.kama(ind.kama.timeframe, "KAMA", ind.kama.short_period, 2, ind.kama.long_period);
+        
+        let (k_slope, k_slope_adj) = ctx.kama_slope(
+            ind.kama.timeframe, "KAMA_Slope", 
+            ind.kama.short_period, 2, ind.kama.long_period, 
+            ind.kama.short_period, ind.atr.period
+        );
+        s.kama_slope = k_slope;
+        s.kama_slope_adj = k_slope_adj;
 
-        let (bb_u, _bb_m, bb_l, _bb_w, _bb_wp, _bb_sw, _bb_sq) = ctx.bbands(ind.bbands.timeframe, "BB", ind.bbands.period, ind.bbands.nbdev);
+        let (bb_u, bb_m, bb_l, _bb_w, _bb_wp, _bb_sw, _bb_sq) = ctx.bbands(ind.bbands.timeframe, "BB", ind.bbands.period, ind.bbands.nbdev);
         s.bb_upper = bb_u;
+        s.bb_middle = bb_m;
         s.bb_lower = bb_l;
 
         let (kc_u, _kc_m, kc_l) = ctx.keltner(ind.keltner.timeframe, "KC", ind.keltner.period as u32, ind.keltner.multiplier, ind.keltner.ma_type.clone());
         s.kc_upper = kc_u;
         s.kc_lower = kc_l;
 
-        let (rsi, _rsi_gain, _rsi_loss) = ctx.rsi(ind.rsi.timeframe, "RSI", ind.rsi.period);
-        s.rsi = rsi;
+        // DEDICATED PER-PLAYBOOK RSI SENSORS
+        let (rsi_t, _, _) = ctx.rsi(ind.rsi_trend.timeframe, "RSI_Trend", ind.rsi_trend.period);
+        s.rsi_trend = rsi_t;
 
-        let (macd_m, macd_s, macd_h, _macd_ma, _macd_sa) = ctx.macd(ind.macd.timeframe, "MACD", ind.macd.fast, ind.macd.slow, ind.macd.signal);
-        s.macd_main = macd_m;
-        s.macd_signal = macd_s;
-        s.macd_hist = macd_h;
+        let (rsi_r, _, _) = ctx.rsi(ind.rsi_reversal.timeframe, "RSI_Rev", ind.rsi_reversal.period);
+        s.rsi_reversal = rsi_r;
 
-        let (st_k, st_d, st_cr, st_kz, st_dz) = ctx.stoch(
-            ind.stochastic.timeframe, "STOCH", 
-            ind.stochastic.period as u32, 
-            ind.stochastic.k_period as u32, ind.stochastic.k_ma_type.clone(),
-            ind.stochastic.d_period as u32, ind.stochastic.d_ma_type.clone(),
-            ind.stochastic.zone
+        let (rsi_m, _, _) = ctx.rsi(ind.rsi_momentum.timeframe, "RSI_Mom", ind.rsi_momentum.period);
+        s.rsi_momentum = rsi_m;
+
+        let (rsi_a, _, _) = ctx.rsi(ind.rsi_anomaly.timeframe, "RSI_Ano", ind.rsi_anomaly.period);
+        s.rsi_anomaly = rsi_a;
+
+        // DEDICATED PER-PLAYBOOK STOCHASTIC SENSORS
+        let (st_t_k, st_t_d, _, _, _) = ctx.stoch(
+            ind.stoch_trend.timeframe, "STOCH_Trend", 
+            ind.stoch_trend.period as u32, 
+            ind.stoch_trend.k_period as u32, ind.stoch_trend.k_ma_type.clone(),
+            ind.stoch_trend.d_period as u32, ind.stoch_trend.d_ma_type.clone(),
+            ind.stoch_trend.zone
         );
-        s.stoch_k = st_k;
-        s.stoch_d = st_d;
-        s.stoch_cross = st_cr;
-        s.stoch_k_zone = st_kz;
-        s.stoch_d_zone = st_dz;
+        s.stoch_trend_k = st_t_k;
+        s.stoch_trend_d = st_t_d;
 
+        let (st_r_k, st_r_d, _, _, _) = ctx.stoch(
+            ind.stoch_range.timeframe, "STOCH_Range", 
+            ind.stoch_range.period as u32, 
+            ind.stoch_range.k_period as u32, ind.stoch_range.k_ma_type.clone(),
+            ind.stoch_range.d_period as u32, ind.stoch_range.d_ma_type.clone(),
+            ind.stoch_range.zone
+        );
+        s.stoch_range_k = st_r_k;
+        s.stoch_range_d = st_r_d;
+
+        // ABSORPTION VWMA SENSOR
+        s.vwma = ctx.vwma(ind.vwma.timeframe, "VWMA", ind.vwma.period);
+        s.z_score = ctx.z_score(ind.kama.timeframe, "ZScore", ind.z_score_lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
 
-        let vol_ratio = match ind.vol_ma.timeframe {
-            ferro_trade::data::Timeframe::T5m => 5.0, 
-            ferro_trade::data::Timeframe::T15m => 15.0, 
-            ferro_trade::data::Timeframe::T1h => 60.0, 
-            ferro_trade::data::Timeframe::T4h => 240.0, 
-            _ => 1.0,
-        };
+        // MACD SENSOR (Vẫn được tính toán đầy đủ cho hệ thống Cảm biến)
+        if ind.macd.fast > 0 && ind.macd.slow > 0 && ind.macd.signal > 0 {
+            let (macd_m, macd_s, macd_h, _, _) = ctx.macd(ind.macd.timeframe, "MACD", ind.macd.fast, ind.macd.slow, ind.macd.signal);
+            s.macd_main = macd_m;
+            s.macd_signal = macd_s;
+            s.macd_hist = macd_h;
+        }
 
         self.sensors = s;
-        self.sensors.closes = raw_closes.clone();
-
-        self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors, &raw_volumes, vol_ratio);
+        self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
     }
 
     fn next(&mut self, tick: &TickContext) {
@@ -133,15 +150,7 @@ impl Strategy for HeliosStrategyV3 {
         let pos = tick.position();
         let is_pos_open = pos.is_open();
 
-        // Đánh giá khi vừa đóng vị thế: Nếu thua lỗ thì bật Cooldown Recovery Period
-        if self.was_position_open && !is_pos_open {
-            if tick.equity < self.equity_at_entry {
-                self.cooldown_bars_remaining = self.config.risk_management.stop_management.cooldown_duration_bars;
-            }
-        }
-        self.was_position_open = is_pos_open;
-
-        // 1. Quản lý Rủi ro / Trailing Stop (Chạy mỗi nến)
+        // 1. Quản lý Rủi ro / Trailing Stop (Chạy mỗi nến khi có vị thế)
         RiskManager::manage_trailing_stop(
             &self.config,
             &self.matrix,
@@ -150,18 +159,12 @@ impl Strategy for HeliosStrategyV3 {
             self.debug_mode
         );
 
-        // 2. Chặn đánh nhồi lệnh: Nếu đã có lệnh mở thì không dò tín hiệu mới
+        // 2. Strict Exclusive Order: Nếu đang có vị thế mở thì không mở lệnh mới
         if is_pos_open {
             return; 
         }
 
-        // 3. Thời gian tạm dừng đếm ngược hồi phục sau lệnh thua (Cooldown Recovery Period)
-        if self.cooldown_bars_remaining > 0 {
-            self.cooldown_bars_remaining -= 1;
-            return;
-        }
-
-        let mut arbiter = HeliosArbiter::new(self.config.min_approval_confidence); 
+        let mut arbiter = HeliosArbiter::new(); 
         
         arbiter.add_scanner(Box::new(scanners::trend_pb::TrendPBScanner));
         arbiter.add_scanner(Box::new(scanners::momentum_ignition::MomentumIgnitionScanner));
@@ -174,25 +177,25 @@ impl Strategy for HeliosStrategyV3 {
 
         if decision.is_approved {
             if let Some(signal) = decision.final_signal {
-                // Tính Size (% Initial Margin)
+                let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
+                
                 let size = RiskManager::calculate_size(
                     tick.equity, 
                     self.config.risk_management.risk_base.percent_per_trade, 
                     21.0, 
-                    20.0
+                    leverage
                 );
                 
                 let is_long = signal == SignalType::Long;
                 
-                let tag_name = decision.winning_scanner.unwrap_or("");
-                let playbook_max_sl_pct = match tag_name {
-                    "TREND_PB" => self.config.tactical_sniper.pullback.max_initial_sl_pct,
-                    "MOMENTUM_IGN" => self.config.tactical_sniper.momentum.max_initial_sl_pct,
-                    "RANGE_OSC" => self.config.tactical_sniper.range.max_initial_sl_pct,
-                    "REVERSAL" => self.config.tactical_sniper.reversal.max_initial_sl_pct,
-                    "ANOMALY" | "ANOMALY_BREAKOUT" => self.config.tactical_sniper.anomaly.max_initial_sl_pct,
-                    "ABSORPTION" => self.config.tactical_sniper.absorption.max_initial_sl_pct,
-                    _ => 0.05,
+                let playbook_max_sl_pct = match decision.winning_scanner {
+                    Some(ScannerId::TrendPullback) => self.config.tactical_sniper.pullback.max_initial_sl_pct,
+                    Some(ScannerId::MomentumIgnition) => self.config.tactical_sniper.momentum.max_initial_sl_pct,
+                    Some(ScannerId::RangeOscillator) => self.config.tactical_sniper.range.max_initial_sl_pct,
+                    Some(ScannerId::ClimaxReversal) => self.config.tactical_sniper.reversal.max_initial_sl_pct,
+                    Some(ScannerId::AnomalyFade) => self.config.tactical_sniper.anomaly.max_initial_sl_pct,
+                    Some(ScannerId::AbsorptionScout) => self.config.tactical_sniper.absorption.max_initial_sl_pct,
+                    None => 0.05,
                 };
 
                 let min_initial_sl_pct = self.config.risk_management.stop_management.min_initial_sl_pct;
@@ -205,21 +208,19 @@ impl Strategy for HeliosStrategyV3 {
                         self.config.risk_management.stop_management.tsl_atr_normal,
                         playbook_max_sl_pct,
                         min_initial_sl_pct,
+                        leverage,
                     )
                 });
                 
-                // Bắt buộc áp dụng Hard Cap SL & Sàn SL tối thiểu của Playbook cho MỌI lệnh mới mở
                 let price = tick.closes()[tick.i];
-                let initial_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, playbook_max_sl_pct, min_initial_sl_pct);
+                let initial_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, playbook_max_sl_pct, min_initial_sl_pct, leverage);
                 
-                let tag = decision.winning_scanner.map(|s| s.to_string());
+                let tag = decision.winning_scanner.map(|s| s.as_str().to_string());
 
-                let policy = Some(RiskPolicy::FixedPrice { 
-                    sl_price: Some(initial_sl), 
-                    tp_price: decision.final_tp 
+                let policy = Some(RiskPolicy::FixedPrice {
+                    sl_price: Some(initial_sl),
+                    tp_price: decision.final_tp,
                 });
-
-                self.equity_at_entry = tick.equity;
 
                 if is_long {
                     tick.buy(Some(size), None, None, policy, tag);

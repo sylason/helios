@@ -58,7 +58,7 @@ impl MarketMatrix {
             
             // 4. Volume Force Raw
             let v = volumes[i];
-            let ma = sensors.vol_ma_series[i];
+            let ma = sensors.vol_sma[i];
             vol_raw.push(if ma > 0.0 { (v * vol_ratio) / ma } else { 1.0 });
 
             // 5. Squeeze Raw (Overlap Logic)
@@ -73,7 +73,7 @@ impl MarketMatrix {
             }
 
             // 6. Volatility Adjusted Slope
-            let s = sensors.linreg_slope[i];
+            let s = sensors.kama_slope[i];
             let atr = sensors.atr_sl[i];
             adj_slope.push(if s.is_nan() || atr.is_nan() || atr < 1e-9 { f64::NAN } else { s / atr });
         }
@@ -92,7 +92,7 @@ impl MarketMatrix {
         let chaos = normalization::rolling_percentile(&natr_raw, config.matrix.squeeze_lookback);
         let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, config.matrix.squeeze_lookback);
         let bb_width_norm = normalization::rolling_percentile(&bb_width_raw, config.matrix.squeeze_lookback);
-        let momentum = normalization::rolling_percentile(&sensors.rsi, config.matrix.momentum_lookback);
+        let momentum = normalization::rolling_percentile(&sensors.rsi_trend, config.matrix.momentum_lookback);
         let liquidity = normalization::rolling_percentile(&sensors.mfi, config.matrix.momentum_lookback);
         let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, config.matrix.squeeze_lookback);
         let entropy = normalization::rolling_percentile(&sensors.efficiency_ratio, config.matrix.trend_lookback);

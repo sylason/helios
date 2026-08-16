@@ -1,23 +1,23 @@
 {
   "prospector": {
     "worker_config": {
-      "population_size": 400,
-      "n_generations": 15,
+      "population_size": 100,
+      "n_generations": 7,
       "cxpb": 0.7,
       "mutpb": 0.3,
-      "tournament_size": 10,
-      "min_trades": 10,
-      "n_top_candidates": 10,
+      "tournament_size": 7,
+      "min_trades": 7,
+      "n_top_candidates": 7,
       "max_stale_generations": 3
     },
     "scout_config": {
       "population_size": 25,
-      "n_generations": 10,
+      "n_generations": 3,
       "cxpb": 0.7,
       "mutpb": 0.2,
-      "tournament_size": 5,
-      "min_trades": 5,
-      "n_top_candidates": 5,
+      "tournament_size": 3,
+      "min_trades": 3,
+      "n_top_candidates": 3,
       "max_stale_generations": 3
     },
     "max_depth": 2,
@@ -36,7 +36,7 @@
     ],
     "scout_method": "lhs",
     "exploration_strategy": "random_restart",
-    "max_threads": 7,
+    "max_threads": 3,
     "max_random_restarts": 2
   },
   "cache_config": {

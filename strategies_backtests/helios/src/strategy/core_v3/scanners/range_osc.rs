@@ -3,14 +3,14 @@
 use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
-use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType};
+use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
 
 pub struct RangeOscScanner;
 
 impl TacticalScanner for RangeOscScanner {
-    fn id(&self) -> &'static str {
-        "RANGE_OSC"
+    fn id(&self) -> ScannerId {
+        ScannerId::RangeOscillator
     }
 
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
@@ -20,67 +20,59 @@ impl TacticalScanner for RangeOscScanner {
         let close = tick.closes()[i];
         let bb_u = sensors.bb_upper[i];
         let bb_l = sensors.bb_lower[i];
-        let bb_m = (bb_u + bb_l) / 2.0;
+        let bb_w_norm = matrix.bb_width_norm[i];
+        let vol_force = matrix.volume_force[i];
         
-        // 1. Kiểm tra bề rộng tối thiểu Bollinger Bands (tránh nén quá chặt sắp breakout)
-        let bb_width_pct = if bb_m > 0.0 { (bb_u - bb_l) / bb_m } else { 0.0 };
-        if bb_width_pct < range_cfg.min_width_pct {
+        if bb_u.is_nan() || bb_l.is_nan() || close <= 0.0 {
             return None;
         }
 
-        // 2. Kiểm tra Volume Force tối đa (Tránh giao dịch Range khi volume quá lớn báo hiệu Breakout)
-        if matrix.volume_force[i] > range_cfg.volume_max_threshold {
+        // 1. Kiểm tra bề rộng tối thiểu Bollinger Bands & Volume Max Threshold
+        if bb_w_norm < range_cfg.min_width_pct || vol_force > range_cfg.volume_max_threshold {
             return None;
         }
-        
-        let stoch_k = sensors.stoch_k[i];
-        let stoch_d = sensors.stoch_d[i];
-        
-        let mut raw_score = 0.0;
-        let mut signal_type = None;
-        let mut suggested_tp = None;
-        
-        let stoch_os = range_cfg.stoch_oversold * 100.0;
-        let stoch_ob = range_cfg.stoch_overbought * 100.0;
-        
-        // [EXPERIMENTAL FEATURE] Soft Activation
-        let bb_long_dist = if close > bb_l { close - bb_l } else { 0.0 };
-        let bb_short_dist = if close < bb_u { bb_u - close } else { 0.0 };
-        
-        let tol_pct = range_cfg.range_bb_tolerance_pct;
-        let bb_w = range_cfg.bb_vs_stoch_weight.max(0.0).min(1.0);
-        let st_w = 1.0 - bb_w;
 
-        let bb_range = bb_u - bb_l;
-        let bb_tol = if bb_range > 0.0 { bb_range * tol_pct } else { close * 0.005 };
-        
-        let bb_long_activation = if bb_tol > 0.0 { (1.0 - (bb_long_dist / bb_tol)).max(0.0).min(1.0) } else { 0.0 };
-        let bb_short_activation = if bb_tol > 0.0 { (1.0 - (bb_short_dist / bb_tol)).max(0.0).min(1.0) } else { 0.0 };
-        
-        let stoch_long_activation = if stoch_os > 0.0 { ((stoch_os - stoch_k) / stoch_os).max(0.0).min(1.0) } else { 0.0 };
-        let stoch_short_activation = if 100.0 - stoch_ob > 0.0 { ((stoch_k - stoch_ob) / (100.0 - stoch_ob)).max(0.0).min(1.0) } else { 0.0 };
-        
-        let long_score = (bb_long_activation * bb_w) + (stoch_long_activation * st_w);
-        let short_score = (bb_short_activation * bb_w) + (stoch_short_activation * st_w);
-        
-        // Cần đạt tối thiểu điểm kích hoạt, chéo Stoch_K cắt Stoch_D
-        if long_score > 0.0 && stoch_k > stoch_d {
-            raw_score = long_score;
-            signal_type = Some(SignalType::Long);
-            suggested_tp = Some(bb_u);
-        } else if short_score > 0.0 && stoch_k < stoch_d {
-            raw_score = short_score;
-            signal_type = Some(SignalType::Short);
-            suggested_tp = Some(bb_l);
+        let stoch_k = sensors.stoch_range_k[i];
+        let stoch_d = sensors.stoch_range_d[i];
+
+        if stoch_k.is_nan() || stoch_d.is_nan() {
+            return None;
         }
-        
-        if let Some(sig) = signal_type {
+
+        let bb_prox = (range_cfg.bb_proximity_pct * close).max(1e-5);
+        let two_sigma_sq = 2.0 * bb_prox * bb_prox;
+
+        // 2. Chấm điểm Mềm Mẫu Hình LONG (Gaussian Price + Sigmoid Stoch + Hook)
+        let dist_l = (close - bb_l).abs();
+        let f_price_long = (- (dist_l * dist_l) / two_sigma_sq).exp();
+        let f_stoch_long = 1.0 / (1.0 + (-0.1 * (range_cfg.stoch_oversold - stoch_k)).exp());
+        let f_hook_long = 1.0 / (1.0 + (-0.5 * (stoch_k - stoch_d)).exp());
+        let score_long = 0.50 * f_price_long + 0.30 * f_stoch_long + 0.20 * f_hook_long;
+
+        // 3. Chấm điểm Mềm Mẫu Hình SHORT (Gaussian Price + Sigmoid Stoch + Hook)
+        let dist_u = (close - bb_u).abs();
+        let f_price_short = (- (dist_u * dist_u) / two_sigma_sq).exp();
+        let f_stoch_short = 1.0 / (1.0 + (-0.1 * (stoch_k - range_cfg.stoch_overbought)).exp());
+        let f_hook_short = 1.0 / (1.0 + (-0.5 * (stoch_d - stoch_k)).exp());
+        let score_short = 0.50 * f_price_short + 0.30 * f_stoch_short + 0.20 * f_hook_short;
+
+        let min_score = range_cfg.min_activation_score;
+
+        if score_long >= min_score && score_long > score_short {
             Some(Proposal {
-                signal_type: sig,
-                raw_score: raw_score.min(1.0),
+                signal_type: SignalType::Long,
+                raw_score: score_long.min(1.0),
                 scanner_id: self.id(),
                 suggested_sl: None,
-                suggested_tp,
+                suggested_tp: Some(bb_u),
+            })
+        } else if score_short >= min_score && score_short > score_long {
+            Some(Proposal {
+                signal_type: SignalType::Short,
+                raw_score: score_short.min(1.0),
+                scanner_id: self.id(),
+                suggested_sl: None,
+                suggested_tp: Some(bb_l),
             })
         } else {
             None

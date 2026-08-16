@@ -28,6 +28,10 @@ pub struct HeliosStrategy {
     pub memory: TacticalMemory,
     pub sensors: HeliosSensors,
     pub matrix: MarketMatrix,
+    pub debug_mode: bool,
+    pub cooldown_bars_remaining: usize,
+    pub was_position_open: bool,
+    pub equity_at_entry: f64,
 }
 
 impl HeliosStrategy {
@@ -69,24 +73,19 @@ impl HeliosStrategy {
         let s = &self.sensors;
         trace_v("ENV_CHAOS", "NATR", &s.natr);
         trace_v("ENV_CHAOS", "ChaosRatio", &s.chaos_ratio);
-        trace_v("ENV_CHAOS", "VOL_MA", &s.vol_ma_series);
+        trace_v("ENV_CHAOS", "VOL_SMA", &s.vol_sma);
         trace_v("ENV_CHAOS", "ER", &s.efficiency_ratio);
         trace_v("ENV_CHAOS", "MFI", &s.mfi);
         trace_v("TREND_REGIME", "ADX", &s.adx);
-        trace_v("TREND_REGIME", "LR_Slope", &s.linreg_slope);
-        trace_v("TREND_REGIME", "LR_Angle", &s.linreg_angle);
+        trace_v("TREND_REGIME", "KAMA_Slope", &s.kama_slope);
         trace_v("TREND_REGIME", "KAMA_Mid", &s.kama_mid);
         trace_v("VOLATILITY", "BB_Upper", &s.bb_upper);
         trace_v("VOLATILITY", "BB_Lower", &s.bb_lower);
         trace_v("VOLATILITY", "KC_Upper", &s.kc_upper);
         trace_v("VOLATILITY", "KC_Lower", &s.kc_lower);
-        trace_v("MOMENTUM", "RSI", &s.rsi);
-        trace_v("MOMENTUM", "MACD_Main", &s.macd_main);
-        trace_v("MOMENTUM", "MACD_Signal", &s.macd_signal);
-        trace_v("MOMENTUM", "MACD_Hist", &s.macd_hist);
-        trace_v("SNIPER", "Stoch_K", &s.stoch_k);
-        trace_v("SNIPER", "Stoch_D", &s.stoch_d);
-        trace_v("SNIPER", "Stoch_Cross", &s.stoch_cross);
+        trace_v("MOMENTUM", "RSI_Trend", &s.rsi_trend);
+        trace_v("SNIPER", "Stoch_Trend_K", &s.stoch_trend_k);
+        trace_v("SNIPER", "Stoch_Trend_D", &s.stoch_trend_d);
         trace_v("RISK", "ATR_SL", &s.atr_sl);
 
         // --- 2. VERIFICATIONS ---
@@ -159,7 +158,7 @@ impl HeliosStrategy {
         self.print_indicator_samples("NATR", &self.sensors.natr, 0, 10);
         self.print_indicator_samples("KAMA_Mid", &self.sensors.kama_mid, 0, 10);
         self.print_indicator_samples("ADX", &self.sensors.adx, 0, 10);
-        self.print_indicator_samples("RSI", &self.sensors.rsi, 0, 10);
+        self.print_indicator_samples("RSI_Trend", &self.sensors.rsi_trend, 0, 10);
         self.print_indicator_samples("ATR_SL", &self.sensors.atr_sl, 0, 10);
         println!("------------------------------------\n");
     }
@@ -181,6 +180,10 @@ impl Strategy for HeliosStrategy {
             memory: TacticalMemory::default(),
             sensors: HeliosSensors::default(),
             matrix: MarketMatrix::default(),
+            debug_mode: std::env::var("HELIOS_DEBUG").is_ok(),
+            cooldown_bars_remaining: 0,
+            was_position_open: false,
+            equity_at_entry: 0.0,
         }
     }
 
@@ -195,9 +198,6 @@ impl Strategy for HeliosStrategy {
 
     /// [ELITE] Khởi tạo hệ thống Giác quan (Sensors) & Nhận thức (Matrix).
     fn init(&mut self, ctx: &mut InitContext) {
-        // [DEBUG] In cấu hình ngay khi bắt đầu Init
-        // self.print_full_config();
-        
         // [CAPTURE DATA SẠCH]: Lấy con trỏ (Arc) dữ liệu 1m ngay lập tức, KHÔNG CLONE.
         let raw_closes = ctx.closes();
         let raw_volumes = ctx.volumes();
@@ -208,12 +208,8 @@ impl Strategy for HeliosStrategy {
         // [SAFETY] Ngăn chặn panic nếu bất kỳ period nào bị bind lỗi về 0
         if ind.natr.period == 0 || ind.mfi.period == 0 || ind.vol_ma.period == 0 || 
            ind.kama.short_period == 0 || ind.kama.long_period == 0 ||
-           ind.adx.period == 0 || ind.rsi.period == 0 || ind.bbands.period == 0 ||
-           ind.macd.fast == 0 || ind.macd.slow == 0 || ind.atr.period == 0 {
+           ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 {
             println!("!!! [SAFETY] CRITICAL PERIOD IS ZERO, ABORTING INIT !!!");
-            println!("   Check: NATR={}, MFI={}, VOL={}, KAMA_S={}, KAMA_L={}, ADX={}, RSI={}, BB={}, MACD_F={}, MACD_S={}",
-                ind.natr.period, ind.mfi.period, ind.vol_ma.period, ind.kama.short_period, ind.kama.long_period,
-                ind.adx.period, ind.rsi.period, ind.bbands.period, ind.macd.fast, ind.macd.slow);
             return;
         }
 
@@ -222,7 +218,7 @@ impl Strategy for HeliosStrategy {
         
         s.natr = ctx.natr(ind.natr.timeframe, "NATR", ind.natr.period);
         s.chaos_ratio = ctx.chaos_ratio(ind.natr.timeframe, "ChaosRatio", ind.natr.period);
-        s.vol_ma_series = ctx.volume_sma(ind.vol_ma.timeframe, "VOL_MA", ind.vol_ma.period);
+        s.vol_sma = ctx.volume_sma(ind.vol_ma.timeframe, "VOL_SMA", ind.vol_ma.period);
         s.efficiency_ratio = ctx.efficiency_ratio(ind.kama.timeframe, "ER", ind.kama.short_period);
 
         let (mfi, _tp, _mf, _pmf, _nmf) = ctx.mfi(ind.mfi.timeframe, "MFI", ind.mfi.period);
@@ -231,38 +227,36 @@ impl Strategy for HeliosStrategy {
         let (adx, _pdi, _mdi, _adxr) = ctx.adx(ind.adx.timeframe, "ADX", ind.adx.period);
         s.adx = adx;
 
-        s.linreg_slope = ctx.linreg_slope(ind.linreg.timeframe, "Slope", ind.linreg.period);
-        s.linreg_angle = ctx.linreg_angle(ind.linreg.timeframe, "Angle", ind.linreg.period);
         s.kama_mid = ctx.kama(ind.kama.timeframe, "KAMA", ind.kama.short_period, 2, ind.kama.long_period);
+        let (k_slope, k_slope_adj) = ctx.kama_slope(
+            ind.kama.timeframe, "KAMA_Slope", 
+            ind.kama.short_period, 2, ind.kama.long_period, 
+            ind.kama.short_period, ind.atr.period
+        );
+        s.kama_slope = k_slope;
+        s.kama_slope_adj = k_slope_adj;
 
-        let (bb_u, _bb_m, bb_l, _bb_w, _bb_wp, _bb_sw, _bb_sq) = ctx.bbands(ind.bbands.timeframe, "BB", ind.bbands.period, ind.bbands.nbdev);
+        let (bb_u, bb_m, bb_l, _bb_w, _bb_wp, _bb_sw, _bb_sq) = ctx.bbands(ind.bbands.timeframe, "BB", ind.bbands.period, ind.bbands.nbdev);
         s.bb_upper = bb_u;
+        s.bb_middle = bb_m;
         s.bb_lower = bb_l;
 
         let (kc_u, _kc_m, kc_l) = ctx.keltner(ind.keltner.timeframe, "KC", ind.keltner.period as u32, ind.keltner.multiplier, ind.keltner.ma_type.clone());
         s.kc_upper = kc_u;
         s.kc_lower = kc_l;
 
-        let (rsi, _rsi_gain, _rsi_loss) = ctx.rsi(ind.rsi.timeframe, "RSI", ind.rsi.period);
-        s.rsi = rsi;
+        let (rsi_t, _, _) = ctx.rsi(ind.rsi.timeframe, "RSI_Trend", ind.rsi.period);
+        s.rsi_trend = rsi_t;
 
-        let (macd_m, macd_s, macd_h, _macd_ma, _macd_sa) = ctx.macd(ind.macd.timeframe, "MACD", ind.macd.fast, ind.macd.slow, ind.macd.signal);
-        s.macd_main = macd_m;
-        s.macd_signal = macd_s;
-        s.macd_hist = macd_h;
-
-        let (st_k, st_d, st_cr, st_kz, st_dz) = ctx.stoch(
-            ind.stochastic.timeframe, "STOCH", 
+        let (st_t_k, st_t_d, _, _, _) = ctx.stoch(
+            ind.stochastic.timeframe, "STOCH_Trend", 
             ind.stochastic.period as u32, 
             ind.stochastic.k_period as u32, ind.stochastic.k_ma_type.clone(),
             ind.stochastic.d_period as u32, ind.stochastic.d_ma_type.clone(),
             ind.stochastic.zone
         );
-        s.stoch_k = st_k;
-        s.stoch_d = st_d;
-        s.stoch_cross = st_cr;
-        s.stoch_k_zone = st_kz;
-        s.stoch_d_zone = st_dz;
+        s.stoch_trend_k = st_t_k;
+        s.stoch_trend_d = st_t_d;
 
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
 

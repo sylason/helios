@@ -5,16 +5,15 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::utils::normalization;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 
-/// [LEVEL 2: MARKET MATRIX V3]
+/// [LEVEL 2: MARKET MATRIX V3.3]
 /// Chứa các dữ liệu đã được chuẩn hóa (Normalized 0.x hoặc -1.0 to 1.0).
-/// Bổ sung thêm các Regime Multipliers phục vụ cho Arbiter.
+/// Bổ sung thêm các Regime Multipliers chuẩn Quant phục vụ cho Arbiter.
 #[derive(Clone, Debug, Default)]
 pub struct MarketMatrixV3 {
     // --- 🧭 Hướng & Sức mạnh (Directional) ---
-    pub trend_dir: Arc<Vec<f64>>,      // -1.0 (Bearish) to 1.0 (Bullish)
-    pub trend_strength: Arc<Vec<f64>>, // 0.0 to 1.0 (ADX Scaled)
-    pub trend_angle: Arc<Vec<f64>>,    // -90.0 to 90.0 (Degrees)
-    pub trend_angle_adj: Arc<Vec<f64>>, // Góc hiệu chỉnh theo ATR
+    pub trend_dir: Arc<Vec<f64>>,         // -1.0 (Bearish) to 1.0 (Bullish)
+    pub trend_strength: Arc<Vec<f64>>,    // 0.0 to 1.0 (ADX Tanh Scaled)
+    pub kama_slope_adj: Arc<Vec<f64>>,    // KAMA Slope điều chỉnh theo ER
     
     // --- 🌪️ Năng lượng & Biến động (Chaos) ---
     pub squeeze_intensity: Arc<Vec<f64>>, // 0.0 to 1.0 (BB/KC Compression)
@@ -22,44 +21,41 @@ pub struct MarketMatrixV3 {
     pub chaos_ratio: Arc<Vec<f64>>,       // NATR / SMA(NATR)
     pub entropy: Arc<Vec<f64>>,           // 0.0 to 1.0 (Efficiency Ratio)
     pub liquidity: Arc<Vec<f64>>,         // 0.0 to 1.0 (MFI Scaled)
-    pub volume_force: Arc<Vec<f64>>,      // 0.0 to 1.0 (Percentile)
+    pub volume_force: Arc<Vec<f64>>,      // 0.0 to 1.0 (Quant Volume Force: Z-Score + MFI)
     pub bb_width_norm: Arc<Vec<f64>>,     // (Upper - Lower) / Middle
     
     // --- 🌊 Động lượng (Velocity) ---
-    pub momentum: Arc<Vec<f64>>, // 0.0 to 1.0 (RSI Scaled)
-    pub price_z_score: Arc<Vec<f64>>, // Z-Score thực của giá
+    pub price_z_score: Arc<Vec<f64>>,     // Z-Score thực của giá (Tanh Scaled)
     
-    // --- ⚖️ REGIME MULTIPLIERS (Dành riêng cho V3 Arbiter) ---
-    pub trend_multiplier: Arc<Vec<f64>>,   // Sức mạnh Trend
+    // --- ⚖️ REGIME MULTIPLIERS (Dành riêng cho V3.3 Arbiter) ---
+    pub trend_multiplier: Arc<Vec<f64>>,   // Sức mạnh Trend (ADX Tanh)
     pub squeeze_multiplier: Arc<Vec<f64>>, // Sức nén Volatility
-    pub range_multiplier: Arc<Vec<f64>>,   // Phần bù của Trend (Sideway)
-    pub anomaly_multiplier: Arc<Vec<f64>>, // Sự kết hợp của Chaos và Z-Score (Climax)
-    pub reversal_multiplier: Arc<Vec<f64>>, // Kiệt sức: Phân kỳ, Z-Score cao
-    pub absorption_multiplier: Arc<Vec<f64>>, // Gom hàng: Squeeze + Volume cao
-    pub volatility_expansion_multiplier: Arc<Vec<f64>>, // Bung nén: Dành riêng cho Momentum Ignition
+    pub range_multiplier: Arc<Vec<f64>>,   // Phần bù của Trend (1.0 - trend_multiplier)
+    pub anomaly_multiplier: Arc<Vec<f64>>, // Chaos Ratio + Z-Score
+    pub reversal_multiplier: Arc<Vec<f64>>, // Kiệt sức: Z-Score cao + Trend yếu
+    pub absorption_multiplier: Arc<Vec<f64>>, // Squeeze + Volume Force
+    pub volatility_expansion_multiplier: Arc<Vec<f64>>, // Chaos Ratio + Volume Force
 }
 
 impl MarketMatrixV3 {
-    pub fn from_sensors(config: &HeliosConfigV3, sensors: &HeliosSensors, volumes: &[f64], vol_ratio: f64) -> Self {
-        let len = volumes.len();
+    pub fn from_sensors(config: &HeliosConfigV3, sensors: &HeliosSensors) -> Self {
+        let len = sensors.closes.len();
+        if len == 0 {
+            return Self::default();
+        }
         
         let mut chaos = Vec::with_capacity(len);
         let mut bb_width_norm = Vec::with_capacity(len);
-        let mut vol_raw = Vec::with_capacity(len);
         let mut sqz_raw = Vec::with_capacity(len);
-        let mut adj_slope = Vec::with_capacity(len);
+        let mut adx_centered = Vec::with_capacity(len);
 
         for i in 0..len {
             chaos.push(sensors.natr[i] / 100.0);
             
             let bu = sensors.bb_upper[i];
             let bl = sensors.bb_lower[i];
-            let bm = (bu + bl) / 2.0;
+            let bm = sensors.bb_middle[i];
             bb_width_norm.push(if bm > 0.0 { (bu - bl) / bm } else { 0.0 });
-            
-            let v = volumes[i];
-            let ma = sensors.vol_ma_series[i];
-            vol_raw.push(if ma > 0.0 { (v * vol_ratio) / ma } else { 1.0 });
 
             let ku = sensors.kc_upper[i];
             let kl = sensors.kc_lower[i];
@@ -71,26 +67,35 @@ impl MarketMatrixV3 {
                 sqz_raw.push((overlap / kc_w).max(0.0).min(1.0));
             }
 
-            let s = sensors.linreg_slope[i];
-            let atr = sensors.atr_sl[i];
-            adj_slope.push(if s.is_nan() || atr.is_nan() || atr < 1e-9 { f64::NAN } else { s / atr });
+            // ADX Centered tại ngưỡng 20.0 để dùng Tanh Scale
+            let adx_v = sensors.adx[i];
+            adx_centered.push(if adx_v.is_nan() { 0.0 } else { adx_v - 20.0 });
         }
 
-        let adj_slope_pct = normalization::rolling_percentile(&adj_slope, config.matrix.trend_lookback);
-        let trend_dir: Vec<f64> = adj_slope_pct.iter().map(|&v| if v.is_nan() { f64::NAN } else { 2.0 * v - 1.0 }).collect();
+        // TÍNH TOÁN CÁC DÒNG CHUẨN HÓA V3.3
+        let trend_strength = normalization::tanh_scale(&adx_centered, config.matrix.z_score_sensitivity);
+        
+        let trend_dir: Vec<f64> = sensors.kama_slope_adj.iter().map(|&s| {
+            if s.is_nan() { 0.0 } else { (s / 0.50).max(-1.0).min(1.0) }
+        }).collect();
 
-        let trend_strength = normalization::rolling_percentile(&sensors.adx, config.matrix.trend_lookback);
         let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, config.matrix.squeeze_lookback);
-        let momentum = normalization::rolling_percentile(&sensors.rsi, config.matrix.momentum_lookback);
         let liquidity = normalization::rolling_percentile(&sensors.mfi, config.matrix.momentum_lookback);
         let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, config.matrix.squeeze_lookback);
         let entropy = normalization::rolling_percentile(&sensors.efficiency_ratio, config.matrix.trend_lookback);
-        let volume_force = normalization::rolling_percentile(&vol_raw, config.matrix.volume_lookback);
 
-        let z_raw = normalization::calculate_z_score_series(&sensors.closes, config.indicators.z_score_lookback);
-        let price_z_score = normalization::tanh_scale(&z_raw, config.matrix.z_score_sensitivity);
+        let price_z_score = normalization::tanh_scale(&sensors.z_score, config.matrix.z_score_sensitivity);
 
-        // TÍNH TOÁN REGIME MULTIPLIERS (V3 MỚI)
+        // VOLUME FORCE CHUẨN QUANT: 0.5 * Tanh(Vol_Z_Score) + 0.5 * (MFI / 100)
+        let vol_z_scale = normalization::tanh_scale(&sensors.z_score, 0.5);
+        let mut volume_force = Vec::with_capacity(len);
+        for i in 0..len {
+            let mfi_norm = (sensors.mfi[i] / 100.0).max(0.0).min(1.0);
+            let vf = 0.5 * (vol_z_scale[i].abs()) + 0.5 * mfi_norm;
+            volume_force.push(vf.max(0.0).min(1.0));
+        }
+
+        // TÍNH TOÁN REGIME MULTIPLIERS (V3.3 SẠCH - KHÔNG TRỌNG SỐ THỪA)
         let mut trend_multiplier = Vec::with_capacity(len);
         let mut squeeze_multiplier = Vec::with_capacity(len);
         let mut range_multiplier = Vec::with_capacity(len);
@@ -100,51 +105,33 @@ impl MarketMatrixV3 {
         let mut volatility_expansion_multiplier = Vec::with_capacity(len);
 
         for i in 0..len {
-            // Trend mạnh lên khi ADX cao và Trend Angle ổn định
             let t_mul = trend_strength[i].max(0.0).min(1.0);
             trend_multiplier.push(t_mul);
-
-            // Range mạnh lên khi Trend yếu
             range_multiplier.push(1.0 - t_mul);
 
-            // Squeeze phụ thuộc trực tiếp vào Squeeze Intensity
             squeeze_multiplier.push(squeeze_intensity[i]);
 
-            let z_abs = price_z_score[i].abs(); // 0.0 to 1.0
-            let momentum_extremity = (momentum[i] - 0.5).abs() * 2.0; // 0.0 to 1.0
+            let z_abs = price_z_score[i].abs();
+            let ano_score = 0.5 * z_abs + 0.5 * chaos_ratio[i];
+            anomaly_multiplier.push(ano_score.max(0.0).min(1.0));
 
-            // [EXPERIMENTAL FEATURE] Tái cấu trúc Matrix Multiplier thành Additive Scoring
-            // Loại bỏ hoàn toàn phép nhân giữa các phân số để tránh làm suy giảm tín hiệu thị trường.
-            // Nếu kết quả không tốt, ta sẽ revert lại code.
-            
-            let mw = &config.matrix_weights;
-            
-            let ano_z_w = mw.anomaly_z_weight.max(0.0).min(1.0);
-            let anomaly_score = (z_abs * ano_z_w) + (chaos_ratio[i] * (1.0 - ano_z_w));
-            anomaly_multiplier.push(anomaly_score.max(0.0).min(1.0));
-
-            let rev_m_w = mw.reversal_momentum_weight.max(0.0).min(1.0);
-            let rev_trend_factor = if t_mul > 0.80 { 0.50 } else { 1.0 - t_mul };
-            let rev_score = rev_trend_factor * ((momentum_extremity * rev_m_w) + (z_abs * (1.0 - rev_m_w)));
+            let rev_trend_factor = if t_mul > 0.80 { 0.20 } else { 1.0 - t_mul };
+            let rev_score = rev_trend_factor * z_abs;
             reversal_multiplier.push(rev_score.max(0.0).min(1.0));
 
-            let abs_sqz_w = mw.absorption_squeeze_weight.max(0.0).min(1.0);
-            let abs_score = (squeeze_intensity[i] * abs_sqz_w) + (volume_force[i] * (1.0 - abs_sqz_w));
+            let abs_score = 0.5 * squeeze_intensity[i] + 0.5 * volume_force[i];
             absorption_multiplier.push(abs_score.max(0.0).min(1.0));
 
-            let vol_chaos_w = mw.vol_exp_chaos_weight.max(0.0).min(1.0);
-            let vol_exp_score = (chaos_ratio[i] * vol_chaos_w) + (volume_force[i] * (1.0 - vol_chaos_w));
+            let vol_exp_score = 0.5 * chaos_ratio[i] + 0.5 * volume_force[i];
             volatility_expansion_multiplier.push(vol_exp_score.max(0.0).min(1.0));
         }
 
         Self {
             trend_dir: Arc::new(trend_dir),
             trend_strength: Arc::new(trend_strength),
-            trend_angle: sensors.linreg_angle.clone(),
-            trend_angle_adj: Arc::new(adj_slope_pct),
+            kama_slope_adj: sensors.kama_slope_adj.clone(),
             squeeze_intensity: Arc::new(squeeze_intensity),
             bb_width_norm: Arc::new(bb_width_norm),
-            momentum: Arc::new(momentum),
             liquidity: Arc::new(liquidity),
             chaos: Arc::new(chaos),
             chaos_ratio: Arc::new(chaos_ratio), 
