@@ -137,8 +137,15 @@ impl RiskManager {
             
             let current_pnl = trade.pl(Some(tick.closes()[i]));
 
-            // STAGNANT CAPITAL RELEASE: Lệnh lỗ mà ngâm quá 1 chu kỳ decay thì đóng luôn giải phóng vốn
+            // STAGNANT CAPITAL RELEASE MỞ RỘNG:
+            // 1. Lệnh lỗ ngâm quá 1 chu kỳ decay -> Đóng ngay cắt lỗ nhỏ
             if decay_cycles > 0 && current_pnl <= 0.0 {
+                tick.close(None);
+                continue;
+            }
+
+            // 2. Lệnh ngâm quá 4 chu kỳ decay (Zombie Trade) -> Đóng chủ động giải phóng vốn ký quỹ
+            if decay_cycles >= 4 {
                 tick.close(None);
                 continue;
             }
