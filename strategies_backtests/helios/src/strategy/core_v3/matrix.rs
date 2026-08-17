@@ -35,6 +35,11 @@ pub struct MarketMatrixV3 {
     pub reversal_multiplier: Arc<Vec<f64>>, // Kiệt sức: Z-Score cao + Trend yếu
     pub absorption_multiplier: Arc<Vec<f64>>, // Squeeze + Volume Force
     pub volatility_expansion_multiplier: Arc<Vec<f64>>, // Chaos Ratio + Volume Force
+
+    // --- 📐 VECTOR BỐI CẢNH CONTINUOUS SIMPLEX (Chuẩn Hóa Tổng = 1.00) ---
+    pub w_trend_norm: Arc<Vec<f64>>,    // Trọng số Xu Hướng [0.0, 1.0]
+    pub w_range_norm: Arc<Vec<f64>>,    // Trọng số Đi Ngang Sideway [0.0, 1.0]
+    pub w_volatile_norm: Arc<Vec<f64>>, // Trọng số Bão Biến Động [0.0, 1.0]
 }
 
 impl MarketMatrixV3 {
@@ -104,6 +109,11 @@ impl MarketMatrixV3 {
         let mut absorption_multiplier = Vec::with_capacity(len);
         let mut volatility_expansion_multiplier = Vec::with_capacity(len);
 
+        // TÍNH TOÁN VECTOR BỐI CẢNH CONTINUOUS SIMPLEX (Chuẩn hóa Tổng = 1.00)
+        let mut w_trend_norm = Vec::with_capacity(len);
+        let mut w_range_norm = Vec::with_capacity(len);
+        let mut w_volatile_norm = Vec::with_capacity(len);
+
         for i in 0..len {
             let t_mul = trend_strength[i].max(0.0).min(1.0);
             trend_multiplier.push(t_mul);
@@ -124,6 +134,20 @@ impl MarketMatrixV3 {
 
             let vol_exp_score = 0.5 * chaos_ratio[i] + 0.5 * volume_force[i];
             volatility_expansion_multiplier.push(vol_exp_score.max(0.0).min(1.0));
+
+            // SIMPLEX NORMALIZATION: w_trend + w_range + w_volatile ≡ 1.00
+            let slope_val = sensors.kama_slope_adj[i];
+            let slope_factor = if slope_val.is_nan() { 0.5 } else { (1.0 + (slope_val.abs() / 0.10).tanh()) / 2.0 };
+            let w_trend_raw = t_mul * slope_factor;
+
+            let w_volatile_raw = chaos_ratio[i] * volume_force[i];
+            let max_trend_vol = w_trend_raw.max(w_volatile_raw);
+            let w_range_raw = (1.0 - max_trend_vol).max(0.05).min(1.0);
+
+            let sum = (w_trend_raw + w_range_raw + w_volatile_raw).max(1e-5);
+            w_trend_norm.push((w_trend_raw / sum).max(0.0).min(1.0));
+            w_range_norm.push((w_range_raw / sum).max(0.0).min(1.0));
+            w_volatile_norm.push((w_volatile_raw / sum).max(0.0).min(1.0));
         }
 
         Self {
@@ -145,6 +169,9 @@ impl MarketMatrixV3 {
             reversal_multiplier: Arc::new(reversal_multiplier),
             absorption_multiplier: Arc::new(absorption_multiplier),
             volatility_expansion_multiplier: Arc::new(volatility_expansion_multiplier),
+            w_trend_norm: Arc::new(w_trend_norm),
+            w_range_norm: Arc::new(w_range_norm),
+            w_volatile_norm: Arc::new(w_volatile_norm),
         }
     }
 }
