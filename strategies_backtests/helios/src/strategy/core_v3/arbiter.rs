@@ -94,38 +94,32 @@ impl HeliosArbiter {
     pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, _debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
         
-        let adx_tanh = matrix.trend_strength[i];
-        let chaos = matrix.chaos_ratio[i];
+        // 1. TÍNH NGƯỠNG PHÊ DUYỆT ĐỘNG CONTINUOUS (DYNAMIC APPROVAL THRESHOLD)
+        let w_t = matrix.w_trend_norm[i];
+        let w_r = matrix.w_range_norm[i];
+        let w_v = matrix.w_volatile_norm[i];
 
-        // 1. CÔNG TẮC CHUYỂN MẠCH BỐI CẢNH (MUTUALLY EXCLUSIVE REGIME ROUTER)
-        let is_trending_regime = adx_tanh > 0.60;
-        let is_ranging_regime = adx_tanh < 0.35;
-        let is_volatile_regime = chaos > 0.70;
+        let required_confidence = w_t * config.arbiter.min_confidence_trending
+                                + w_r * config.arbiter.min_confidence_ranging
+                                + w_v * config.arbiter.min_confidence_volatile;
 
         let mut best_proposal: Option<(Proposal, f64)> = None;
         let mut max_confidence = 0.0;
         
-        // 2. Thu thập và Phân luồng Proposal từ các Scanner
+        // 2. VÒNG LẶP THU THẬP & ĐẤU THẦU ĐA BỐI CẢNH (CONFIDENCE AUCTION)
+        // Mọi Scanner đều được đối xử bình đẳng, không bị khóa cứng nhị phân
         for scanner in &self.scanners {
             let id = scanner.id();
 
-            // Khóa/Duyệt Scanner theo Bối cảnh độc quyền
-            let is_allowed = if is_trending_regime {
-                id == ScannerId::TrendPullback || id == ScannerId::MomentumIgnition
-            } else if is_ranging_regime {
-                id == ScannerId::RangeOscillator || id == ScannerId::ClimaxReversal
-            } else if is_volatile_regime {
-                id == ScannerId::AnomalyFade || id == ScannerId::AbsorptionScout
-            } else {
-                // Neutral Zone (0.35 <= ADX Tanh <= 0.60): Soft Blended Mode cho phép tất cả scanners
-                true
-            };
-
-            if !is_allowed {
-                continue;
-            }
-
             if let Some(proposal) = scanner.scan(tick, sensors, matrix, config) {
+                // Tra cứu Trọng số Bối cảnh Simplex Đội Nhà (O(1))
+                let regime_weight = match id {
+                    ScannerId::TrendPullback | ScannerId::MomentumIgnition => w_t,
+                    ScannerId::RangeOscillator | ScannerId::ClimaxReversal => w_r,
+                    ScannerId::AnomalyFade | ScannerId::AbsorptionScout   => w_v,
+                };
+
+                // Tra cứu Multiplier vi mô của Matrix
                 let multiplier = match id {
                     ScannerId::TrendPullback => matrix.trend_multiplier[i],
                     ScannerId::MomentumIgnition => matrix.volatility_expansion_multiplier[i],
@@ -136,15 +130,16 @@ impl HeliosArbiter {
                 };
                 
                 let min_veto = config.arbiter.min_multiplier_veto;
-                let s_weight = config.arbiter.scanner_weight.max(0.0).min(1.0);
-                let m_weight = 1.0 - s_weight;
                 
-                let confidence = if multiplier < min_veto {
-                    0.0
-                } else {
-                    (proposal.raw_score * s_weight) + (multiplier * m_weight)
-                };
+                // Màng lọc Phủ quyết (Veto Check)
+                if multiplier < min_veto {
+                    continue;
+                }
+
+                // Điểm Tự Tin Đấu Thầu (Tích Hỗ Tương: Điểm Mẫu Hình * Trọng Số Bối Cảnh * Multiplier Vi Mô)
+                let confidence = proposal.raw_score * regime_weight * multiplier;
                 
+                // Cạnh tranh Ngôi Quán Quân (Max Tracking trên thanh ghi CPU)
                 if confidence > max_confidence {
                     max_confidence = confidence;
                     best_proposal = Some((proposal, confidence));
@@ -152,17 +147,7 @@ impl HeliosArbiter {
             }
         }
         
-        // 3. Phê duyệt qua 3 Dải Ngưỡng Duyệt Động (Dynamic Approval Confidence)
-        let required_confidence = if is_trending_regime {
-            config.arbiter.min_confidence_trending
-        } else if is_ranging_regime {
-            config.arbiter.min_confidence_ranging
-        } else if is_volatile_regime {
-            config.arbiter.min_confidence_volatile
-        } else {
-            config.arbiter.min_confidence_ranging
-        };
-
+        // 3. HỘI ĐỒNG TRỌNG TÀI PHÊ DUYỆT THEO NGƯỠNG ĐỘNG
         if let Some((proposal, confidence)) = best_proposal {
             if confidence >= required_confidence {
                 return ArbiterDecision {
