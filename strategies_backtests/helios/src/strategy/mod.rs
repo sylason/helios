@@ -276,7 +276,7 @@ impl Strategy for HeliosStrategy {
         // self.run_init_diagnostics(ctx, &raw_closes, &raw_volumes);
     }
 
-    fn next(&mut self, tick: &TickContext) {
+    fn next(&mut self, tick: &mut TickContext) {
         let i = tick.i;
         
         // --- 🛡️ SAFETY FUSE (Kiểm tra dữ liệu) ---

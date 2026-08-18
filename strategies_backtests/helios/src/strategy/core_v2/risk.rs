@@ -11,7 +11,7 @@ use ferro_trade::strategy::TickContext;
 pub fn manage_trailing_stop(
     config: &HeliosConfig,
     memory: &mut TacticalMemory,
-    tick: &TickContext,
+    tick: &mut TickContext,
     current_regime: MarketRegime, // [FIXED]: Nhận diện Regime hiện tại thay vì trend_angle
     _atr_val: f64,
 ) {

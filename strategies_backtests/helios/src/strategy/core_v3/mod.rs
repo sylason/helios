@@ -141,7 +141,7 @@ impl Strategy for HeliosStrategyV3 {
         self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
     }
 
-    fn next(&mut self, tick: &TickContext) {
+    fn next(&mut self, tick: &mut TickContext) {
         let i = tick.i;
         if self.sensors.atr_sl.len() <= i || self.matrix.chaos_ratio.len() <= i {
             return;

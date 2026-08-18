@@ -15,7 +15,7 @@ pub fn execute_tactical(
     memory: &mut TacticalMemory, // [FIXED Task 3.2]: Bỏ gạch dưới để sử dụng bộ nhớ
     playbook: TacticalPlaybook,
     scores: &MarketRegimeScores, 
-    tick: &TickContext,
+    tick: &mut TickContext,
     sensors: &HeliosSensors,
     matrix: &MarketMatrix,
     env: MarketEnvironment, // [NEW]: Nhận thêm môi trường để log

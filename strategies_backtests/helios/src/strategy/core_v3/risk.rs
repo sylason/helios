@@ -67,7 +67,7 @@ impl RiskManager {
     pub fn manage_trailing_stop(
         config: &HeliosConfigV3,
         matrix: &MarketMatrixV3,
-        tick: &TickContext,
+        tick: &mut TickContext,
         sensors: &HeliosSensors,
         _debug_mode: bool,
     ) {
