@@ -8,7 +8,7 @@ use binance_sdk::derivatives_trading_usds_futures::{
     DerivativesTradingUsdsFuturesRestApi
 };
 use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
-    CancelAllOpenOrdersParams, CancelAllAlgoOpenOrdersParams, NewOrderParams, NewOrderSideEnum
+    CancelAllOpenOrdersParams, CancelAllAlgoOpenOrdersParams, NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum
 };
 use rust_decimal::prelude::FromPrimitive;
 use tracing::{info, error};
@@ -222,7 +222,7 @@ impl AccountManager {
         let qty = rust_decimal::Decimal::from_f64(position_amt.abs())
             .ok_or_else(|| BotError::Internal("Lỗi parse khối lượng".to_string()))?;
 
-        let params = NewOrderParams::builder(symbol.to_string(), side.clone(), "MARKET".to_string())
+        let params = NewOrderParams::builder(symbol.to_string(), side.clone(), NewOrderTypeEnum::Market)
             .quantity(qty)
             .build().map_err(|e| BotError::Internal(e.to_string()))?;
 

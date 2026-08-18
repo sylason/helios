@@ -1,38 +1,77 @@
-PS E:\Projects\Automations\trading_backtest\trading_bot> git add .
-warning: in the working copy of 'trading_bot/.gitignore', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/GEMINI.md', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_desktop_client/src-tauri/Cargo.toml', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/Cargo.toml', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/helios_champions_results.json', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/scripts/check_gaps.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/data_engine/mod.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/data_engine/sqlite_impl.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/error/mod.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/execution/account_manager.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/execution/mod.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/execution/paper_trader.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/execution/rate_limit_monitor.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/execution/ws_manager.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/main.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/models/account_state.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/models/market_info.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/models/mod.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/optimizer/helios_bridge.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/optimizer/mod.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/src/optimizer/prospector_runner.rs', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/CACHEDIR.TAG', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/bot_engine-61ebb6614f0caa12/output-bin-bot_engine', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/bot_engine-8973226c02ee9316/output-bin-bot_engine', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/bot_engine-aad5a8edfbd2dd06/output-bin-bot_engine', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/bot_engine-b570c8c73d2d776e/output-bin-bot_engine', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/bot_engine-e5fe75a6f2d301bf/output-bin-bot_engine', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/bot_engine-f3457b5c8c90fea4/output-bin-bot_engine', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/bot_engine-fbb8f90269c22020/output-test-bin-bot_engine', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/helios-1f17ce8b126fe012/output-lib-helios', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/helios-2654bf162a996e0e/output-lib-helios', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/helios-2a61e0b39c81856a/output-lib-helios', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/helios-33d83181f75f00ed/output-lib-helios', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/helios-4fb953f2cdd38f77/output-lib-helios', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/helios-8bb1c79af9b3792e/output-lib-helios', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/.fingerprint/helios-9772ced30083a301/output-lib-helios', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'trading_bot/bot_engine/target/debug/bot_engine.d', LF will be replaced by CRLF the next time Git touches it
+2026-08-13T10:16:16.726878Z  INFO walk_forward_smart_seed: ================================================================================
+2026-08-13T10:16:16.727015Z  INFO walk_forward_smart_seed: ✅ KẾT THÚC BÀI ĐÁNH GIÁ WALK-FORWARD EVALUATOR VỚI SMART SEEDING!
+2026-08-13T10:16:16.727121Z  INFO walk_forward_smart_seed:    Tổng số lần chạy Re-Optimize (N mins): 7
+2026-08-13T10:16:16.727235Z  INFO walk_forward_smart_seed:    Tổng số lần chạy Single Backtest Eval (M mins): 1438
+2026-08-13T10:16:16.727349Z  INFO walk_forward_smart_seed:    File log chi tiết: examples/logs/walk_forward_smart_seed.log
+2026-08-13T10:16:16.727457Z  INFO walk_forward_smart_seed: ================================================================================
+2026-08-13T10:16:16.872431Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.872920Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.873354Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.873790Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.874195Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.874600Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.874959Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.875270Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.875552Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.875794Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.876017Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.876400Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.876671Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.876866Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.877054Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.877242Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.877427Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.877617Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.877807Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.877994Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.878183Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.878370Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.878550Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.878760Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.878948Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.879134Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.879322Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.879511Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.879706Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.879895Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.880084Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.880272Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.880460Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.880651Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.880837Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.881024Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.881197Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.881363Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.881586Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.881755Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.881921Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.882087Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.882252Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.882416Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.882583Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.882748Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.882913Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.883140Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.883307Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.883473Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.883641Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.883805Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.883970Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.884135Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.884300Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.884465Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.884633Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.884799Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.884964Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.885128Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.885293Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.885458Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.885663Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.885855Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.886024Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.886191Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.886356Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.886533Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.886786Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.887033Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed
+2026-08-13T10:16:16.887273Z ERROR bot_engine::controller::asset_actor: ❌ [ETHUSDT] data_rx recv error: channel closed

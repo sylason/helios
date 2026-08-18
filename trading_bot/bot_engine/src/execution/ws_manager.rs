@@ -7,10 +7,31 @@ use binance_sdk::derivatives_trading_usds_futures::{
     DerivativesTradingUsdsFuturesWsStreams, 
     DerivativesTradingUsdsFuturesWsApi,
     DerivativesTradingUsdsFuturesRestApi,
-    websocket_streams::KlineCandlestickStreamsParams,
+    websocket_streams::{KlineCandlestickStreamsParams, KlineCandlestickStreamsIntervalEnum},
     rest_api::RestApi,
     websocket_api::{NewOrderParams, NewOrderSideEnum},
 };
+
+fn parse_interval(tf: &str) -> KlineCandlestickStreamsIntervalEnum {
+    match tf {
+        "1m" => KlineCandlestickStreamsIntervalEnum::Interval1m,
+        "3m" => KlineCandlestickStreamsIntervalEnum::Interval3m,
+        "5m" => KlineCandlestickStreamsIntervalEnum::Interval5m,
+        "15m" => KlineCandlestickStreamsIntervalEnum::Interval15m,
+        "30m" => KlineCandlestickStreamsIntervalEnum::Interval30m,
+        "1h" => KlineCandlestickStreamsIntervalEnum::Interval1h,
+        "2h" => KlineCandlestickStreamsIntervalEnum::Interval2h,
+        "4h" => KlineCandlestickStreamsIntervalEnum::Interval4h,
+        "6h" => KlineCandlestickStreamsIntervalEnum::Interval6h,
+        "8h" => KlineCandlestickStreamsIntervalEnum::Interval8h,
+        "12h" => KlineCandlestickStreamsIntervalEnum::Interval12h,
+        "1d" => KlineCandlestickStreamsIntervalEnum::Interval1d,
+        "3d" => KlineCandlestickStreamsIntervalEnum::Interval3d,
+        "1w" => KlineCandlestickStreamsIntervalEnum::Interval1w,
+        "1M" => KlineCandlestickStreamsIntervalEnum::Interval1M,
+        _ => KlineCandlestickStreamsIntervalEnum::Interval1m,
+    }
+}
 use crate::models::weight_monitor::WeightMonitor;
 use crate::data_engine::sqlite_impl::SqliteStore;
 use crate::data_engine::binance_rest::InitialSync;
@@ -85,7 +106,8 @@ impl WsManager {
                             Err(e) => warn!("⚠️ Lỗi đồng bộ dữ liệu Gap Filler: {}", e),
                         }
 
-                        let params = KlineCandlestickStreamsParams::builder(symbol_lower.clone(), timeframe.clone()).build().unwrap();
+                        let interval = parse_interval(&timeframe);
+                        let params = KlineCandlestickStreamsParams::builder(symbol_lower.clone(), interval).build().unwrap();
                         match connection.kline_candlestick_streams(params).await {
                             Ok(stream) => {
                                 info!("✅ Đã kết nối Market Data ({}-{})", symbol, timeframe);
@@ -301,8 +323,33 @@ impl WsManager {
                     }
                 }
             }
-            UserDataStreamEventsResponse::OrderTradeUpdate(_update) => {
-                // TODO: Xử lý trạng thái lệnh
+            UserDataStreamEventsResponse::OrderTradeUpdate(update) => {
+                if let Some(ref o) = update.o {
+                    let symbol = o.s.clone().unwrap_or_default();
+                    let side = o.s_uppercase.clone().unwrap_or_default();
+                    let order_type = o.o.clone().unwrap_or_default();
+                    let order_status = o.x_uppercase.clone().unwrap_or_default();
+                    let parse_f64 = |opt_s: &Option<String>| {
+                        opt_s.as_ref().and_then(|str_val| str_val.parse::<f64>().ok()).unwrap_or(0.0)
+                    };
+                    let avg_price = parse_f64(&o.ap);
+                    let orig_qty = parse_f64(&o.q);
+                    let executed_qty = parse_f64(&o.z);
+                    let client_order_id = o.c.clone().unwrap_or_default();
+                    let order_id = o.i.unwrap_or(0);
+
+                    events.push(crate::models::account_state::AccountEvent::OrderTradeUpdate {
+                        symbol,
+                        side,
+                        order_type,
+                        order_status,
+                        avg_price,
+                        orig_qty,
+                        executed_qty,
+                        client_order_id,
+                        order_id,
+                    });
+                }
             }
             _ => {}
         }
@@ -383,10 +430,62 @@ mod tests {
                     assert_eq!(unrealized_profit, -100.0);
                     has_pos_update = true;
                 }
+                _ => {}
             }
         }
 
         assert!(has_acc_update, "Thiếu AccountUpdate event");
         assert!(has_pos_update, "Thiếu PositionUpdate event");
+    }
+
+    #[test]
+    fn test_parse_order_trade_update_json() {
+        let json_str = r#"{
+            "e": "ORDER_TRADE_UPDATE",
+            "E": 1568747495000,
+            "T": 1568747495000,
+            "o": {
+                "s": "ETHUSDT",
+                "c": "test-client-id-123",
+                "S": "SELL",
+                "o": "STOP_MARKET",
+                "f": "GTC",
+                "q": "1.000",
+                "p": "0",
+                "ap": "1847.23",
+                "sp": "1847.23",
+                "x": "TRADE",
+                "X": "FILLED",
+                "i": 99887766,
+                "l": "1.000",
+                "z": "1.000",
+                "L": "1847.23",
+                "n": "0.05",
+                "N": "USDT",
+                "T": 1568747495000,
+                "wt": "MARK_PRICE",
+                "ot": "STOP_MARKET"
+            }
+        }"#;
+
+        let parsed: UserDataStreamEventsResponse = serde_json::from_str(json_str)
+            .expect("Không thể parse ORDER_TRADE_UPDATE JSON từ Binance");
+
+        let events = WsManager::parse_user_data_event(&parsed);
+        assert_eq!(events.len(), 1);
+
+        if let AccountEvent::OrderTradeUpdate { symbol, side, order_type, order_status, avg_price, orig_qty, executed_qty, client_order_id, order_id } = &events[0] {
+            assert_eq!(symbol, "ETHUSDT");
+            assert_eq!(side, "SELL");
+            assert_eq!(order_type, "STOP_MARKET");
+            assert_eq!(order_status, "FILLED");
+            assert_eq!(*avg_price, 1847.23);
+            assert_eq!(*orig_qty, 1.0);
+            assert_eq!(*executed_qty, 1.0);
+            assert_eq!(client_order_id, "test-client-id-123");
+            assert_eq!(*order_id, 99887766);
+        } else {
+            panic!("Event không phải là OrderTradeUpdate!");
+        }
     }
 }

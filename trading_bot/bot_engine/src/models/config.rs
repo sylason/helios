@@ -1,6 +1,15 @@
 use std::env;
 use dotenv::dotenv;
 
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+pub enum ExecutionMode {
+    Paper,       // Giả lập 100% qua PaperTrader ở máy local (Zero-delay hoặc real-time)
+    Testnet,     // Kết nối Binance Futures Testnet (Gửi lệnh thật lên Testnet API)
+    RealTrade,   // Kết nối Binance Futures Mainnet (Gửi lệnh thật tiền thật)
+    DryRun,      // Nhận nến real-time, tính tín hiệu nhưng CHỈ LOG chứ KHÔNG gửi HTTP API
+    Diagnostic,  // Chỉ chạy Backtest chẩn đoán 1:1 đo đạc PnL/DD
+}
+
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub api_key: String,

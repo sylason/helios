@@ -9,7 +9,7 @@ use ferro_trade::backtest::BacktestBuilder;
 use ferro_trade::optimizer::prospector::{Prospector, ProspectorConfig};
 use ferro_trade::optimizer::params::DnaMappable;
 use ferro_trade::stats::StatItem;
-use helios::strategy::HeliosStrategy;
+use helios::strategy::core_v3::HeliosStrategyV3;
 use polars::prelude::*;
 
 use crate::models::repository::{CandleRepository, StrategyRepository};
@@ -24,6 +24,7 @@ pub const FRACTIONAL_UNIT: f64 = 0.0001;
 #[derive(Debug, Deserialize)]
 struct FullOptimizerConfig {
     prospector: ProspectorConfig,
+    cache_config: Option<ferro_trade::data::global_cache::CacheConfig>,
 }
 
 pub struct ProspectorRunner;
@@ -34,18 +35,89 @@ impl ProspectorRunner {
         symbol: &str,
         strategy_id: &str,
         db: Arc<SqliteStore>,
-        config_path: &str, // VD: "../../strategies_backtests/helios/examples/helios_optimizer_config.json"
+        config_path: &str,
         prospector_db_path: &str,
         dna_tx: Option<tokio::sync::watch::Sender<Option<crate::models::models::OptimizedDna>>>,
     ) -> Result<(), String> {
-        info!("🧬 [Optimizer] Bắt đầu chu kỳ tối ưu hóa cho {}...", symbol);
+        let now = chrono::Utc::now().timestamp_millis();
+        let thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
+        let start_time = now - thirty_days_ms;
+        Self::run_optimization_cycle_range(symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, now).await
+    }
 
-        // 1. Lấy dữ liệu 30 ngày từ DuckDB
+    /// Chạy 1 chu kỳ tối ưu hóa 30 ngày gần nhất kèm Smart Seeding (tự động lấy DNA tốt nhất từ DB làm hạt giống mồi)
+    pub async fn run_optimization_cycle_smart_seed(
+        symbol: &str,
+        strategy_id: &str,
+        db: Arc<SqliteStore>,
+        config_path: &str,
+        prospector_db_path: &str,
+        dna_tx: Option<tokio::sync::watch::Sender<Option<crate::models::models::OptimizedDna>>>,
+    ) -> Result<(), String> {
         let now = chrono::Utc::now().timestamp_millis();
         let thirty_days_ms = 30 * 24 * 60 * 60 * 1000;
         let start_time = now - thirty_days_ms;
 
-        let candles = db.get_candles_by_range(symbol, start_time, now).await.map_err(|e| e.to_string())?;
+        let seed_dna = match db.get_best_dna(symbol, strategy_id).await {
+            Ok(Some(dna_data)) => {
+                info!("🌱 [Smart Seeding] Đã chọn Rank 1 Champion DNA từ DB làm hạt giống mồi.");
+                Some(dna_data.dna)
+            }
+            _ => None,
+        };
+
+        Self::run_optimization_cycle_range_smart_seed(
+            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, now, seed_dna
+        ).await
+    }
+
+    /// Chạy 1 chu kỳ tối ưu hóa kèm Smart Seeding (Tiêm 1 cá thể Rank 1 Champion vào Generation 0)
+    pub async fn run_optimization_cycle_range_smart_seed(
+        symbol: &str,
+        strategy_id: &str,
+        db: Arc<SqliteStore>,
+        config_path: &str,
+        prospector_db_path: &str,
+        dna_tx: Option<tokio::sync::watch::Sender<Option<crate::models::models::OptimizedDna>>>,
+        start_time: i64,
+        end_time: i64,
+        seed_dna: Option<Vec<f64>>,
+    ) -> Result<(), String> {
+        Self::run_optimization_cycle_range_internal(
+            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, seed_dna
+        ).await
+    }
+
+    /// Chạy 1 chu kỳ tối ưu hóa dựa trên khoảng thời gian chỉ định [start_time -> end_time]
+    pub async fn run_optimization_cycle_range(
+        symbol: &str,
+        strategy_id: &str,
+        db: Arc<SqliteStore>,
+        config_path: &str,
+        prospector_db_path: &str,
+        dna_tx: Option<tokio::sync::watch::Sender<Option<crate::models::models::OptimizedDna>>>,
+        start_time: i64,
+        end_time: i64,
+    ) -> Result<(), String> {
+        Self::run_optimization_cycle_range_internal(
+            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, None
+        ).await
+    }
+
+    async fn run_optimization_cycle_range_internal(
+        symbol: &str,
+        strategy_id: &str,
+        db: Arc<SqliteStore>,
+        config_path: &str,
+        prospector_db_path: &str,
+        dna_tx: Option<tokio::sync::watch::Sender<Option<crate::models::models::OptimizedDna>>>,
+        start_time: i64,
+        end_time: i64,
+        seed_dna: Option<Vec<f64>>,
+    ) -> Result<(), String> {
+        info!("🧬 [Optimizer] Bắt đầu chu kỳ tối ưu hóa cho {} (Khoảng MS: {} -> {})...", symbol, start_time, end_time);
+
+        let candles = db.get_candles_by_range(symbol, start_time, end_time).await.map_err(|e| e.to_string())?;
         if candles.is_empty() {
             warn!("⚠️ [Optimizer] Không có dữ liệu nến cho {} để tối ưu hóa.", symbol);
             return Ok(());
@@ -57,76 +129,87 @@ impl ProspectorRunner {
             return Ok(());
         }
 
-        info!("🧬 [Optimizer] Đã lấy {} nến từ DuckDB.", candles.len());
+        info!("🧬 [Optimizer] Đã lấy {} nến từ Database.", candles.len());
 
-        // 2. Chuyển đổi dữ liệu sang DataFrame của Polars (Tái sử dụng hàm từ HeliosBridge)
-        let df = Self::candles_to_df(&candles).map_err(|e| e.to_string())?;
-
-        // 3. Khởi tạo BacktestBuilder (Thông số cứng từ common.rs)
-        let backtest = BacktestBuilder::new()
-            .data(df)
-            .cash(INITIAL_CASH)
-            .commission(COMMISSION)
-            .margin(MARGIN)
-            .fractional_unit(Some(FRACTIONAL_UNIT))
-            .trade_on_close(true)
-            .exclusive_orders(true)
-            .hedging(false)
-            .finalize_trades(true)
-            .calculate_metrics(&[
-                StatItem::ReturnPct,
-                StatItem::TotalTrades,
-                StatItem::MaxDrawdownPct,
-            ])
-            .build().map_err(|e| e.to_string())?;
-
-        // 4. Load Cấu hình Prospector từ file JSON
+        // 1. Load Cấu hình Prospector & Cache từ file JSON trước
         let file = File::open(config_path).map_err(|e| e.to_string())?;
         let reader = BufReader::new(file);
         let full_config: FullOptimizerConfig = serde_json::from_reader(reader).map_err(|e| e.to_string())?;
-        
-        let mut prospector_config = full_config.prospector;
-        prospector_config.db_path = prospector_db_path.to_string();
 
-        let db_exists = Path::new(prospector_db_path).exists();
-        let mut prospector = Prospector::new(prospector_config).map_err(|e| e.to_string())?;
+        // 2. Tách toàn bộ việc dựng DataFrame, Backtest & chạy GA sang luồng Blocking riêng của Tokio (tránh nghẽn Async Event Loop)
+        let prospector_db_path_owned = prospector_db_path.to_string();
 
-        // Thêm job đầu tiên nếu chưa có
-        if !db_exists || prospector.backlog_storage.get_max_job_id() == 0 {
-            let flat_search_space = helios::strategy::config::HeliosConfig::parameter_defs();
-            prospector.add_initial_job(flat_search_space);
-        }
+        let champion_opt = tokio::task::spawn_blocking(move || {
+            let df = Self::candles_to_df(&candles).map_err(|e| e.to_string())?;
 
-        // 5. Khởi chạy thuật toán GA
-        let objective = |stats: &ferro_trade::stats::Stats| {
-            let total_days = 30.0;
-            let trades_per_day = stats.total_trades as f64 / total_days;
-            
-            if trades_per_day < 1.0 {
-                return -2000.0 * (1.0 - trades_per_day); 
+            let backtest = BacktestBuilder::new()
+                .data(df)
+                .cash(INITIAL_CASH)
+                .commission(COMMISSION)
+                .margin(MARGIN)
+                .fractional_unit(Some(FRACTIONAL_UNIT))
+                .trade_on_close(true)
+                .exclusive_orders(true)
+                .hedging(false)
+                .finalize_trades(true)
+                .cache_config(full_config.cache_config.clone().unwrap_or_default())
+                .calculate_metrics(&[
+                    StatItem::ReturnPct,
+                    StatItem::TotalTrades,
+                    StatItem::MaxDrawdownPct,
+                ])
+                .build().map_err(|e| e.to_string())?;
+
+            let mut prospector_config = full_config.prospector;
+            prospector_config.db_path = prospector_db_path_owned.clone();
+
+            if let Some(parent) = Path::new(&prospector_db_path_owned).parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
-            
-            let dd = stats.max_drawdown_pct.abs();
-            if dd > 40.0 {
-                return -1000.0 - dd; 
+
+            let db_exists = Path::new(&prospector_db_path_owned).exists();
+            let mut prospector = Prospector::new(prospector_config).map_err(|e| e.to_string())?;
+
+            if let Some(dna) = seed_dna {
+                let mut champs = prospector.champions.write();
+                champs.push(ferro_trade::optimizer::ga_worker::Candidate {
+                    params: std::collections::HashMap::new(),
+                    fitness: 0.0,
+                    stats: std::collections::HashMap::new(),
+                    dna: Some(dna),
+                });
+                info!("🌱 [Smart Seeding] Tiêm 1 hạt giống Rank 1 Champion từ chu kỳ trước vào Generation 0.");
             }
 
-            let ret = stats.return_pct;
-            if ret.is_nan() || ret <= 0.0 {
-                return -50.0;
+            if !db_exists || prospector.backlog_storage.get_max_job_id() == 0 {
+                let flat_search_space = helios::strategy::core_v3::config::HeliosConfigV3::parameter_defs();
+                prospector.add_initial_job(flat_search_space);
             }
 
-            ret
-        };
+            let objective = |stats: &ferro_trade::stats::Stats| {
+                let total_days = 30.0;
+                let trades_per_day = stats.total_trades as f64 / total_days;
+                if trades_per_day < 0.5 {
+                    return -2000.0 * (1.0 - trades_per_day); 
+                }
+                let ret = stats.return_pct;
+                let dd = stats.max_drawdown_pct.abs();
+                if dd > 40.0 {
+                    return -5000.0 - dd; 
+                }
+                if ret.is_nan() || ret <= 0.0 {
+                    return -50.0;
+                }
+                ret + (trades_per_day * 0.1)
+            };
 
-        info!("🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...");
-        prospector.run::<HeliosStrategy, _>(backtest, objective);
+            info!("🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...");
+            prospector.run::<HeliosStrategyV3, _>(backtest, objective);
 
-        // 6. Lấy kết quả Top 1 (Champion)
-        let champion_opt = {
             let champs = prospector.champions.read();
-            champs.first().cloned()
-        };
+            let top_champ = champs.iter().find(|c| !c.params.is_empty()).cloned().or_else(|| champs.first().cloned());
+            Ok::<_, String>(top_champ)
+        }).await.map_err(|e| e.to_string())??;
 
         if let Some(champion) = champion_opt {
             let ret = champion.stats.get("Return %").unwrap_or(&0.0);
@@ -140,6 +223,7 @@ impl ProspectorRunner {
                 use crate::models::models::OptimizedDna;
                 use std::collections::HashMap;
 
+                let now = chrono::Utc::now().timestamp_millis();
                 let opt_dna = OptimizedDna {
                     symbol: symbol.to_string(),
                     strategy_id: strategy_id.to_string(),
@@ -194,12 +278,12 @@ impl ProspectorRunner {
         let s_vol = Series::new("Volume".into(), vol_vec);
 
         DataFrame::new(vec![
-            Column::from(s_dt),
-            Column::from(s_open),
-            Column::from(s_high),
-            Column::from(s_low),
-            Column::from(s_close),
-            Column::from(s_vol),
+            s_dt.into(),
+            s_open.into(),
+            s_high.into(),
+            s_low.into(),
+            s_close.into(),
+            s_vol.into(),
         ])
     }
 }

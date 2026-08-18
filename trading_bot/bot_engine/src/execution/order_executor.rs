@@ -1,9 +1,10 @@
-use tracing::{info, error};
+use tracing::{info, warn, error};
 use rust_decimal::prelude::FromPrimitive;
 
 use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
-    TradeApi, NewOrderParams, NewOrderSideEnum,
-    NewAlgoOrderParams, NewAlgoOrderWorkingTypeEnum,
+    TradeApi, NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum,
+    NewAlgoOrderParams, NewAlgoOrderWorkingTypeEnum, NewAlgoOrderAlgoTypeEnum,
+    NewAlgoOrderTypeEnum, NewAlgoOrderClosePositionEnum,
     CancelAllAlgoOpenOrdersParams, NewAlgoOrderSideEnum
 };
 use binance_sdk::derivatives_trading_usds_futures::rest_api::RestApi;
@@ -68,6 +69,20 @@ impl OrderExecutor {
         Ok(qty)
     }
 
+    /// Làm tròn giá thành Decimal chuẩn theo tick_size của sàn
+    fn format_price_decimal(&self, price: f64) -> rust_decimal::Decimal {
+        let rounded = self.market_filter.round_price(price);
+        let decimals = MarketFilter::count_decimals(self.market_filter.tick_size);
+        rust_decimal::Decimal::from_f64(rounded).unwrap().round_dp(decimals as u32)
+    }
+
+    /// Làm tròn khối lượng thành Decimal chuẩn theo step_size của sàn
+    fn format_qty_decimal(&self, qty: f64) -> rust_decimal::Decimal {
+        let rounded = self.market_filter.round_qty(qty);
+        let decimals = MarketFilter::count_decimals(self.market_filter.step_size);
+        rust_decimal::Decimal::from_f64(rounded).unwrap().round_dp(decimals as u32)
+    }
+
     /// Thực thi tín hiệu giao dịch
     pub async fn execute_action(
         &self, 
@@ -91,23 +106,42 @@ impl OrderExecutor {
                 info!("🧹 [{}] Đã hủy Algo SL cũ để cập nhật mới.", symbol);
             }
 
+            // Chờ 150ms để Binance Futures Server cập nhật sổ lệnh hủy thành công
+            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+
             if let Some(sl) = new_sl_price {
                 let sl_side = if position_amt > 0.0 { NewAlgoOrderSideEnum::Sell } else { NewAlgoOrderSideEnum::Buy };
+                let rounded_sl = self.format_price_decimal(*sl);
                 let p_sl = NewAlgoOrderParams::builder(
-                    "CONDITIONAL".to_string(),
+                    NewAlgoOrderAlgoTypeEnum::Conditional,
                     symbol.to_string(),
                     sl_side,
-                    "STOP_MARKET".to_string()
+                    NewAlgoOrderTypeEnum::StopMarket
                 )
-                .trigger_price(rust_decimal::Decimal::from_f64(*sl).unwrap())
-                .close_position(Some("true".to_string()))
+                .trigger_price(rounded_sl)
+                .close_position(Some(NewAlgoOrderClosePositionEnum::True))
                 .working_type(NewAlgoOrderWorkingTypeEnum::MarkPrice)
                 .build().unwrap();
                 
-                self.monitor.wait_if_needed(1).await;
-                match self.rest_client.new_algo_order(p_sl).await {
-                    Ok(_) => info!("🛡️ [{}] Đã cập nhật Trailing SL mới tại: {}", symbol, sl),
-                    Err(e) => error!("❌ [{}] Lỗi đặt Trailing SL mới: {}", symbol, e),
+                // Thử lại tối đa 3 lần nếu dính lỗi độ trễ hủy lệnh trên Binance
+                let mut success = false;
+                for attempt in 1..=3 {
+                    self.monitor.wait_if_needed(1).await;
+                    match self.rest_client.new_algo_order(p_sl.clone()).await {
+                        Ok(_) => {
+                            info!("🛡️ [{}] Đã cập nhật Trailing SL mới tại: {}", symbol, rounded_sl);
+                            success = true;
+                            break;
+                        },
+                        Err(e) => {
+                            warn!("⚠️ [{}] Thử lần {}/3 đặt Trailing SL thất bại ({}), thử lại sau 150ms...", symbol, attempt, e);
+                            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+                        }
+                    }
+                }
+
+                if !success {
+                    error!("❌ [{}] Đã thử 3 lần nhưng không thể đặt Trailing SL mới tại: {}", symbol, rounded_sl);
                 }
             }
             return Ok(());
@@ -168,12 +202,12 @@ impl OrderExecutor {
 
         info!("🚀 [{}] Chuẩn bị gửi lệnh: {:?} Qty: {:.4} @ Market", symbol, side, qty);
 
-        let dec_qty = rust_decimal::Decimal::from_f64(qty).ok_or_else(|| BotError::Internal("Lỗi chuyển đổi kiểu dữ liệu khối lượng".to_string()))?;
+        let dec_qty = self.format_qty_decimal(qty);
 
         let params = NewOrderParams::builder(
             symbol.to_string(),
             side.clone(),
-            "MARKET".to_string()
+            NewOrderTypeEnum::Market
         )
         .quantity(dec_qty)
         .build().map_err(|e| BotError::Internal(e.to_string()))?;
@@ -217,21 +251,37 @@ impl OrderExecutor {
                         NewOrderSideEnum::Buy => NewAlgoOrderSideEnum::Sell,
                         NewOrderSideEnum::Sell => NewAlgoOrderSideEnum::Buy,
                     };
+                    let rounded_sl = self.format_price_decimal(sl);
                     let p_sl = NewAlgoOrderParams::builder(
-                        "CONDITIONAL".to_string(),
+                        NewAlgoOrderAlgoTypeEnum::Conditional,
                         symbol.to_string(),
                         sl_side,
-                        "STOP_MARKET".to_string()
+                        NewAlgoOrderTypeEnum::StopMarket
                     )
-                    .trigger_price(rust_decimal::Decimal::from_f64(sl).unwrap())
-                    .close_position(Some("true".to_string()))
+                    .trigger_price(rounded_sl)
+                    .close_position(Some(NewAlgoOrderClosePositionEnum::True))
                     .working_type(NewAlgoOrderWorkingTypeEnum::MarkPrice)
                     .build().unwrap();
                     
-                    self.monitor.wait_if_needed(1).await;
-                    match self.rest_client.new_algo_order(p_sl).await {
-                        Ok(_) => info!("🛡️ [{}] Đã đặt Hard SL bảo vệ tại: {}", symbol, sl),
-                        Err(e) => error!("❌ [{}] Lỗi đặt Hard SL: {}", symbol, e),
+                    // Thử lại tối đa 3 lần cho Hard SL
+                    let mut success = false;
+                    for attempt in 1..=3 {
+                        self.monitor.wait_if_needed(1).await;
+                        match self.rest_client.new_algo_order(p_sl.clone()).await {
+                            Ok(_) => {
+                                info!("🛡️ [{}] Đã đặt Hard SL bảo vệ tại: {}", symbol, rounded_sl);
+                                success = true;
+                                break;
+                            },
+                            Err(e) => {
+                                warn!("⚠️ [{}] Thử lần {}/3 đặt Hard SL thất bại ({}), thử lại sau 150ms...", symbol, attempt, e);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+                            }
+                        }
+                    }
+
+                    if !success {
+                        error!("❌ [{}] Đã thử 3 lần nhưng không thể đặt Hard SL bảo vệ tại: {}", symbol, rounded_sl);
                     }
                 }
 

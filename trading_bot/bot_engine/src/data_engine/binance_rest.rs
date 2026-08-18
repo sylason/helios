@@ -4,7 +4,7 @@ use binance_sdk::derivatives_trading_usds_futures::{
         KlineCandlestickDataIntervalEnum, 
         KlineCandlestickDataParams, 
         RestApi, 
-        KlineCandlestickDataResponseItemInner
+        KlineCandlestickDataItemInner
     },
 };
 use crate::models::models::Candle;
@@ -77,18 +77,18 @@ impl InitialSync {
             let mut candles = Vec::new();
             let mut last_timestamp = 0;
 
-            let to_i64 = |item: &KlineCandlestickDataResponseItemInner| -> Option<i64> {
+            let to_i64 = |item: &KlineCandlestickDataItemInner| -> Option<i64> {
                 match item {
-                    KlineCandlestickDataResponseItemInner::Integer(v) => Some(*v),
-                    KlineCandlestickDataResponseItemInner::String(s) => s.parse().ok(),
+                    KlineCandlestickDataItemInner::Integer(v) => Some(*v),
+                    KlineCandlestickDataItemInner::String(s) => s.parse().ok(),
                     _ => None,
                 }
             };
 
-            let to_f64 = |item: &KlineCandlestickDataResponseItemInner| -> Option<f64> {
+            let to_f64 = |item: &KlineCandlestickDataItemInner| -> Option<f64> {
                 match item {
-                    KlineCandlestickDataResponseItemInner::String(s) => s.parse().ok(),
-                    KlineCandlestickDataResponseItemInner::Integer(v) => Some(*v as f64),
+                    KlineCandlestickDataItemInner::String(s) => s.parse().ok(),
+                    KlineCandlestickDataItemInner::Integer(v) => Some(*v as f64),
                     _ => None,
                 }
             };
@@ -201,17 +201,17 @@ impl InitialSync {
             let mut candles = Vec::new();
             let mut first_timestamp = current_end_time;
 
-            let to_i64 = |item: &KlineCandlestickDataResponseItemInner| -> Option<i64> {
+            let to_i64 = |item: &KlineCandlestickDataItemInner| -> Option<i64> {
                 match item {
-                    KlineCandlestickDataResponseItemInner::Integer(v) => Some(*v),
-                    KlineCandlestickDataResponseItemInner::String(s) => s.parse().ok(),
+                    KlineCandlestickDataItemInner::Integer(v) => Some(*v),
+                    KlineCandlestickDataItemInner::String(s) => s.parse().ok(),
                     _ => None,
                 }
             };
-            let to_f64 = |item: &KlineCandlestickDataResponseItemInner| -> Option<f64> {
+            let to_f64 = |item: &KlineCandlestickDataItemInner| -> Option<f64> {
                 match item {
-                    KlineCandlestickDataResponseItemInner::String(s) => s.parse().ok(),
-                    KlineCandlestickDataResponseItemInner::Integer(v) => Some(*v as f64),
+                    KlineCandlestickDataItemInner::String(s) => s.parse().ok(),
+                    KlineCandlestickDataItemInner::Integer(v) => Some(*v as f64),
                     _ => None,
                 }
             };

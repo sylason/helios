@@ -19,9 +19,8 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Binance Official SDK (Chính chủ)
 # Kích hoạt tính năng Futures (USDS-M) cho cả REST và WebSocket
-binance-sdk = { version = "46.0.0", default-features = false, features = [
+binance-sdk = { version = "68.1.1", default-features = false, features = [
     "derivatives_trading_usds_futures",
-    "spot",
     "rustls-tls",
 ] }
 
@@ -29,7 +28,7 @@ binance-sdk = { version = "46.0.0", default-features = false, features = [
 # Data Analysis
 polars = { version = "0.52", features = ["lazy", "temporal", "describe"] }
 ferro_trade = { path = "../../ferro_trade" }
-helios = { path = "../../strategies_backtests/v2_trading_bot_demo" }
+helios = { path = "../../strategies_backtests/helios" }
 
 # Networking (Bổ sung cho SDK)
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
@@ -47,6 +46,50 @@ thiserror = "1.0"
 anyhow = "1.0.103"
 rust_decimal = "1.42.1"
 
+
 [profile.release]
-lto = "thin"
-codegen-units = 16
+opt-level = 3       # Mặc định tối ưu cao nhất (-O3) cho code dự án (bot_engine)
+lto = false         # Tắt LTO toàn cục để tránh nghẽn Linker
+codegen-units = 16  # Phân chia 16 luồng biên dịch song song
+panic = "abort"     # Tắt unwinding để giảm dung lượng file exe
+strip = true        # Xóa debug symbols
+
+# --- PROC-MACRO BUILD OVERRIDE ---
+[profile.release.build-override]
+opt-level = 0
+
+# --- SELECTIVE PACKAGE PROFILE OVERRIDES ---
+[profile.release.package.binance-sdk]
+opt-level = 1       # Giảm thời gian LLVM optimize 1.2MB SDK code từ 30p xuống 15s!
+
+[profile.release.package.serde_with]
+opt-level = 0
+
+[profile.release.package.serde_with_macros]
+opt-level = 0
+
+[profile.release.package.schemars]
+opt-level = 0
+
+[profile.release.package.darling]
+opt-level = 0
+
+[profile.release.package.darling_macro]
+opt-level = 0
+
+[profile.release.package.jiff]
+opt-level = 1
+
+[profile.release.package.jiff-tzdb]
+opt-level = 0
+
+# --- PRESERVE MAXIMUM SPEED FOR BACKTEST & GA ENGINES ---
+[profile.release.package.ferro_trade]
+opt-level = 3
+
+[profile.release.package.helios]
+opt-level = 3
+
+[profile.release.package.polars]
+opt-level = 3
+

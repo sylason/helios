@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::cell::RefCell;
 use polars::prelude::*;
 use ferro_trade::broker::Broker;
 use ferro_trade::backtest::manager::IndicatorManager;
@@ -23,44 +22,36 @@ impl HeliosBridge {
             return (Vec::new(), None);
         }
 
-        // 1. Chuyá»ƒn Ä‘á»•i dá»¯ liá»‡u sang DataFrame
+        // 1. Chuyển đổi dữ liệu sang DataFrame
         let df = match Self::candles_to_df(candles) {
             Ok(df) => df,
             Err(e) => {
-                error!("âŒ HeliosBridge: Lá»—i chuyá»ƒn Ä‘á»•i DataFrame: {}", e);
+                error!("❌ HeliosBridge: Lỗi chuyển đổi DataFrame: {}", e);
                 return (Vec::new(), None);
             }
         };
 
-        // 2. Chuáº©n bá»‹ mÃ´i trÆ°á»ng tÃ­nh toÃ¡n (Giá»‘ng ferro_trade::backtest::engine)
+        // 2. Chuẩn bị môi trường tính toán (Giống ferro_trade::backtest::engine)
         let cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
         let raw_cache = match ferro_trade::data::RawDataCache::new(&df) {
             Ok(c) => c,
             Err(e) => {
-                error!("âŒ HeliosBridge: Lá»—i táº¡o RawDataCache: {}", e);
+                error!("❌ HeliosBridge: Lỗi tạo RawDataCache: {}", e);
                 return (Vec::new(), None);
             }
         };
-        let data_view = ferro_trade::data::DataView::new(df, raw_cache);
-        
-        // 2.5 TIá»€N TÃNH TOÃN MTF (Resampling) cho cÃ¡c Timeframe chuáº©n
-        let base_times = &data_view.raw_cache().datetime;
-        let base_df = data_view.get_full_df();
-        for tf_str in &["3m", "5m", "15m", "1h", "4h"] {
-            let tf = std::str::FromStr::from_str(tf_str).expect("Invalid timeframe");
-            let df_res = ferro_trade::utils::resample::resample_ohlcv(tf_str, base_df).expect("Precompute resample fail");
-            let flat_ohlcv = Arc::new(ferro_trade::utils::resample::df_to_resampled_ohlcv(&df_res).expect("Precompute convert fail"));
-            cache.put_resampled_ohlcv(tf, flat_ohlcv.clone());
 
-            let table = Arc::new(ferro_trade::utils::resample::create_lookup_table(base_times, &flat_ohlcv.datetime));
-            cache.put_lookup(tf, table);
-        }
+        // 2.5 TIỀN TÍNH TOÁN MTF (Resampling) cho các Timeframe chuẩn
+        let tf_list: Vec<String> = vec!["3m".into(), "5m".into(), "15m".into(), "1h".into(), "4h".into()];
+        let _ = ferro_trade::utils::resample::precompute_timeframes(&tf_list, &df, &cache, &raw_cache.datetime);
 
+        let data_view = ferro_trade::data::DataView::new(raw_cache);
+        drop(df);
         
-        // 3. Khá»Ÿi táº¡o Broker (Simulated)
+        // 3. Khởi tạo Broker (Simulated)
         let mut broker = Broker::new(
             data_view.clone(),
-            10000.0, // Initial Cash (khÃ´ng quan trá»ng cho viá»‡c láº¥y signal)
+            10000.0, // Initial Cash (không quan trọng cho việc lấy signal)
             1.0,     // Leverage
             1.0,     // Margin rate
             Box::new(|_, _| 0.0), // Zero commission cho simulation
@@ -71,7 +62,7 @@ impl HeliosBridge {
             None,    // max_position_size
         );
 
-        // 4. Khá»Ÿi táº¡o Strategy vÃ  Indicators
+        // 4. Khởi tạo Strategy và Indicators
         let mut indicator_manager = IndicatorManager::new();
         let mut init_context = InitContext {
             raw_data: broker.data.raw_cache(),
@@ -83,49 +74,48 @@ impl HeliosBridge {
         strategy.init(&mut init_context);
 
         let warmup = indicator_manager.warmup_period;
-        let full_len = broker.data.get_full_df().height();
+        let full_len = broker.data.total_len();
         
         if full_len <= warmup {
-            debug!("âš ï¸ HeliosBridge: Dá»¯ liá»‡u chÆ°a Ä‘á»§ thá»i gian Warmup ({} < {}).", full_len, warmup);
+            debug!("⚠️ HeliosBridge: Dữ liệu chưa đủ thời gian Warmup ({} < {}).", full_len, warmup);
             return (Vec::new(), None);
         }
 
-        let actions_buffer = RefCell::new(SmallVec::<[Action; 4]>::new());
+        // 5. Chạy mô phỏng từng cây nến từ warmup đến nến mới nhất
         let mut last_actions = Vec::new();
+        let mut actions_buffer: SmallVec<[Action; 4]> = SmallVec::new();
 
-        // 5. VÃ²ng láº·p mÃ´ phá»ng (Simulated Loop)
-        // ChÃºng ta cháº¡y tá»« warmup + 1 Ä‘áº¿n náº¿n cuá»‘i cÃ¹ng.
-        for i in (warmup + 1)..full_len {
+        for i in warmup..full_len {
             broker.data.set_len(i + 1);
-            if broker.next(i).is_err() { break; }
+            let _ = broker.next(i);
 
             let position_snapshot = broker.position();
             let current_equity = broker.equity();
+            actions_buffer.clear();
             
             {
-                let tick_context = TickContext {
+                let mut tick_context = TickContext {
                     i,
                     equity: current_equity,
                     data_view: &broker.data,
                     indicator_manager: &indicator_manager,
                     trades: &broker.trades,
-                    actions: &actions_buffer,
+                    actions: &mut actions_buffer,
                     position: position_snapshot,
                 };
-                strategy.next(&tick_context);
+                strategy.next(&mut tick_context);
             }
             
-            let mut actions = actions_buffer.borrow_mut();
-            if !actions.is_empty() {
-                // Náº¿u Ä‘Ã¢y lÃ  náº¿n cuá»‘i cÃ¹ng, ta báº¯t láº¥y cÃ¡c action nÃ y!
+            if !actions_buffer.is_empty() {
+                // Nếu đây là nến cuối cùng, ta bắt lấy các action này!
                 if i == full_len - 1 {
-                    last_actions = actions.to_vec();
+                    last_actions = actions_buffer.to_vec();
                 }
-                broker.execute_actions(std::mem::take(&mut *actions));
+                broker.execute_actions(std::mem::take(&mut actions_buffer));
             }
         }
 
-        // 6. TÃ­nh toÃ¡n thá»‘ng kÃª trÃªn toÃ n bá»™ dá»¯ liá»‡u (Diagnostic)
+        // 6. Tính toán thống kê trên toàn bộ dữ liệu (Diagnostic)
         broker.close_position(1.0);
         let _ = broker.next(full_len - 1);
 
@@ -150,6 +140,7 @@ impl HeliosBridge {
     pub fn evaluate_live_tick(
         symbol: &str,
         candles: &[Candle],
+        slice_start: usize,
         live_position: Option<&crate::controller::asset_actor::LivePositionState>,
         strategy: &mut dyn Strategy,
     ) -> Vec<Action> {
@@ -165,29 +156,92 @@ impl HeliosBridge {
             }
         };
 
-        let cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
-        let raw_cache = match ferro_trade::data::RawDataCache::new(&df) {
-            Ok(c) => c,
-            Err(e) => {
-                error!("❌ HeliosBridge: Lỗi tạo RawDataCache: {}", e);
-                return Vec::new();
+        // Cache MTF Resampled Data & Lookup Tables theo mốc nến đóng của khung thời gian lớn
+        static LIVE_MTF_STORE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, GlobalMtfCache>>> = std::sync::OnceLock::new();
+
+        struct GlobalMtfCache {
+            symbol: String,
+            last_candle_count: usize,
+            last_candle_ts: i64,
+            cache: Arc<ferro_trade::data::global_cache::GlobalCache>,
+            tf_buckets: std::collections::HashMap<String, i64>,
+        }
+
+        let last_candle_ts = candles.last().map(|c| c.timestamp).unwrap_or(0);
+        let candles_len = candles.len();
+
+        let mut store_map = LIVE_MTF_STORE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new())).lock().unwrap();
+        let cache = if let Some(store) = store_map.get_mut(symbol) {
+            if store.last_candle_count <= candles_len {
+                store.cache.clone()
+            } else {
+                let new_cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
+                *store = GlobalMtfCache {
+                    symbol: symbol.to_string(),
+                    last_candle_count: candles_len,
+                    last_candle_ts,
+                    cache: new_cache.clone(),
+                    tf_buckets: std::collections::HashMap::new(),
+                };
+                new_cache
             }
+        } else {
+            let new_cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
+            store_map.insert(symbol.to_string(), GlobalMtfCache {
+                symbol: symbol.to_string(),
+                last_candle_count: candles_len,
+                last_candle_ts,
+                cache: new_cache.clone(),
+                tf_buckets: std::collections::HashMap::new(),
+            });
+            new_cache
         };
-        let data_view = ferro_trade::data::DataView::new(df, raw_cache);
-        
-        let base_times = &data_view.raw_cache().datetime;
-        let base_df = data_view.get_full_df();
-        for tf_str in &["3m", "5m", "15m", "1h", "4h"] {
+
+        let raw_cache = ferro_trade::data::RawDataCache::new(&df).expect("RawDataCache error");
+        let base_times = &raw_cache.datetime;
+        let base_df = &df;
+
+        let store = store_map.get_mut(symbol).unwrap();
+        let tf_specs = [
+            ("3m", 3 * 60 * 1000i64),
+            ("5m", 5 * 60 * 1000i64),
+            ("15m", 15 * 60 * 1000i64),
+            ("1h", 60 * 60 * 1000i64),
+            ("4h", 4 * 60 * 60 * 1000i64),
+        ];
+
+        for (tf_str, tf_ms) in &tf_specs {
+            let current_bucket = last_candle_ts / tf_ms;
+            let prev_bucket = store.tf_buckets.get(*tf_str).copied().unwrap_or(-1);
+
             if let Ok(tf) = std::str::FromStr::from_str(tf_str) {
-                if let Ok(df_res) = ferro_trade::utils::resample::resample_ohlcv(tf_str, base_df) {
-                    if let Ok(flat_ohlcv) = ferro_trade::utils::resample::df_to_resampled_ohlcv(&df_res) {
-                        let flat_arc = Arc::new(flat_ohlcv);
-                        cache.put_resampled_ohlcv(tf, flat_arc.clone());
-                        let table = Arc::new(ferro_trade::utils::resample::create_lookup_table(base_times, &flat_arc.datetime));
-                        cache.put_lookup(tf, table);
-                    }
+                let maybe_flat = if current_bucket != prev_bucket || cache.get_resampled_ohlcv(tf).is_none() {
+                    if let Ok(df_res) = ferro_trade::utils::resample::resample_ohlcv(tf_str, base_df) {
+                        if let Ok(flat_ohlcv) = ferro_trade::utils::resample::df_to_resampled_ohlcv(&df_res) {
+                            let flat_arc = Arc::new(flat_ohlcv);
+                            cache.put_resampled_ohlcv(tf, flat_arc.clone());
+                            store.tf_buckets.insert((*tf_str).to_string(), current_bucket);
+                            Some(flat_arc)
+                        } else { None }
+                    } else { None }
+                } else {
+                    cache.get_resampled_ohlcv(tf)
+                };
+
+                if let Some(flat_arc) = maybe_flat {
+                    let table = Arc::new(ferro_trade::utils::resample::create_lookup_table(base_times, &flat_arc.datetime));
+                    cache.put_lookup(tf, table);
                 }
             }
+        }
+        drop(store_map);
+
+        let data_view = ferro_trade::data::DataView::new(raw_cache);
+        drop(df);
+
+        let full_len = data_view.total_len();
+        if full_len < 200 {
+            return Vec::new();
         }
 
         let mut indicator_manager = IndicatorManager::new();
@@ -201,8 +255,6 @@ impl HeliosBridge {
         strategy.init(&mut init_context);
 
         let warmup = indicator_manager.warmup_period;
-        let full_len = data_view.get_full_df().height();
-        
         if full_len <= warmup {
             return Vec::new();
         }
@@ -215,11 +267,12 @@ impl HeliosBridge {
 
         if let Some(pos) = live_position {
             if pos.position_amt != 0.0 {
+                let mapped_entry_bar = pos.live_entry_bar.saturating_sub(slice_start);
                 let mut trade = ferro_trade::broker::trade::Trade::new(
                     1,
                     pos.position_amt,
                     pos.entry_price,
-                    pos.live_entry_bar.min(last_idx),
+                    mapped_entry_bar.min(last_idx),
                     None,
                     pos.opening_playbook_tag.clone(),
                 );
@@ -236,23 +289,22 @@ impl HeliosBridge {
             }
         }
 
-        let actions_buffer = RefCell::new(SmallVec::<[Action; 4]>::new());
+        let mut actions_buffer: SmallVec<[Action; 4]> = SmallVec::new();
 
         {
-            let tick_context = TickContext {
+            let mut tick_context = TickContext {
                 i: last_idx,
                 equity: 10000.0,
                 data_view: &data_view,
                 indicator_manager: &indicator_manager,
                 trades: &live_trades,
-                actions: &actions_buffer,
+                actions: &mut actions_buffer,
                 position: live_position_snapshot,
             };
-            strategy.next(&tick_context);
+            strategy.next(&mut tick_context);
         }
 
-        let actions = actions_buffer.into_inner();
-        actions.to_vec()
+        actions_buffer.to_vec()
     }
 
     /// Chuyá»ƒn Ä‘á»•i danh sÃ¡ch Candle (shared model) sang DataFrame (ferro_trade format)
@@ -302,6 +354,10 @@ impl HeliosBridge {
             return Err("Empty candles".into());
         }
 
+        // Khóa Mutex đồng bộ hóa để tránh đụng độ IO lock file ferro_backlog.db khi nhiều luồng cùng gọi
+        static DIAGNOSTIC_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = DIAGNOSTIC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
         // 1. Chuyển đổi DataFrame
         let df = Self::candles_to_df(candles).map_err(|e| e.to_string())?;
 
@@ -333,7 +389,7 @@ impl HeliosBridge {
         prospector.precompute_mtf_data(&backtest);
 
         // 4. Run với DNA
-        let result = backtest.run_with_dna::<helios::strategy::HeliosStrategy>(dna)
+        let result = backtest.run_with_dna::<helios::strategy::core_v3::HeliosStrategyV3>(dna)
             .map_err(|e| e.to_string())?;
 
         Ok(result)

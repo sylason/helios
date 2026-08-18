@@ -11,6 +11,8 @@ use ferro_trade::broker::actions::Action;
 
 use crate::models::account_state::{AccountState, PositionState, AccountEvent};
 
+pub const MAX_LIVE_MEM_CANDLES: usize = 2000;
+
 #[derive(Debug, Clone)]
 pub struct LivePositionState {
     pub symbol: String,
@@ -33,6 +35,7 @@ pub struct AssetActor {
     dna_rx: tokio::sync::watch::Receiver<Option<crate::models::models::OptimizedDna>>,
     data_rx: broadcast::Receiver<(Candle, bool)>,
     account_rx: broadcast::Receiver<AccountEvent>,
+    account_tx: broadcast::Sender<AccountEvent>,
     emergency_rx: mpsc::Receiver<EmergencyCmd>,
     status_tx: mpsc::Sender<StatusUpdate>,
     _trade_tx: mpsc::Sender<TradeSignal>,
@@ -44,11 +47,13 @@ pub struct AssetActor {
     pub account_state: AccountState,
     pub position_state: PositionState,
     pub live_position: Option<LivePositionState>,
-
+    pub execution_mode: crate::models::config::ExecutionMode,
     // Khối 3: Order Executor
     pub executor: Option<Arc<crate::execution::order_executor::OrderExecutor>>,
     pub allocated_capital: f64,
     pub leverage: f64,
+    pub max_live_mem_candles: usize,
+    pub is_submitting_order: bool,
 }
 
 impl AssetActor {
@@ -64,11 +69,16 @@ impl AssetActor {
         status_tx: mpsc::Sender<StatusUpdate>,
         trade_tx: mpsc::Sender<TradeSignal>,
         account_rx: broadcast::Receiver<AccountEvent>,
+        account_tx: broadcast::Sender<AccountEvent>,
         market_filter: crate::models::market_info::MarketFilter,
         executor: Option<Arc<crate::execution::order_executor::OrderExecutor>>,
         allocated_capital: f64,
         leverage: f64,
+        execution_mode: crate::models::config::ExecutionMode,
     ) -> Self {
+        let mut paper_trader = PaperTrader::new(symbol.clone(), allocated_capital, 0.0004);
+        paper_trader.leverage = leverage;
+
         Self {
             symbol: symbol.clone(),
             strategy_id,
@@ -80,24 +90,34 @@ impl AssetActor {
             dna_rx,
             data_rx: data_tx.subscribe(),
             account_rx,
+            account_tx,
             emergency_rx,
             status_tx,
             _trade_tx: trade_tx,
             strategy: None,
-            paper_trader: PaperTrader::new(symbol.clone(), allocated_capital, 0.0004),
+            paper_trader,
             market_filter,
             account_state: AccountState::default(),
             position_state: PositionState::new(&symbol),
             live_position: None,
+            execution_mode,
             executor,
             allocated_capital,
             leverage,
+            max_live_mem_candles: MAX_LIVE_MEM_CANDLES,
+            is_submitting_order: false,
         }
     }
 
     /// Thiết lập Strategy cho Actor (Dependency Injection)
     pub fn with_strategy(mut self, strategy: Box<dyn Strategy + Send>) -> Self {
         self.strategy = Some(strategy);
+        self
+    }
+
+    /// Thiết lập kích thước cửa sổ nến bộ nhớ tối đa
+    pub fn with_max_mem_candles(mut self, max_candles: usize) -> Self {
+        self.max_live_mem_candles = max_candles;
         self
     }
 
@@ -143,6 +163,24 @@ impl AssetActor {
                             strategy.update_from_dna(&dna.dna);
                             info!("✨ [{}] Đã cập nhật bộ não Helios với DNA mới (Fitness: {:.4})", self.symbol, dna.fitness);
                         }
+
+                        // Chạy Backtest chẩn đoán 1 lần duy nhất khi nhận được DNA mới
+                        let rolling_buffer = self.asset.get_candles_vec();
+                        match HeliosBridge::diagnostic_backtest(&rolling_buffer, &dna.dna) {
+                            Ok(result) => {
+                                info!("📊 [DIAGNOSTIC BACKTEST] Window: 30D + Ticks | Return: {:.2}% | Max DD: {:.2}% | Trades: {}", 
+                                    result.stats.return_pct, result.stats.max_drawdown_pct, result.stats.total_trades);
+                            }
+                            Err(e) => {
+                                error!("❌ [DIAGNOSTIC BACKTEST] Failed to run: {}", e);
+                            }
+                        }
+
+                        if self.execution_mode == crate::models::config::ExecutionMode::Paper {
+                            let last_close = rolling_buffer.last().map(|c| c.close).unwrap_or(0.0);
+                            let time_str = chrono::Utc::now().format("%Y-%m-%d %H:%M").to_string();
+                            self.paper_trader.log_cumulative_report(last_close, &time_str);
+                        }
                     }
                 }
 
@@ -152,9 +190,20 @@ impl AssetActor {
                 }
 
                 // Lắng nghe nến real-time từ MarketData
-                Ok((candle, is_historical)) = self.data_rx.recv() => {
-                    if candle.symbol == self.symbol {
-                        self.on_new_candle(candle, is_historical).await;
+                res = self.data_rx.recv() => {
+                    match res {
+                        Ok((candle, is_historical)) => {
+                            if candle.symbol == self.symbol {
+                                self.on_new_candle(candle, is_historical).await;
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!("⚠️ [{}] AssetActor data_rx LAGGED! Dropped {} candles!", self.symbol, skipped);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            info!("ℹ️ [{}] data_rx channel closed. Stopping AssetActor loop.", self.symbol);
+                            break;
+                        }
                     }
                 }
             }
@@ -165,12 +214,12 @@ impl AssetActor {
     }
 
     /// Cập nhật trạng thái và gửi thông báo lên hệ thống UI
-    async fn update_state(&mut self, new_state: AssetState, msg: &str) {
+    pub async fn update_state(&mut self, new_state: AssetState, detail: &str) {
         self.state = new_state.clone();
         let update = StatusUpdate {
             symbol: self.symbol.clone(),
             state: new_state,
-            message: msg.to_string(),
+            message: detail.to_string(),
         };
         
         // Gửi báo cáo vào Channel (không block logic chính)
@@ -179,9 +228,26 @@ impl AssetActor {
         }
     }
 
-    /// Xử lý sự kiện cập nhật số dư hoặc vị thế
-    async fn on_account_event(&mut self, event: AccountEvent) {
-        match event {
+    /// Cập nhật bộ DNA cho chiến thuật hiện tại
+    pub fn update_strategy_dna(&mut self, dna: &[f64]) {
+        if let Some(ref mut strategy) = self.strategy {
+            strategy.update_from_dna(dna);
+        }
+    }
+
+    /// In báo cáo tích lũy kết quả Paper Trader
+    pub fn log_paper_report(&self, current_price: f64, time_label: &str) {
+        self.paper_trader.log_cumulative_report(current_price, time_label);
+    }
+
+    /// Xuất báo cáo vị thế và lịch sử tất cả lệnh cho Paper Trader
+    pub fn log_all_trades_report(&self, current_price: f64) {
+        self.paper_trader.log_all_trades(current_price);
+    }
+
+    /// Lắng nghe và cập nhật trạng thái tài khoản / vị thế thời gian thực
+    async fn on_account_event(&mut self, evt: AccountEvent) {
+        match evt {
             AccountEvent::AccountUpdate { wallet_balance, available_balance } => {
                 self.account_state.wallet_balance = wallet_balance;
                 self.account_state.available_balance = available_balance;
@@ -193,6 +259,7 @@ impl AssetActor {
                     self.position_state.position_amt = position_amt;
                     self.position_state.entry_price = entry_price;
                     self.position_state.unrealized_profit = unrealized_profit;
+                    self.is_submitting_order = false;
                     info!("📈 [{}] Position Update: Amt = {:.4}, Entry = {:.2}, uPnL = {:.2}", 
                           self.symbol, position_amt, entry_price, unrealized_profit);
 
@@ -223,11 +290,16 @@ impl AssetActor {
                     }
                 }
             }
+            AccountEvent::OrderTradeUpdate { symbol, side: _, order_type: _, order_status: _, avg_price: _, orig_qty: _, executed_qty: _, client_order_id: _, order_id: _ } => {
+                if symbol == self.symbol {
+                    self.is_submitting_order = false;
+                }
+            }
         }
     }
 
     /// Truy vấn Database để lấy bộ DNA tốt nhất đã được lưu
-    async fn load_best_params(&mut self) -> Result<(), crate::error::BotError> {
+    pub async fn load_best_params(&mut self) -> Result<(), crate::error::BotError> {
         info!("🧬 [{}] Searching for best DNA in DB...", self.symbol);
         
         let dna_opt = self.strategy_repo.get_best_dna(&self.symbol, &self.strategy_id).await
@@ -245,29 +317,46 @@ impl AssetActor {
         Ok(())
     }
 
-    async fn handle_initial_sync(&mut self) -> Result<(), crate::error::BotError> {
-        info!("📥 [{}] Syncing 30 days of history from Database into Rolling Buffer...", self.symbol);
-        
-        let latest = self.candle_repo.get_latest_candle(&self.symbol).await.map_err(|e| crate::error::BotError::Internal(e.to_string()))?;
-        if let Some(latest_candle) = latest {
-            let end_time = latest_candle.timestamp;
-            // Lấy dư ra 33 ngày để đảm bảo Warmup
-            let start_time = end_time - (33 * 24 * 60 * 60 * 1000);
-            
-            let historical_candles = self.candle_repo.get_candles_by_range(&self.symbol, start_time, end_time).await.map_err(|e| crate::error::BotError::Internal(e.to_string()))?;
-            
-            let count = historical_candles.len();
-            for c in historical_candles {
-                self.asset.push_candle(c);
+    /// Kiểm tra và cập nhật DNA từ Receiver nếu có DNA mới từ Re-Optimizer
+    pub fn check_and_update_dna(&mut self) {
+        if self.dna_rx.has_changed().unwrap_or(false) {
+            let dna_data = self.dna_rx.borrow_and_update();
+            if let Some(ref dna) = *dna_data {
+                if let Some(ref mut strategy) = self.strategy {
+                    strategy.update_from_dna(&dna.dna);
+                    info!("✨ [{}] Đã cập nhật bộ não Helios với DNA mới từ Re-Optimizer! (Fitness: {:.4})", self.symbol, dna.fitness);
+                }
             }
-            info!("✅ [{}] Trí nhớ đã được nạp {} nến lịch sử. Sẵn sàng chiến đấu!", self.symbol, count);
-        } else {
-            warn!("⚠️ [{}] Database trống! Bot sẽ phải thu thập nến từ từ (có thể mất rất lâu mới trade được).", self.symbol);
         }
+    }
+
+    pub async fn handle_initial_sync_until(&mut self, until_ts: i64) -> Result<(), String> {
+        info!("📥 [{}] Syncing history until timestamp {} into Rolling Buffer...", self.symbol, until_ts);
+        
+        let start_time = until_ts - (33 * 24 * 60 * 60 * 1000);
+        let historical_candles = self.candle_repo.get_candles_by_range(&self.symbol, start_time, until_ts).await.map_err(|e| e.to_string())?;
+        
+        let count = historical_candles.len();
+        for c in historical_candles {
+            self.asset.push_candle(c);
+        }
+
+        info!("✅ [{}] Synchronized {} historical 1m candles into Rolling Buffer (Total buffer: {}).", 
+              self.symbol, count, self.asset.get_candles_vec().len());
         Ok(())
     }
 
-    async fn on_new_candle(&mut self, candle: Candle, is_historical: bool) {
+    pub async fn handle_initial_sync(&mut self) -> Result<(), String> {
+        let latest = self.candle_repo.get_latest_candle(&self.symbol).await.map_err(|e| e.to_string())?;
+        if let Some(latest_candle) = latest {
+            self.handle_initial_sync_until(latest_candle.timestamp).await
+        } else {
+            warn!("⚠️ [{}] Database trống! Bot sẽ phải thu thập nến từ từ (có thể mất rất lâu mới trade được).", self.symbol);
+            Ok(())
+        }
+    }
+
+    pub async fn on_new_candle(&mut self, candle: Candle, is_historical: bool) {
         debug!("📬 [{}] Received new candle: {} (historical: {})", self.symbol, candle.timestamp, is_historical);
         
         // 1. Đẩy vào Rolling Buffer (Trí nhớ 30 ngày)
@@ -275,39 +364,59 @@ impl AssetActor {
 
         let current_close = candle.close;
 
-        // 2. Lưu nến vào Database (Bền vững)
-        if let Err(e) = self.candle_repo.save_candle(candle).await {
-            error!("❌ [{}] Failed to save candle: {}", self.symbol, e);
+        // 2. Chỉ lưu nến vào Database nếu không phải Paper mode và không phải nến lịch sử
+        if self.execution_mode != crate::models::config::ExecutionMode::Paper && !is_historical {
+            if let Err(e) = self.candle_repo.save_candle(candle.clone()).await {
+                error!("❌ [{}] Failed to save candle: {}", self.symbol, e);
+            }
         }
 
         // 3. Nếu đang ở trạng thái Trading, thực thi chiến lược
         if self.state == AssetState::Trading {
-            let rolling_buffer = self.asset.get_candles_vec();
+            let full_buffer = self.asset.get_candles_vec();
+            
+            // Cắt nến bộ nhớ: Đảm bảo cửa sổ luôn chứa nến mở vị thế (live_entry_bar)
+            let max_mem = if let Some(ref pos) = self.live_position {
+                let pos_age = full_buffer.len().saturating_sub(pos.live_entry_bar);
+                self.max_live_mem_candles.max(pos_age + 200)
+            } else {
+                self.max_live_mem_candles
+            };
 
-            // Lấy DNA mới nhất hiện tại từ channel
-            let current_dna_opt = self.dna_rx.borrow().clone();
+            let slice_start = full_buffer.len().saturating_sub(max_mem);
+            let rolling_buffer = &full_buffer[slice_start..];
 
-            // Chạy Backtest chẩn đoán 1:1 với ferro_trade::backtest::engine 
-            // (Đúng như yêu cầu của user, gọi run_with_dna ở mỗi tick)
-            if let Some(dna_data) = current_dna_opt {
-                match HeliosBridge::diagnostic_backtest(&rolling_buffer, &dna_data.dna) {
-                    Ok(result) => {
-                        info!("📊 [DIAGNOSTIC BACKTEST] Window: 30D + Ticks | Return: {:.2}% | Max DD: {:.2}% | Trades: {}", 
-                            result.stats.return_pct, result.stats.max_drawdown_pct, result.stats.total_trades);
-                    }
-                    Err(e) => {
-                        error!("❌ [DIAGNOSTIC BACKTEST] Failed to run: {}", e);
+            // BƯỚC 3.1: Quét nến real-time cho PaperTrader xem có dính Trailing SL/TP từ nến trước hay không (CHẠY TRƯỚC khi Strategy dời SL)
+            if self.execution_mode == crate::models::config::ExecutionMode::Paper {
+                if self.paper_trader.on_candle(&candle, Some(&self.account_tx)) {
+                    if self.paper_trader.position_type == crate::execution::paper_trader::PositionType::None {
+                        self.live_position = None;
                     }
                 }
             }
 
-            // Gọi HeliosBridge::evaluate_live_tick để đánh giá tín hiệu và dời Trailing SL cho nến HIỆN TẠI
+            // BƯỚC 3.2: Gọi HeliosBridge::evaluate_live_tick để đánh giá tín hiệu và dời Trailing SL cho nến tiếp theo
             if let Some(ref mut strategy) = self.strategy {
-                let actions = HeliosBridge::evaluate_live_tick(&self.symbol, &rolling_buffer, self.live_position.as_ref(), strategy.as_mut());
+                let actions = HeliosBridge::evaluate_live_tick(&self.symbol, rolling_buffer, slice_start, self.live_position.as_ref(), strategy.as_mut());
                 
                 if !actions.is_empty() {
                     info!("🎯 [{}] Strategy generated {} actions on candle {}!", self.symbol, actions.len(), current_close);
                     for action in actions {
+                        use ferro_trade::broker::policies::RiskPolicy;
+                        use crate::execution::paper_trader::PositionType;
+
+                        // Trích xuất tag & initial_sl từ action
+                        let (playbook_tag, initial_sl) = match &action {
+                            Action::Buy { policy, tag, .. } | Action::Sell { policy, tag, .. } => {
+                                let sl = match policy {
+                                    Some(RiskPolicy::FixedPrice { sl_price, .. }) => *sl_price,
+                                    _ => None,
+                                };
+                                (tag.clone(), sl)
+                            }
+                            _ => (None, None),
+                        };
+
                         // Cập nhật giá SL nội bộ nếu có Action::UpdateTradeSlTp
                         if let Action::UpdateTradeSlTp { new_sl_price: Some(sl), .. } = action {
                             if let Some(ref mut pos) = self.live_position {
@@ -316,47 +425,95 @@ impl AssetActor {
                         }
 
                         // --- ENFORCE EXCLUSIVE ORDER RULE ---
-                        // "Không vào lệnh Long khi đã có Long, không vào lệnh Short khi đã có Short"
                         let position_amt = self.position_state.position_amt;
                         if let Action::Buy { .. } = action {
-                            if position_amt > 0.0 {
-                                info!("ℹ️ [{}] Đang có vị thế Long ({}), bỏ qua tín hiệu Buy (Exclusive Order).", self.symbol, position_amt);
+                            if position_amt > 0.0 || self.is_submitting_order {
+                                info!("ℹ️ [{}] Đang có vị thế Long ({}) hoặc đang gửi lệnh, bỏ qua tín hiệu Buy (Exclusive Order).", self.symbol, position_amt);
                                 continue;
                             }
                         } else if let Action::Sell { .. } = action {
-                            if position_amt < 0.0 {
-                                info!("ℹ️ [{}] Đang có vị thế Short ({}), bỏ qua tín hiệu Sell (Exclusive Order).", self.symbol, position_amt);
+                            if position_amt < 0.0 || self.is_submitting_order {
+                                info!("ℹ️ [{}] Đang có vị thế Short ({}) hoặc đang gửi lệnh, bỏ qua tín hiệu Sell (Exclusive Order).", self.symbol, position_amt);
                                 continue;
                             }
                         }
                         
-                        // Bắn lệnh thật nếu có Executor (VÀ nến không phải là nến lịch sử lấy từ Gap Filler)
-                        if is_historical {
-                            info!("🕰️ [{}] Nến Lịch sử. Bỏ qua Action {:?} (Gap Filler Order Spam Prevention).", self.symbol, action);
-                        } else if let Some(ref executor) = self.executor {
-                            // Sử dụng chiến thuật quản lý vốn lũy tiến (10% của Available Balance)
-                            let usable_capital = self.account_state.available_balance * 0.1;
-                            let leverage = self.leverage;
-                            let symbol = self.symbol.clone();
-                            
-                            // Ta cần Clone action vì execute_action là hàm async lấy giá trị Action
-                            let action_clone = action.clone();
-                            let executor_clone = executor.clone();
-                            
-                            tokio::spawn(async move {
-                                if let Err(e) = executor_clone.execute_action(&symbol, action_clone, current_close, usable_capital, position_amt, leverage).await {
-                                    error!("❌ [{}] Lỗi thực thi lệnh qua OrderExecutor: {:?}", symbol, e);
-                                }
-                            });
+                        // Phân định chế độ thực thi qua ExecutionMode
+                        use crate::models::config::ExecutionMode;
+                        match self.execution_mode {
+                            ExecutionMode::Paper => {
+                                info!("📝 [{}] [PAPER MODE] Process Action: {:?}", self.symbol, action);
+                                self.paper_trader.process_action(action.clone(), current_close, Some(&self.account_tx));
 
-                        } else {
-                            // Chế độ Paper Trader: Chỉ chạy khi KHÔNG CÓ Executor
-                            self.paper_trader.process_action(action.clone(), current_close);
+                                // Cập nhật live_position để Helios nhận đúng tag & initial_sl ở các nến sau
+                                if self.paper_trader.position_type != PositionType::None {
+                                    let current_bar = full_buffer.len().saturating_sub(1);
+                                    let pos_amt = match self.paper_trader.position_type {
+                                        PositionType::Long => self.paper_trader.position_size,
+                                        PositionType::Short => -self.paper_trader.position_size,
+                                        PositionType::None => 0.0,
+                                    };
+                                    if let Some(ref mut pos) = self.live_position {
+                                        pos.position_amt = pos_amt;
+                                        pos.entry_price = self.paper_trader.entry_price;
+                                        if playbook_tag.is_some() {
+                                            pos.opening_playbook_tag = playbook_tag;
+                                        }
+                                        if initial_sl.is_some() {
+                                            pos.current_sl_price = initial_sl;
+                                        }
+                                    } else {
+                                        let current_time = chrono::Utc::now().timestamp_millis();
+                                        self.live_position = Some(LivePositionState {
+                                            symbol: self.symbol.clone(),
+                                            position_amt: pos_amt,
+                                            entry_price: self.paper_trader.entry_price,
+                                            entry_timestamp: current_time,
+                                            live_entry_bar: current_bar,
+                                            current_sl_price: initial_sl,
+                                            opening_playbook_tag: playbook_tag,
+                                        });
+                                    }
+                                } else {
+                                    self.live_position = None;
+                                }
+                            }
+                            ExecutionMode::Testnet | ExecutionMode::RealTrade => {
+                                if is_historical {
+                                    info!("🕰️ [{}] Nến Lịch sử. Bỏ qua Action {:?} (Gap Filler Order Spam Prevention).", self.symbol, action);
+                                } else if let Some(ref executor) = self.executor {
+                                    let usable_capital = self.account_state.available_balance;
+                                    let leverage = self.leverage;
+                                    let symbol = self.symbol.clone();
+                                    let action_clone = action.clone();
+                                    let executor_clone = executor.clone();
+                                    self.is_submitting_order = true;
+                                    
+                                    tokio::spawn(async move {
+                                        if let Err(e) = executor_clone.execute_action(&symbol, action_clone, current_close, usable_capital, position_amt, leverage).await {
+                                            error!("❌ [{}] Lỗi thực thi lệnh qua OrderExecutor: {:?}", symbol, e);
+                                        }
+                                    });
+                                } else {
+                                    warn!("⚠️ [{}] [{:?}] Executor bị None nhưng execution_mode là Real/Testnet!", self.symbol, self.execution_mode);
+                                }
+                            }
+                            ExecutionMode::DryRun => {
+                                info!("🧪 [{}] [DRY_RUN MODE] Would execute Action: {:?} @ {:.2}", self.symbol, action, current_close);
+                            }
+                            ExecutionMode::Diagnostic => {
+                                info!("📊 [{}] [DIAGNOSTIC MODE] Action logged: {:?} @ {:.2}", self.symbol, action, current_close);
+                            }
                         }
                     }
                 } else {
                     debug!("🧠 [{}] Strategy evaluated. No actions generated on close {}.", self.symbol, current_close);
                 }
+            }
+
+            // Đồng bộ AccountEvent vừa phát ra ngay lập tức
+            while let Ok(acc_evt) = self.account_rx.try_recv() {
+                self.on_account_event(acc_evt).await;
             }
         }
     }

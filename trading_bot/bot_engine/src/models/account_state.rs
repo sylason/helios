@@ -43,7 +43,18 @@ pub enum AccountEvent {
         position_amt: f64,
         entry_price: f64,
         unrealized_profit: f64,
-    }
+    },
+    OrderTradeUpdate {
+        symbol: String,
+        side: String,
+        order_type: String,
+        order_status: String,
+        avg_price: f64,
+        orig_qty: f64,
+        executed_qty: f64,
+        client_order_id: String,
+        order_id: i64,
+    },
 }
 
 /// Hàm trợ giúp kiểm tra số dư an toàn trước khi mở lệnh

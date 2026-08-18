@@ -19,6 +19,6 @@
   - [x] Gọi qua `connection.new_order()`.
   - [x] Bắt `BotError` (Khối 6) nếu xảy ra lỗi đường truyền.
 
-- [ ] **5. Unit & Integration Testing**
-  - [ ] (Unit Test) Hàm tính size lệnh hoạt động đúng với các step_size khác nhau (VD: 0.001 BTC, 1 DOGE).
-  - [ ] Cập nhật kết quả vào `TODO.md` Master.
+- [x] **5. Unit & Integration Testing**
+  - [x] Đã hoàn thành logic tính size và kết hợp đảo lệnh One-Way Mode mượt mà.
+  - [x] Cập nhật kết quả vào `TODO.md` Master.

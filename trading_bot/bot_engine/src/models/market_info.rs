@@ -79,7 +79,7 @@ impl MarketFilter {
     }
 
     /// Đếm số lượng chữ số thập phân, ví dụ 0.001 -> 3
-    fn count_decimals(val: f64) -> u32 {
+    pub fn count_decimals(val: f64) -> u32 {
         if val >= 1.0 || val <= 0.0 {
             return 0;
         }

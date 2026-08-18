@@ -44,7 +44,7 @@ Tài liệu này liệt kê chi tiết các chức năng cần hoàn thiện, s�
 - [ ] **8. Hot-swap Controller**
     - **Nhiệm vụ:** Nhận tham số (DNA) tốt nhất từ Optimizer và ra lệnh cho `Recalculation Engine` thực thi ngay lập tức (kể cả khi đang có lệnh).
     - **Phụ thuộc:** **Recalculation Engine**.
-- [ ] **11. Helios Strategy Integration (v1)**
+- [x] **11. Helios Strategy Integration (v1)**
     - **Nhiệm vụ:** Port code Helios sang `trading_bot`. Xây dựng `LiveStrategyWrapper` để Helios đọc nến Real-time + 30 ngày lịch sử.
     - **Phụ thuộc:** Không.
 
@@ -53,7 +53,7 @@ Tài liệu này liệt kê chi tiết các chức năng cần hoàn thiện, s�
 ## 💸 TẦNG 4: THỰC THI & HIỂN THỊ (Minimalist UI)
 *Mục tiêu: Giao diện bảng tài sản "Một chạm".*
 
-- [ ] **9. Trade Executor (Testnet)**
+- [x] **9. Trade Executor (Testnet)**
     - **Nhiệm vụ:** Đặt lệnh Mua/Bán, Stop-loss thực tế lên Binance Testnet.
     - **Phụ thuộc:** **Weight Monitor**, **User Stream**.
 - [ ] **10. Minimal Asset Table (Tauri v2)**

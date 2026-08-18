@@ -1,7 +1,7 @@
 use binance_sdk::config::ConfigurationWebsocketStreams;
 use binance_sdk::derivatives_trading_usds_futures::{
     DerivativesTradingUsdsFuturesWsStreams,
-    websocket_streams::KlineCandlestickStreamsParams,
+    websocket_streams::{KlineCandlestickStreamsParams, KlineCandlestickStreamsIntervalEnum},
 };
 use tokio::sync::broadcast;
 use tracing::{error, info, debug};
@@ -27,7 +27,7 @@ pub async fn start_kline_stream(symbol: String, data_tx: broadcast::Sender<(Cand
     info!("👀 Đã kết nối WebSocket. Đang đăng ký Kline 1m cho {}", symbol.to_uppercase());
 
     // 3. Đăng ký stream Kline 1m
-    let params = KlineCandlestickStreamsParams::builder(symbol_lower, "1m".to_string()).build().unwrap();
+    let params = KlineCandlestickStreamsParams::builder(symbol_lower, KlineCandlestickStreamsIntervalEnum::Interval1m).build().unwrap();
     let stream = connection.kline_candlestick_streams(params).await.expect("Không thể mở Kline Stream");
 
     // 4. Xử lý tin nhắn (Bóc tách Option đa tầng)

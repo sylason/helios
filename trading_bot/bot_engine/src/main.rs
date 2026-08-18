@@ -16,7 +16,7 @@ use controller::asset_actor::AssetActor;
 use data_engine::binance_rest::InitialSync;
 use execution::ws_manager::WsManager;
 use std::collections::HashMap;
-use helios::strategy::{HeliosStrategy, QuickCrossStrategy};
+use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
@@ -24,7 +24,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // KHAI BÁO STRATEGY ID ĐANG DÙNG (Dùng để định danh log và db)
-    let strategy_id = "helios_v2";
+    let strategy_id = "helios_v3";
 
     // 1. Khởi tạo Logger (Console + File)
     let log_filename = format!("{}_bot.log", strategy_id);
@@ -101,9 +101,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Optimizer chạy ngay lập tức vì ta đã đảm bảo xong 33 ngày data
         loop {
             // Chạy optimizer
-            let config_path = r#"E:\Projects\Automations\trading_backtest\strategies_backtests\v2_trading_bot_demo\examples\helios_optimizer_config.json"#;
+            let local_config = "helios_optimizer_config.json";
+            let config_in_dir = "config/helios_optimizer_config.json";
+            let default_path = r#"E:\Projects\Automations\trading_backtest\strategies_backtests\trading_bot_demo\examples\helios_optimizer_config.json"#;
+            let relative_1 = "strategies_backtests/trading_bot_demo/examples/helios_optimizer_config.json";
+            let relative_2 = "../strategies_backtests/trading_bot_demo/examples/helios_optimizer_config.json";
+            let relative_3 = "../../strategies_backtests/trading_bot_demo/examples/helios_optimizer_config.json";
+
+            let config_path = if std::path::Path::new(local_config).exists() {
+                local_config
+            } else if std::path::Path::new(config_in_dir).exists() {
+                config_in_dir
+            } else if std::path::Path::new(relative_1).exists() {
+                relative_1
+            } else if std::path::Path::new(relative_2).exists() {
+                relative_2
+            } else if std::path::Path::new(relative_3).exists() {
+                relative_3
+            } else {
+                default_path
+            };
+
             let db_opt_path = format!("storage/{}_prospector.db", strategy_id);
-            if let Err(e) = crate::optimizer::prospector_runner::ProspectorRunner::run_optimization_cycle(
+            if let Err(e) = crate::optimizer::prospector_runner::ProspectorRunner::run_optimization_cycle_smart_seed(
                 &symbol_opt,
                 strategy_id,
                 db_for_opt.clone(),
@@ -114,9 +134,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 tracing::error!("❌ Lỗi chạy Optimizer ngầm: {}", e);
             }
             
-            // Chờ 15 phút cho chu kỳ tiếp theo
-            info!("💤 [Optimizer] Tạm nghỉ 15 phút chờ chu kỳ mới.");
-            tokio::time::sleep(tokio::time::Duration::from_secs(15 * 60)).await;
+            // Chờ 5 phút cho chu kỳ tiếp theo
+            info!("💤 [Optimizer] Tạm nghỉ 5 phút chờ chu kỳ mới.");
+            tokio::time::sleep(tokio::time::Duration::from_secs(5 * 60)).await;
         }
     });
 
@@ -163,10 +183,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         monitor.clone()
     ));
 
-    // 9. Khởi chạy Asset Actor (Nhạc trưởng) với QuickCrossStrategy để test
-    // let test_strategy = Box::new(QuickCrossStrategy::new());
-    let test_strategy = Box::new(HeliosStrategy::new(&std::collections::HashMap::new()));
+    // 9. Khởi chạy Asset Actor (Nhạc trưởng) với HeliosStrategyV3
+    let test_strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
 
+    let execution_mode = if _config.use_testnet {
+        crate::models::config::ExecutionMode::Testnet
+    } else {
+        crate::models::config::ExecutionMode::RealTrade
+    };
+
+    let account_tx = event_bus.account_tx.clone();
 
     let actor = AssetActor::new(
         symbol,
@@ -180,10 +206,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         status_tx, // Truyền Sender trạng thái vào đây
         trade_tx,
         account_rx,
+        account_tx,
         market_filter,
         Some(executor),
         60.0, // allocated_capital
         20.0, // leverage
+        execution_mode,
     ).with_strategy(test_strategy);
     
     let actor_handle = tokio::spawn(async move {

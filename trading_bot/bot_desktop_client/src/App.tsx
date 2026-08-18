@@ -1,116 +1,204 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Container, Table, Button, Badge, Card, Navbar } from "react-bootstrap";
+// trading_bot/bot_desktop_client/src/App.tsx
+import { useState, useMemo } from 'react';
+import { PageId, AssetState, AccountState, SystemHealth } from './types/bot';
+import { 
+  INITIAL_MOCK_ASSETS, 
+  INITIAL_MOCK_ACCOUNT, 
+  INITIAL_MOCK_HEALTH, 
+  BotService 
+} from './services/botService';
+import { Topbar } from './components/layout/Topbar';
+import { Sidebar } from './components/layout/Sidebar';
+import { ControlPage } from './pages/ControlPage';
+import { DashboardPage } from './pages/DashboardPage';
 
 function App() {
-  // Trạng thái cho từng Asset (Trong demo này chỉ có ETHUSDT)
-  const [signalReady, setSignalReady] = useState(false);
-  const [isActivating, setIsActivating] = useState(false);
+  const [activePage, setActivePage] = useState<PageId>('control');
+  const [assets, setAssets] = useState<AssetState[]>(INITIAL_MOCK_ASSETS);
+  const [account, setAccount] = useState<AccountState>(INITIAL_MOCK_ACCOUNT);
+  const [health] = useState<SystemHealth>(INITIAL_MOCK_HEALTH);
 
-  const handleActivate = async (asset: string) => {
-    if (!isActivating) {
-      // Logic BẬT: Sync 30 ngày -> Optimize ngầm -> Signal READY -> Trade
-      setIsActivating(true);
-      setSignalReady(false);
-      
-      try {
-        await invoke("cmd_activate_asset", { asset });
-        // Giả lập chu kỳ Sync & Optimize ban đầu mất khoảng 3 giây
-        // Trong thực tế, Backend sẽ gửi event khi Ready, nhưng ở demo ta dùng timeout
-        setTimeout(() => setSignalReady(true), 3000);
-      } catch (error) {
-        console.error("Lỗi kích hoạt:", error);
-        setIsActivating(false);
+  // Tính số lượng Asset đang Active
+  const activeCount = useMemo(() => {
+    return assets.filter(a => a.status !== 'INACTIVE' && a.status !== 'ERROR').length;
+  }, [assets]);
+
+  // Cập nhật state Account khi activeCount thay đổi
+  const currentAccount = useMemo(() => {
+    return {
+      ...account,
+      activeAssetsCount: activeCount,
+    };
+  }, [account, activeCount]);
+
+  /**
+   * Kích hoạt Bot cho một Cặp tiền (Sync -> GA Optimize -> Live Trading)
+   */
+  const handleActivate = async (symbol: string) => {
+    // 1. Chuyển sang SYNCING_DATA
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === symbol) {
+        return {
+          ...a,
+          status: 'SYNCING_DATA',
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 📥 Starting 60-Day Kline Sync from Binance REST...`],
+        };
       }
-    } else {
-      // Logic TẮT (Immediate): Đóng sạch mọi thứ ngay lập tức
-      setIsActivating(false);
-      setSignalReady(false);
-      await invoke("cmd_terminate_immediate", { asset });
-    }
+      return a;
+    }));
+
+    await BotService.activateAsset(symbol);
+
+    // 2. Giả lập sau 1.5s chuyển sang GA_OPTIMIZING
+    setTimeout(() => {
+      setAssets(prev => prev.map(a => {
+        if (a.symbol === symbol) {
+          return {
+            ...a,
+            status: 'GA_OPTIMIZING',
+            recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🧬 Prospector GA Engine building Champion DNA...`],
+          };
+        }
+        return a;
+      }));
+
+      // 3. Giả lập sau 1.5s nữa chuyển sang READY_TRADING
+      setTimeout(() => {
+        setAssets(prev => prev.map(a => {
+          if (a.symbol === symbol) {
+            const isLong = symbol === 'ETHUSDT' || symbol === 'SOLUSDT';
+            return {
+              ...a,
+              status: 'READY_TRADING',
+              position: {
+                side: isLong ? 'LONG' : 'SHORT',
+                qty: symbol === 'ETHUSDT' ? 1.5 : (symbol === 'BTCUSDT' ? 0.05 : 10.0),
+                entryPrice: symbol === 'ETHUSDT' ? 1905.40 : (symbol === 'BTCUSDT' ? 64200.0 : 135.50),
+                unrealizedPnl: 45.20,
+                unrealizedPnlPct: 2.37,
+                trailingSlPrice: symbol === 'ETHUSDT' ? 1929.54 : undefined,
+              },
+              recentLogs: [
+                ...a.recentLogs, 
+                `[${new Date().toLocaleTimeString()}] 🚀 Champion DNA loaded. READY TO TRADE on Binance Futures Testnet.`,
+                `[${new Date().toLocaleTimeString()}] 🛡️ Trailing SL target order initialized.`,
+              ],
+            };
+          }
+          return a;
+        }));
+
+        setAccount(prev => ({
+          ...prev,
+          totalUnrealizedPnl: prev.totalUnrealizedPnl + 45.20,
+        }));
+      }, 1500);
+    }, 1500);
   };
 
-  const handleGraceful = async (asset: string) => {
-    // Logic DỪNG AN TOÀN: Chặn mở lệnh mới, đợi Trailing SL đóng lệnh cũ
-    await invoke("cmd_terminate_graceful", { asset });
+  /**
+   * Dừng an toàn (Graceful Terminate)
+   */
+  const handleGracefulTerminate = async (symbol: string) => {
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === symbol) {
+        return {
+          ...a,
+          status: 'GRACEFUL_EXIT',
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🟡 Graceful termination requested. Waiting for Trailing SL execution...`],
+        };
+      }
+      return a;
+    }));
+
+    await BotService.gracefulTerminateAsset(symbol);
+
+    // Giả lập sau 3s đóng xong vị thế
+    setTimeout(() => {
+      setAssets(prev => prev.map(a => {
+        if (a.symbol === symbol) {
+          return {
+            ...a,
+            status: 'INACTIVE',
+            position: { side: 'FLAT', qty: 0, entryPrice: 0, unrealizedPnl: 0, unrealizedPnlPct: 0 },
+            recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🧹 Trailing SL filled. Position closed gracefully. Asset INACTIVE.`],
+          };
+        }
+        return a;
+      }));
+    }, 3000);
+  };
+
+  /**
+   * Ngắt khẩn cấp (Immediate Terminate)
+   */
+  const handleImmediateTerminate = async (symbol: string) => {
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === symbol) {
+        return {
+          ...a,
+          status: 'INACTIVE',
+          position: { side: 'FLAT', qty: 0, entryPrice: 0, unrealizedPnl: 0, unrealizedPnlPct: 0 },
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🔴 Immediate termination executed. Algo orders cancelled. Position reset.`],
+        };
+      }
+      return a;
+    }));
+
+    await BotService.immediateTerminateAsset(symbol);
+  };
+
+  /**
+   * Dừng khẩn cấp Toàn cục (Emergency Stop All)
+   */
+  const handleEmergencyStopAll = async () => {
+    setAssets(prev => prev.map(a => ({
+      ...a,
+      status: 'INACTIVE',
+      position: { side: 'FLAT', qty: 0, entryPrice: 0, unrealizedPnl: 0, unrealizedPnlPct: 0 },
+      recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🚨 GLOBAL EMERGENCY STOP EXECUTED. All bots stopped.`],
+    })));
+
+    setAccount(prev => ({
+      ...prev,
+      totalUnrealizedPnl: 0,
+    }));
+
+    await BotService.emergencyStopAll();
   };
 
   return (
-    <div className="bg-dark min-vh-100 text-light">
-      <Navbar bg="black" variant="dark" className="border-bottom border-secondary mb-4">
-        <Container fluid>
-          <Navbar.Brand href="#home" className="fw-bold text-info">
-            🚀 Trading Bot Client v1
-          </Navbar.Brand>
-          <Navbar.Text>
-            Mode: <Badge bg="warning" text="dark">DEMO (Binance Testnet)</Badge>
-          </Navbar.Text>
-        </Container>
-      </Navbar>
+    <div className="bg-dark min-vh-100 text-light d-flex flex-column">
+      {/* Topbar Component */}
+      <Topbar wsConnected={health.wsConnected} />
 
-      <Container fluid>
-        <Card bg="dark" border="secondary" className="shadow-sm">
-          <Card.Header className="bg-black text-info border-secondary py-3">
-            <h5 className="mb-0">Asset Management (Active Watchlist)</h5>
-          </Card.Header>
-          <Card.Body className="p-0">
-            <Table responsive variant="dark" hover className="mb-0 align-middle text-center border-0">
-              <thead className="text-secondary text-uppercase small">
-                <tr>
-                  <th>Category</th>
-                  <th>Exchange</th>
-                  <th>Asset Symbol</th>
-                  <th style={{ width: '250px' }}>Main Action</th>
-                  <th style={{ width: '250px' }}>Safe Exit</th>
-                  <th>Signal Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><Badge bg="outline-secondary" className="border border-secondary text-secondary">FUTURES</Badge></td>
-                  <td className="text-secondary">BINANCE</td>
-                  <td className="fw-bold">ETHUSDT</td>
-                  <td>
-                    <Button 
-                      variant={isActivating ? "outline-danger" : "outline-success"} 
-                      className="w-100 py-2 fw-bold"
-                      onClick={() => handleActivate("ETHUSDT")}
-                    >
-                      {isActivating ? "DEACTIVATE (IMMEDIATE)" : "ACTIVATE BOT"}
-                    </Button>
-                  </td>
-                  <td>
-                    <Button 
-                      variant="outline-warning" 
-                      className="w-100 py-2 fw-bold"
-                      onClick={() => handleGraceful("ETHUSDT")}
-                      disabled={!isActivating}
-                    >
-                      TERMINATE GRACEFULLY
-                    </Button>
-                  </td>
-                  <td>
-                    {isActivating ? (
-                      <Badge bg={signalReady ? "success" : "warning"} className="px-3 py-2">
-                        {signalReady ? "READY TO TRADE" : "SYNCING / OPTIMIZING..."}
-                      </Badge>
-                    ) : (
-                      <Badge bg="secondary" className="px-3 py-2 text-dark" style={{ opacity: 0.5 }}>
-                        INACTIVE
-                      </Badge>
-                    )}
-                  </td>
-                </tr>
-              </tbody>
-            </Table>
-          </Card.Body>
-        </Card>
+      {/* Main Content Layout (Sidebar + Active Page) */}
+      <div className="d-flex flex-grow-1">
+        <Sidebar 
+          activePage={activePage} 
+          onSelectPage={(page) => setActivePage(page)} 
+        />
 
-        <footer className="mt-4 text-secondary small">
-          <p className="mb-0">* Hệ thống tự động duy trì cửa sổ 30 ngày dữ liệu nến 1m cho các Asset được Activate.</p>
-          <p>* Mọi quyết định Optimize và Hot-swap DNA diễn ra hoàn toàn trong Engine ngầm.</p>
-        </footer>
-      </Container>
+        <main className="flex-grow-1 bg-dark overflow-auto">
+          {activePage === 'control' && (
+            <ControlPage 
+              assets={assets}
+              onActivate={handleActivate}
+              onGracefulTerminate={handleGracefulTerminate}
+              onImmediateTerminate={handleImmediateTerminate}
+            />
+          )}
+
+          {activePage === 'dashboard' && (
+            <DashboardPage 
+              account={currentAccount}
+              health={health}
+              totalAssetsCount={assets.length}
+              onEmergencyStopAll={handleEmergencyStopAll}
+            />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
