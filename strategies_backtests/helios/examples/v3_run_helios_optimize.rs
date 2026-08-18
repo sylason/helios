@@ -57,6 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. Backtest Setup (Template cho mọi Worker)
     let backtest = BacktestBuilder::new()
         .data(df)
+        .timeframes(&prospector_config.available_timeframes)
         .cash(common::INITIAL_CASH)
         .commission(common::COMMISSION)
         .margin(common::MARGIN)

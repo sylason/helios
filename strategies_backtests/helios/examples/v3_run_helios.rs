@@ -34,6 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let backtest = BacktestBuilder::new()
         .data(df)
+        .timeframes(&["3m", "5m", "15m", "1h", "4h"])
         .cash(1000.0)
         .commission(0.0004)
         .margin(1.0)
@@ -48,16 +49,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             StatItem::MaxDrawdownPct,
         ])
         .build()?;
-
-    // Load Cấu hình (Chỉ lấy phần cấu hình Prospector để precompute MTF)
-    let config_path = "examples/helios_optimizer_config.json";
-    let file = File::open(config_path)?;
-    let reader = BufReader::new(file);
-    let full_config: FullOptimizerConfig = serde_json::from_reader(reader)?;
-
-    // TIỀN TÍNH TOÁN MTF
-    let prospector = Prospector::new(full_config.prospector)?;
-    prospector.precompute_mtf_data(&backtest);
 
     let start_time = Instant::now();
     let result = backtest.run_with_dna::<HeliosStrategyV3>(&rank_1_dna)?;
