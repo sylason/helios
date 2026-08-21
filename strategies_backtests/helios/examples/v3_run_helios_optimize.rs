@@ -2,13 +2,12 @@
 
 mod common;
 
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
 use serde::Deserialize;
-use ferro_trade::backtest::BacktestBuilder;
+use ferro_trade::backtest::{BacktestBuilder, EarlyTermination, TerminationReason};
 use ferro_trade::data::load_data;
 use ferro_trade::optimizer::prospector::{Prospector, ProspectorConfig};
 use ferro_trade::stats::StatItem;
@@ -78,6 +77,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             StatItem::SortinoRatio,
             StatItem::ProfitFactor
         ])
+        // [A4.2] Cấu hình Early Termination dựa trên Objective Function:
+        // - Ngắt ngay nếu Max Drawdown vượt quá 40% (ngưỡng đỏ của Objective)
+        // - Ngắt ngay nếu sau 10 ngày (14,400 nến 1m) mà vào ít hơn 5 lệnh (< 0.5 trades/day)
+        .early_termination(EarlyTermination::Any(vec![
+            EarlyTermination::MaxDrawdown(40.0),
+            EarlyTermination::WarmupMinTrades { after_bars: 14400, min_trades: 5 },
+        ]))
+        // Tùy chọn: Hàm phạt khớp chính xác với điểm phạt của Objective
+        .early_termination_penalty(|term_info| {
+            match &term_info.reason {
+                TerminationReason::MaxDrawdownExceeded { current_pct, .. } => {
+                    -5000.0 - current_pct
+                }
+                TerminationReason::WarmupStagnant { bars_checked, trades_count, .. } => {
+                    let days = *bars_checked as f64 / 1440.0;
+                    let trades_per_day = *trades_count as f64 / days;
+                    -2000.0 * (1.0 - trades_per_day)
+                }
+                _ => -5000.0 - (term_info.total_bars - term_info.bar_index) as f64 * 0.1,
+            }
+        })
         .build()?;
 
     // 5. Khởi tạo Prospector
@@ -136,17 +156,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, c) in champs.iter().enumerate() {
         if i >= 10 { break; }
 
-        let ret = c.stats.get("Return %").unwrap_or(&0.0);
-        let dd = c.stats.get("Max DD %").unwrap_or(&0.0);
-        let trades = c.stats.get("Trades").unwrap_or(&0.0);
-        let win_rate = c.stats.get("Win Rate %").unwrap_or(&0.0);
-        let best = c.stats.get("Best Trade %").unwrap_or(&0.0);
-        let worst = c.stats.get("Worst Trade %").unwrap_or(&0.0);
-        let pf = c.stats.get("Profit Factor").unwrap_or(&0.0);
-        let sharpe = c.stats.get("Sharpe").unwrap_or(&0.0);
-        let sortino = c.stats.get("Sortino").unwrap_or(&0.0);
+        let ret = c.stats.return_pct;
+        let dd = c.stats.max_drawdown_pct;
+        let trades = c.stats.total_trades;
+        let win_rate = c.stats.win_rate_pct;
+        let best = c.stats.best_trade_pct;
+        let worst = c.stats.worst_trade_pct;
+        let pf = c.stats.profit_factor;
+        let sharpe = c.stats.sharpe_ratio;
+        let sortino = c.stats.sortino_ratio;
 
-        println!("{:<5} | {:<10.2} | {:<10.2} | {:<8.0} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.4} | {:<10.4}", 
+        println!("{:<5} | {:<10.2} | {:<10.2} | {:<8} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.4} | {:<10.4}", 
             i+1, ret, dd, trades, win_rate, best, worst, pf, sharpe, sortino);
         
         // if let Some(dna) = &c.dna {
@@ -187,19 +207,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // println!("   Params: {}", params_str);
 
             if let Ok(res) = backtest.run_with_dna::<HeliosStrategyV3>(dna) {
-                println!("{:<5} | {:<10} | {:<12} | {:<10.2} | {:<10} | {:<20}", 
-                    "ID", "Type", "Entry Bar", "PnL", "Duration", "Playbook Tag");
+                println!("{:<5} | {:<8} | {:<10} | {:<10} | {:<10} | {:<10} | {:<15}", 
+                    "ID", "Type", "Entry Bar", "PnL ($)", "PnL (%)", "Duration", "Playbook Tag");
                 println!("{}", "-".repeat(85));
 
                 for t in res.trades {
-                    let pnl = t.pl(None); 
+                    let pnl_usd = t.pl(None); 
+                    let pnl_pct = t.pl_pct(None) * 100.0;
                     let duration = t.exit_bar.map(|eb| eb - t.entry_bar).unwrap_or(0);
 
-                    println!("{:<5} | {:<10} | {:<12} | {:<10.2} | {:<10} | {:<20}", 
+                    println!("{:<5} | {:<8} | {:<10} | {:<10.2} | {:<9.2}% | {:<10} | {:<15}", 
                         t.id, 
                         if t.size > 0.0 { "LONG" } else { "SHORT" },
                         t.entry_bar,
-                        pnl,
+                        pnl_usd,
+                        pnl_pct,
                         duration,
                         t.tag.as_deref().unwrap_or("None")
                     );

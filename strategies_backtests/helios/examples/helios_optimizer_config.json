@@ -1,32 +1,41 @@
 {
   "prospector": {
     "worker_config": {
-      "population_size": 100,
-      "n_generations": 7,
+      "population_size": 40,
+      "n_generations": 12,
       "cxpb": 0.7,
       "mutpb": 0.3,
-      "tournament_size": 7,
-      "min_trades": 7,
-      "n_top_candidates": 7,
+      "tournament_size": 4,
+      "min_trades": 3,
+      "n_top_candidates": 3,
       "max_stale_generations": 3
     },
     "scout_config": {
-      "population_size": 25,
+      "population_size": 20,
       "n_generations": 3,
       "cxpb": 0.7,
       "mutpb": 0.2,
       "tournament_size": 3,
       "min_trades": 3,
-      "n_top_candidates": 3,
-      "max_stale_generations": 3
+      "n_top_candidates": 2,
+      "max_stale_generations": 2
     },
     "max_depth": 2,
     "max_backlog_depth": 3,
     "zoom_factor": 0.5,
-    "db_path": "E:/Projects/Automations/trading_backtest/strategies_backtests/helios/examples/helios_prospector_v2.db",
+    "db_path": "helios_prospector_v3.db",
+    "pruning_strategy": {
+      "mode": "QuantileRank",
+      "top_ratio": 0.25,
+      "min_variance": 0.0001,
+      "warmup_jobs": 2
+    },
     "pruning_fitness_threshold": 0.0,
-    "pruning_variance_threshold": 0.005,
+    "pruning_variance_threshold": 0.0001,
     "enable_pruning": true,
+    "sampling_method": "MaximinLHS",
+    "enable_multi_fidelity": false,
+    "multi_fidelity_top_ratio": 0.30,
     "available_timeframes": [
       "3m",
       "5m",
@@ -34,10 +43,10 @@
       "1h",
       "4h"
     ],
-    "scout_method": "lhs",
-    "exploration_strategy": "random_restart",
-    "max_threads": 3,
-    "max_random_restarts": 2
+    "scout_method": "maximin_lhs",
+    "exploration_strategy": "split",
+    "max_threads": null,
+    "max_random_restarts": 1
   },
   "cache_config": {
     "resampled_data_limit": 100,
