@@ -277,7 +277,11 @@ impl HeliosBridge {
                     pos.opening_playbook_tag.clone(),
                 );
                 trade.sl_price = pos.current_sl_price;
+                trade.tp_price = pos.current_tp_price;
+                trade.sl_order_id = if pos.current_sl_price.is_some() { Some(1) } else { None };
+                trade.tp_order_id = if pos.current_tp_price.is_some() { Some(2) } else { None };
                 live_trades.push(trade);
+
 
                 live_position_snapshot = ferro_trade::broker::position::Position {
                     size: pos.position_amt,
@@ -362,8 +366,11 @@ impl HeliosBridge {
         let df = Self::candles_to_df(candles).map_err(|e| e.to_string())?;
 
         // 2. Khởi tạo Backtest giống hệt prospector_runner
+        let available_tfs: Vec<String> = vec!["3m".into(), "5m".into(), "15m".into(), "1h".into(), "4h".into()];
         let backtest = ferro_trade::backtest::BacktestBuilder::new()
+
             .data(df)
+            .timeframes(&available_tfs)
             .cash(60.0) // INITIAL_CASH
             .commission(0.0004) // COMMISSION
             .margin(1.0 / 20.0) // MARGIN
@@ -379,6 +386,7 @@ impl HeliosBridge {
             ])
             .build()
             .map_err(|e| e.to_string())?;
+
 
         // 3. Tiền tính toán MTF bằng Prospector
         let mut prospector_config = ferro_trade::optimizer::prospector::ProspectorConfig::default();

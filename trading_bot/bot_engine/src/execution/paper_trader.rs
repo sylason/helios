@@ -31,6 +31,7 @@ pub struct PaperTrader {
     pub entry_commission: f64, // Phí mở lệnh của vị thế hiện tại
     pub leverage: f64,
     pub current_sl_price: Option<f64>, // Mức giá Trailing StopLoss bảo vệ
+    pub current_tp_price: Option<f64>, // Mức giá TakeProfit chốt lời
     pub total_trades: usize,           // Tích lũy tổng số giao dịch từ đầu
     pub winning_trades: usize,         // Số giao dịch thắng tích lũy từ đầu
     pub losing_trades: usize,          // Số giao dịch thua tích lũy từ đầu
@@ -50,12 +51,14 @@ impl PaperTrader {
             entry_commission: 0.0,
             leverage: 1.0,
             current_sl_price: None,
+            current_tp_price: None,
             total_trades: 0,
             winning_trades: 0,
             losing_trades: 0,
             closed_trades: Vec::new(),
         }
     }
+
 
     /// Cập nhật PnL nếu có vị thế đang mở (Unrealized PnL)
     pub fn get_unrealized_pnl(&self, current_price: f64) -> f64 {
@@ -188,6 +191,7 @@ impl PaperTrader {
         self.position_size = 0.0;
         self.entry_commission = 0.0;
         self.current_sl_price = None;
+        self.current_tp_price = None;
 
         self.broadcast_account_events(account_tx);
     }
@@ -206,8 +210,18 @@ impl PaperTrader {
                     PositionType::None => "NONE ",
                 };
                 let status_icon = if record.net_pnl >= 0.0 { "🟢" } else { "🔴" };
-                info!("   {} [TRADE #{:03}] {} Entry: {:.2} -> Exit: {:.2} | Net PnL: ${:+.2} ({:+.2}%) | Equity: ${:.2}",
-                    status_icon, record.id, side_str, record.entry_price, record.exit_price, record.net_pnl, record.pnl_pct, record.equity_after);
+                let price_pnl_pct = if record.entry_price > 0.0 {
+                    let dir = match record.pos_type {
+                        PositionType::Long => 1.0,
+                        PositionType::Short => -1.0,
+                        PositionType::None => 0.0,
+                    };
+                    ((record.exit_price / record.entry_price - 1.0) * dir) * 100.0
+                } else {
+                    0.0
+                };
+                info!("   {} [TRADE #{:03}] {} Entry: {:.2} -> Exit: {:.2} | Net PnL: ${:+.2} ({:+.2}% ROE | {:+.2}% Price) | Equity: ${:.2}",
+                    status_icon, record.id, side_str, record.entry_price, record.exit_price, record.net_pnl, record.pnl_pct, price_pnl_pct, record.equity_after);
             }
         }
         
@@ -215,16 +229,27 @@ impl PaperTrader {
             let u_pnl = self.get_unrealized_pnl(current_price);
             let margin_used = (self.entry_price * self.position_size) / self.leverage;
             let u_pnl_pct = if margin_used > 0.0 { (u_pnl / margin_used) * 100.0 } else { 0.0 };
+            let u_price_pct = if self.entry_price > 0.0 {
+                let dir = match self.position_type {
+                    PositionType::Long => 1.0,
+                    PositionType::Short => -1.0,
+                    PositionType::None => 0.0,
+                };
+                ((current_price / self.entry_price - 1.0) * dir) * 100.0
+            } else {
+                0.0
+            };
             let pos_str = match self.position_type {
                 PositionType::Long => "LONG ",
                 PositionType::Short => "SHORT",
                 PositionType::None => "NONE ",
             };
             let sl_str = self.current_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+            let tp_str = self.current_tp_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
             let icon = if u_pnl >= 0.0 { "🟢" } else { "🔴" };
             info!("--------------------------------------------------------------------------------");
-            info!("📌 [CURRENT OPEN POSITION] {} {} Entry: {:.2} | Current: {:.2} | Size: {:.4} | Trailing SL: {} | uPnL: ${:+.2} ({:+.2}%)",
-                  icon, pos_str, self.entry_price, current_price, self.position_size, sl_str, u_pnl, u_pnl_pct);
+            info!("📌 [CURRENT OPEN POSITION] {} {} Entry: {:.2} | Current: {:.2} | Size: {:.4} | SL: {} | TP: {} | uPnL: ${:+.2} ({:+.2}% ROE | {:+.2}% Price)",
+                  icon, pos_str, self.entry_price, current_price, self.position_size, sl_str, tp_str, u_pnl, u_pnl_pct, u_price_pct);
         } else {
             info!("--------------------------------------------------------------------------------");
             info!("📌 [CURRENT OPEN POSITION] (Không có vị thế nào đang mở)");
@@ -239,6 +264,7 @@ impl PaperTrader {
         current_price: f64, 
         size_pct: Option<f64>,
         initial_sl: Option<f64>,
+        initial_tp: Option<f64>,
         account_tx: Option<&tokio::sync::broadcast::Sender<AccountEvent>>
     ) {
         if self.position_type != PositionType::None {
@@ -258,14 +284,18 @@ impl PaperTrader {
         self.entry_price = current_price;
         self.position_type = pos_type.clone();
         self.current_sl_price = initial_sl;
+        self.current_tp_price = initial_tp;
 
-        info!("📈 [PaperTrader] MỞ VỊ THẾ {:?} @ {:.2}. Size: {:.4} (Ratio: {:.1}%). SL: {:?}. Equity còn: {:.2}", 
-            self.position_type, self.entry_price, self.position_size, size_ratio * 100.0, self.current_sl_price, self.equity);
+        let sl_display = self.current_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+        let tp_display = self.current_tp_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+
+        info!("📈 [PaperTrader] MỞ VỊ THẾ {:?} @ {:.2}. Size: {:.4} (Ratio: {:.1}%). SL: {}, TP: {}. Equity còn: {:.2}", 
+            self.position_type, self.entry_price, self.position_size, size_ratio * 100.0, sl_display, tp_display, self.equity);
 
         self.broadcast_account_events(account_tx);
     }
 
-    /// Quét nến real-time xem giá High/Low có chạm Trailing SL hay không
+    /// Quét nến real-time xem giá High/Low có chạm Trailing SL hay TP hay không
     pub fn on_candle(
         &mut self, 
         candle: &crate::models::models::Candle, 
@@ -275,22 +305,48 @@ impl PaperTrader {
             return false;
         }
 
-        if let Some(sl) = self.current_sl_price {
-            let mut sl_triggered = false;
-            if self.position_type == PositionType::Long && candle.low <= sl {
-                info!("⚡ [PAPER TRADER] LONG Position dính Trailing SL @ {:.2} (Low: {:.2})", sl, candle.low);
-                self.close_position(sl, account_tx);
-                sl_triggered = true;
-            } else if self.position_type == PositionType::Short && candle.high >= sl {
-                info!("⚡ [PAPER TRADER] SHORT Position dính Trailing SL @ {:.2} (High: {:.2})", sl, candle.high);
-                self.close_position(sl, account_tx);
-                sl_triggered = true;
-            }
+        let sl_opt = self.current_sl_price;
+        let tp_opt = self.current_tp_price;
 
-            if sl_triggered {
-                return true;
+        let (is_sl_hit, is_tp_hit) = match self.position_type {
+            PositionType::Long => (
+                sl_opt.map_or(false, |sl| candle.low <= sl),
+                tp_opt.map_or(false, |tp| candle.high >= tp),
+            ),
+            PositionType::Short => (
+                sl_opt.map_or(false, |sl| candle.high >= sl),
+                tp_opt.map_or(false, |tp| candle.low <= tp),
+            ),
+            PositionType::None => (false, false),
+        };
+
+        if is_sl_hit && is_tp_hit {
+            // Nếu cả SL và TP cùng chạm trong 1 cây nến:
+            // Ưu tiên cái nào gần giá Open hơn (giống logic ferro_trade::Broker)
+            let sl = sl_opt.unwrap();
+            let tp = tp_opt.unwrap();
+            let dist_sl = (candle.open - sl).abs();
+            let dist_tp = (candle.open - tp).abs();
+            if dist_sl <= dist_tp {
+                info!("⚡ [PAPER TRADER] {:?} dính StopLoss @ {:.2} (gần Open hơn TP)", self.position_type, sl);
+                self.close_position(sl, account_tx);
+            } else {
+                info!("🎯 [PAPER TRADER] {:?} chạm TakeProfit @ {:.2} (gần Open hơn SL)", self.position_type, tp);
+                self.close_position(tp, account_tx);
             }
+            return true;
+        } else if is_sl_hit {
+            let sl = sl_opt.unwrap();
+            info!("⚡ [PAPER TRADER] {:?} Position dính StopLoss @ {:.2}", self.position_type, sl);
+            self.close_position(sl, account_tx);
+            return true;
+        } else if is_tp_hit {
+            let tp = tp_opt.unwrap();
+            info!("🎯 [PAPER TRADER] {:?} Position chạm TakeProfit @ {:.2}", self.position_type, tp);
+            self.close_position(tp, account_tx);
+            return true;
         }
+
         false
     }
 
@@ -306,20 +362,20 @@ impl PaperTrader {
         match action {
             Action::Buy { size, policy, .. } => {
                 if self.position_type != PositionType::Long {
-                    let initial_sl = match policy {
-                        Some(RiskPolicy::FixedPrice { sl_price, .. }) => sl_price,
-                        _ => None,
+                    let (initial_sl, initial_tp) = match policy {
+                        Some(RiskPolicy::FixedPrice { sl_price, tp_price }) => (sl_price, tp_price),
+                        _ => (None, None),
                     };
-                    self.open_position(PositionType::Long, current_price, Some(size), initial_sl, account_tx);
+                    self.open_position(PositionType::Long, current_price, Some(size), initial_sl, initial_tp, account_tx);
                 }
             }
             Action::Sell { size, policy, .. } => {
                 if self.position_type != PositionType::Short {
-                    let initial_sl = match policy {
-                        Some(RiskPolicy::FixedPrice { sl_price, .. }) => sl_price,
-                        _ => None,
+                    let (initial_sl, initial_tp) = match policy {
+                        Some(RiskPolicy::FixedPrice { sl_price, tp_price }) => (sl_price, tp_price),
+                        _ => (None, None),
                     };
-                    self.open_position(PositionType::Short, current_price, Some(size), initial_sl, account_tx);
+                    self.open_position(PositionType::Short, current_price, Some(size), initial_sl, initial_tp, account_tx);
                 }
             }
             Action::CloseLongs { .. } => {
@@ -335,15 +391,19 @@ impl PaperTrader {
             Action::ClosePosition { .. } => {
                 self.close_position(current_price, account_tx);
             }
-            Action::UpdateTradeSlTp { new_sl_price, .. } => {
-                if let Some(sl) = new_sl_price {
-                    info!("🛡️ [PAPER TRADER] Cập nhật Trailing StopLoss mới: {:.2}", sl);
-                    self.current_sl_price = Some(sl);
+            Action::UpdateTradeSlTp { new_sl_price, new_tp_price, .. } => {
+                if new_sl_price.is_some() || new_tp_price.is_some() || self.current_sl_price.is_some() || self.current_tp_price.is_some() {
+                    let sl_str = new_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+                    let tp_str = new_tp_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+                    info!("🛡️ [PAPER TRADER] Cập nhật SL/TP mới: SL = {}, TP = {}", sl_str, tp_str);
+                    self.current_sl_price = new_sl_price;
+                    self.current_tp_price = new_tp_price;
                     self.broadcast_account_events(account_tx);
                 }
             }
         }
     }
+
 }
 
 #[cfg(test)]
@@ -393,4 +453,59 @@ mod tests {
         assert_eq!(trader.position_type, PositionType::None);
         assert_eq!(trader.equity, 975.0);
     }
+
+    #[test]
+    fn test_paper_trader_cancel_sl() {
+        let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
+
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy: None, tag: None }, 2000.0, None);
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(1950.0), new_tp_price: None }, 2000.0, None);
+        assert_eq!(trader.current_sl_price, Some(1950.0));
+
+        // Hủy SL bằng cách truyền None
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: None, new_tp_price: None }, 2000.0, None);
+        assert_eq!(trader.current_sl_price, None);
+
+        let candle = crate::models::models::Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1600000000,
+            open: 1990.0,
+            high: 2010.0,
+            low: 1940.0,
+            close: 1960.0,
+            volume: 10.0,
+        };
+
+        // Khi SL đã bị hủy thì candle.low <= 1950 không làm đóng vị thế
+        let sl_hit = trader.on_candle(&candle, None);
+        assert!(!sl_hit);
+        assert_eq!(trader.position_type, PositionType::Long);
+    }
+
+    #[test]
+    fn test_paper_trader_take_profit() {
+        use ferro_trade::broker::policies::RiskPolicy;
+        let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
+
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1900.0), tp_price: Some(2100.0) });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, None);
+        assert_eq!(trader.current_sl_price, Some(1900.0));
+        assert_eq!(trader.current_tp_price, Some(2100.0));
+
+        let candle = crate::models::models::Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1600000000,
+            open: 2050.0,
+            high: 2120.0, // Chạm TP 2100
+            low: 2040.0,
+            close: 2110.0,
+            volume: 10.0,
+        };
+
+        let tp_hit = trader.on_candle(&candle, None);
+        assert!(tp_hit);
+        assert_eq!(trader.position_type, PositionType::None);
+        assert_eq!(trader.equity, 1050.0); // (2100 - 2000) * 0.5 coin = +50$
+    }
 }
+

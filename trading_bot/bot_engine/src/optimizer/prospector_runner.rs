@@ -5,12 +5,13 @@ use std::path::Path;
 use tracing::{info, warn, error};
 use serde::Deserialize;
 
-use ferro_trade::backtest::BacktestBuilder;
+use ferro_trade::backtest::{BacktestBuilder, EarlyTermination, TerminationReason};
 use ferro_trade::optimizer::prospector::{Prospector, ProspectorConfig};
 use ferro_trade::optimizer::params::DnaMappable;
 use ferro_trade::stats::StatItem;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use polars::prelude::*;
+
 
 use crate::models::repository::{CandleRepository, StrategyRepository};
 use crate::data_engine::sqlite_impl::SqliteStore;
@@ -142,8 +143,12 @@ impl ProspectorRunner {
         let champion_opt = tokio::task::spawn_blocking(move || {
             let df = Self::candles_to_df(&candles).map_err(|e| e.to_string())?;
 
+            let mut prospector_config = full_config.prospector;
+            prospector_config.db_path = prospector_db_path_owned.clone();
+
             let backtest = BacktestBuilder::new()
                 .data(df)
+                .timeframes(&prospector_config.available_timeframes)
                 .cash(INITIAL_CASH)
                 .commission(COMMISSION)
                 .margin(MARGIN)
@@ -156,12 +161,33 @@ impl ProspectorRunner {
                 .calculate_metrics(&[
                     StatItem::ReturnPct,
                     StatItem::TotalTrades,
+                    StatItem::WinRatePct,
+                    StatItem::BestTradePct,
+                    StatItem::WorstTradePct,
                     StatItem::MaxDrawdownPct,
+                    StatItem::SharpeRatio,
+                    StatItem::SortinoRatio,
+                    StatItem::ProfitFactor,
                 ])
+                .early_termination(EarlyTermination::Any(vec![
+                    EarlyTermination::MaxDrawdown(40.0),
+                    EarlyTermination::WarmupMinTrades { after_bars: 14400, min_trades: 5 },
+                ]))
+                .early_termination_penalty(|term_info| {
+                    match &term_info.reason {
+                        TerminationReason::MaxDrawdownExceeded { current_pct, .. } => {
+                            -5000.0 - current_pct
+                        }
+                        TerminationReason::WarmupStagnant { bars_checked, trades_count, .. } => {
+                            let days = *bars_checked as f64 / 1440.0;
+                            let trades_per_day = *trades_count as f64 / days;
+                            -2000.0 * (1.0 - trades_per_day)
+                        }
+                        _ => -5000.0 - (term_info.total_bars - term_info.bar_index) as f64 * 0.1,
+                    }
+                })
                 .build().map_err(|e| e.to_string())?;
 
-            let mut prospector_config = full_config.prospector;
-            prospector_config.db_path = prospector_db_path_owned.clone();
 
             if let Some(parent) = Path::new(&prospector_db_path_owned).parent() {
                 let _ = std::fs::create_dir_all(parent);
@@ -175,7 +201,7 @@ impl ProspectorRunner {
                 champs.push(ferro_trade::optimizer::ga_worker::Candidate {
                     params: std::collections::HashMap::new(),
                     fitness: 0.0,
-                    stats: std::collections::HashMap::new(),
+                    stats: ferro_trade::stats::PackedStats::default(),
                     dna: Some(dna),
                 });
                 info!("🌱 [Smart Seeding] Tiêm 1 hạt giống Rank 1 Champion từ chu kỳ trước vào Generation 0.");
@@ -212,9 +238,9 @@ impl ProspectorRunner {
         }).await.map_err(|e| e.to_string())??;
 
         if let Some(champion) = champion_opt {
-            let ret = champion.stats.get("Return %").unwrap_or(&0.0);
-            let dd = champion.stats.get("Max DD %").unwrap_or(&0.0);
-            let trades = champion.stats.get("Trades").unwrap_or(&0.0);
+            let ret = champion.stats.return_pct;
+            let dd = champion.stats.max_drawdown_pct;
+            let trades = champion.stats.total_trades;
 
             info!("🏆 [Optimizer] TOP 1 FOUND! Return: {:.2}%, Max DD: {:.2}%, Trades: {}", ret, dd, trades);
 
@@ -224,15 +250,23 @@ impl ProspectorRunner {
                 use std::collections::HashMap;
 
                 let now = chrono::Utc::now().timestamp_millis();
+                let mut stats_map = HashMap::new();
+                stats_map.insert("Return %".to_string(), champion.stats.return_pct);
+                stats_map.insert("Max DD %".to_string(), champion.stats.max_drawdown_pct);
+                stats_map.insert("Trades".to_string(), champion.stats.total_trades as f64);
+                stats_map.insert("Profit Factor".to_string(), champion.stats.profit_factor);
+                stats_map.insert("Sharpe".to_string(), champion.stats.sharpe_ratio);
+
                 let opt_dna = OptimizedDna {
                     symbol: symbol.to_string(),
                     strategy_id: strategy_id.to_string(),
                     dna: dna,
                     mapping: HashMap::new(), // Không cần mapping với DNA v2
-                    fitness: *ret,
-                    stats: champion.stats,
+                    fitness: ret,
+                    stats: stats_map,
                     updated_at: now,
                 };
+
 
                 db.save_best_dna(opt_dna.clone()).await.map_err(|e| e.to_string())?;
                 info!("💾 [Optimizer] Đã lưu DNA mới nhất vào Database.");

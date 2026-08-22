@@ -11,7 +11,7 @@ use ferro_trade::broker::actions::Action;
 
 use crate::models::account_state::{AccountState, PositionState, AccountEvent};
 
-pub const MAX_LIVE_MEM_CANDLES: usize = 2000;
+pub const MAX_LIVE_MEM_CANDLES: usize = 15000;
 
 #[derive(Debug, Clone)]
 pub struct LivePositionState {
@@ -21,8 +21,10 @@ pub struct LivePositionState {
     pub entry_timestamp: i64,
     pub live_entry_bar: usize,
     pub current_sl_price: Option<f64>,
+    pub current_tp_price: Option<f64>,
     pub opening_playbook_tag: Option<String>,
 }
+
 
 pub struct AssetActor {
     symbol: String,
@@ -278,8 +280,10 @@ impl AssetActor {
                                 entry_timestamp: current_time,
                                 live_entry_bar: current_bar,
                                 current_sl_price: None,
+                                current_tp_price: None,
                                 opening_playbook_tag: None,
                             });
+
                             info!("🛡️ [{}] Khởi tạo LivePositionState mới cho Trailing SL (entry_bar: {})", symbol, current_bar);
                         }
                     } else {
@@ -405,22 +409,23 @@ impl AssetActor {
                         use ferro_trade::broker::policies::RiskPolicy;
                         use crate::execution::paper_trader::PositionType;
 
-                        // Trích xuất tag & initial_sl từ action
-                        let (playbook_tag, initial_sl) = match &action {
+                        // Trích xuất tag, initial_sl & initial_tp từ action
+                        let (playbook_tag, initial_sl, initial_tp) = match &action {
                             Action::Buy { policy, tag, .. } | Action::Sell { policy, tag, .. } => {
-                                let sl = match policy {
-                                    Some(RiskPolicy::FixedPrice { sl_price, .. }) => *sl_price,
-                                    _ => None,
+                                let (sl, tp) = match policy {
+                                    Some(RiskPolicy::FixedPrice { sl_price, tp_price }) => (*sl_price, *tp_price),
+                                    _ => (None, None),
                                 };
-                                (tag.clone(), sl)
+                                (tag.clone(), sl, tp)
                             }
-                            _ => (None, None),
+                            _ => (None, None, None),
                         };
 
-                        // Cập nhật giá SL nội bộ nếu có Action::UpdateTradeSlTp
-                        if let Action::UpdateTradeSlTp { new_sl_price: Some(sl), .. } = action {
+                        // Cập nhật giá SL/TP nội bộ nếu có Action::UpdateTradeSlTp
+                        if let Action::UpdateTradeSlTp { new_sl_price, new_tp_price, .. } = action {
                             if let Some(ref mut pos) = self.live_position {
-                                pos.current_sl_price = Some(sl);
+                                pos.current_sl_price = new_sl_price;
+                                pos.current_tp_price = new_tp_price;
                             }
                         }
 
@@ -445,7 +450,7 @@ impl AssetActor {
                                 info!("📝 [{}] [PAPER MODE] Process Action: {:?}", self.symbol, action);
                                 self.paper_trader.process_action(action.clone(), current_close, Some(&self.account_tx));
 
-                                // Cập nhật live_position để Helios nhận đúng tag & initial_sl ở các nến sau
+                                // Cập nhật live_position để Helios nhận đúng tag, initial_sl & initial_tp ở các nến sau
                                 if self.paper_trader.position_type != PositionType::None {
                                     let current_bar = full_buffer.len().saturating_sub(1);
                                     let pos_amt = match self.paper_trader.position_type {
@@ -462,6 +467,9 @@ impl AssetActor {
                                         if initial_sl.is_some() {
                                             pos.current_sl_price = initial_sl;
                                         }
+                                        if initial_tp.is_some() {
+                                            pos.current_tp_price = initial_tp;
+                                        }
                                     } else {
                                         let current_time = chrono::Utc::now().timestamp_millis();
                                         self.live_position = Some(LivePositionState {
@@ -471,6 +479,7 @@ impl AssetActor {
                                             entry_timestamp: current_time,
                                             live_entry_bar: current_bar,
                                             current_sl_price: initial_sl,
+                                            current_tp_price: initial_tp,
                                             opening_playbook_tag: playbook_tag,
                                         });
                                     }
@@ -478,6 +487,7 @@ impl AssetActor {
                                     self.live_position = None;
                                 }
                             }
+
                             ExecutionMode::Testnet | ExecutionMode::RealTrade => {
                                 if is_historical {
                                     info!("🕰️ [{}] Nến Lịch sử. Bỏ qua Action {:?} (Gap Filler Order Spam Prevention).", self.symbol, action);
