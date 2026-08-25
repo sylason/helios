@@ -21,12 +21,15 @@ use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::repository::{StrategyRepository, CandleRepository};
 use bot_engine::models::weight_monitor::WeightMonitor;
 use bot_engine::models::bus::EventBus;
-use bot_engine::models::config::ExecutionMode;
+use bot_engine::models::config::EngineConfig;
 use bot_engine::controller::asset_actor::AssetActor;
+use bot_engine::execution::engine::ExecutionEngineFactory;
 use bot_engine::optimizer::prospector_runner::ProspectorRunner;
 use bot_engine::optimizer::helios_bridge::HeliosBridge;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
+
+
 
 // ============================================================================
 // ⚙️ CẤU HÌNH TẦN SUẤT CHẠY OPTIMIZER (N MINS) VÀ SINGLE BACKTEST (M MINS)
@@ -137,8 +140,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (event_bus, _trade_rx, emergency_rx, mut status_rx) = EventBus::new();
     let data_tx = event_bus.data_tx.clone();
-    let trade_tx = event_bus.trade_tx.clone();
+    let _trade_tx = event_bus.trade_tx.clone();
     let status_tx = event_bus.status_tx.clone();
+
     let account_tx = event_bus.account_tx.clone();
     let account_rx = event_bus.account_tx.subscribe();
 
@@ -151,24 +155,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let market_filter = syncer.fetch_market_filter(SYMBOL).await.unwrap_or_default();
     let strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
 
+    let engine_config = EngineConfig {
+        initial_cash: 60.0,
+        commission_rate: 0.0004,
+        margin_rate: 1.0 / 20.0,
+        fractional_unit: Some(0.0001),
+        max_live_mem_candles: 15000,
+        historical_sync_days: TOTAL_FETCH_DAYS as u64,
+        buffer_padding_bars: 200,
+        opt_num_threads: 4,
+    };
+
+    let paper_engine = ExecutionEngineFactory::create_paper(
+        SYMBOL,
+        60.0,
+        20.0,
+        0.0004,
+        market_filter,
+        Some(account_tx),
+    );
+
     let actor = AssetActor::new(
         SYMBOL.to_string(),
         STRATEGY_ID.to_string(),
         db_store.clone(),
         db_store.clone(),
-        monitor.clone(),
         dna_rx,
         data_tx.clone(),
         emergency_rx,
         status_tx,
-        trade_tx,
         account_rx,
-        account_tx,
-        market_filter,
-        None,
-        60.0,
-        20.0,
-        if ENABLE_PAPER_TRADE { ExecutionMode::Paper } else { ExecutionMode::Diagnostic },
+        paper_engine,
+        engine_config,
     ).with_strategy(strategy);
 
     tokio::spawn(async move {

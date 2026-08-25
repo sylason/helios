@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
+
 use serde::Deserialize;
 
 use ferro_trade::backtest::{BacktestBuilder, EarlyTermination, TerminationReason};
@@ -213,20 +214,17 @@ impl ProspectorRunner {
             }
 
             let objective = |stats: &ferro_trade::stats::Stats| {
-                let total_days = 30.0;
-                let trades_per_day = stats.total_trades as f64 / total_days;
-                if trades_per_day < 0.5 {
-                    return -2000.0 * (1.0 - trades_per_day); 
-                }
                 let ret = stats.return_pct;
                 let dd = stats.max_drawdown_pct.abs();
-                if dd > 40.0 {
-                    return -5000.0 - dd; 
+                let trades = stats.total_trades;
+
+                // Phòng vệ Edge Cases: Cần ít nhất 2 lệnh độc lập và lợi nhuận dương
+                if ret.is_nan() || ret <= 0.0 || trades < 2 {
+                    return -100.0 - dd;
                 }
-                if ret.is_nan() || ret <= 0.0 {
-                    return -50.0;
-                }
-                ret + (trades_per_day * 0.1)
+
+                // Điểm số Calmar tối thượng với hằng số làm mượt +3.0 bảo vệ rung lắc
+                ret / (dd + 3.0)
             };
 
             info!("🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...");

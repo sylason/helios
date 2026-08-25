@@ -78,12 +78,12 @@ impl MarketFilter {
         Ok(())
     }
 
-    /// Đếm số lượng chữ số thập phân, ví dụ 0.001 -> 3
+    /// Đếm số lượng chữ số thập phân, ví dụ 0.001 -> 3, 0.00000001 -> 8
     pub fn count_decimals(val: f64) -> u32 {
         if val >= 1.0 || val <= 0.0 {
             return 0;
         }
-        let s = format!("{:.8}", val); // convert to string with enough precision
+        let s = format!("{:.12}", val); // Đảm bảo hỗ trợ đến 12 chữ số thập phân cho micro-ticks/memecoins
         let trimmed = s.trim_end_matches('0');
         if let Some(pos) = trimmed.find('.') {
             (trimmed.len() - pos - 1) as u32
@@ -102,9 +102,13 @@ mod tests {
         assert_eq!(MarketFilter::count_decimals(0.1), 1);
         assert_eq!(MarketFilter::count_decimals(0.01), 2);
         assert_eq!(MarketFilter::count_decimals(0.001), 3);
+        assert_eq!(MarketFilter::count_decimals(0.0001), 4);
+        assert_eq!(MarketFilter::count_decimals(0.00001), 5);
+        assert_eq!(MarketFilter::count_decimals(0.00000001), 8);
         assert_eq!(MarketFilter::count_decimals(1.0), 0);
         assert_eq!(MarketFilter::count_decimals(10.0), 0);
     }
+
 
     #[test]
     fn test_round_price() {

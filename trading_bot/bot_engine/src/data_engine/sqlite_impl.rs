@@ -17,7 +17,14 @@ impl SqliteStore {
         let conn = if db_path == ":memory:" {
             Connection::open_in_memory().map_err(|e| BotError::DatabaseError(e.to_string()))?
         } else {
-            Connection::open(db_path).map_err(|e| BotError::DatabaseError(e.to_string()))?
+            let c = Connection::open(db_path).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+            // Kích hoạt WAL Mode và Busy Timeout cho phép đọc ghi đồng thời không khóa chết
+            c.execute_batch("
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+                PRAGMA busy_timeout = 5000;
+            ").map_err(|e| BotError::DatabaseError(e.to_string()))?;
+            c
         };
         
         // 1. Tạo bảng nến

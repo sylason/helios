@@ -13,13 +13,16 @@ use models::config::AppConfig;
 use models::weight_monitor::WeightMonitor;
 use data_engine::sqlite_impl::SqliteStore;
 use controller::asset_actor::AssetActor;
+use execution::engine::ExecutionEngineFactory;
+use models::config::EngineConfig;
 use data_engine::binance_rest::InitialSync;
 use execution::ws_manager::WsManager;
-use std::collections::HashMap;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -80,8 +83,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7. Thiết lập "Hệ thần kinh" (Event Bus)
     let (event_bus, _trade_rx, emergency_rx, mut status_rx) = EventBus::new();
     let data_tx = event_bus.data_tx.clone();
-    let trade_tx = event_bus.trade_tx.clone();
+    let _trade_tx = event_bus.trade_tx.clone();
     let status_tx = event_bus.status_tx.clone();
+
     info!("🧠 Hệ thần kinh (Event Bus) đã sẵn sàng.");
 
     // [MỚI] Lắng nghe báo cáo trạng thái từ các Actor (Tạm thời in ra Console)
@@ -186,32 +190,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 9. Khởi chạy Asset Actor (Nhạc trưởng) với HeliosStrategyV3
     let test_strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
 
-    let execution_mode = if _config.use_testnet {
-        crate::models::config::ExecutionMode::Testnet
-    } else {
-        crate::models::config::ExecutionMode::RealTrade
+    let account_tx = event_bus.account_tx.clone();
+
+    let engine_config = EngineConfig {
+        initial_cash: 60.0,
+        commission_rate: 0.0004,
+        margin_rate: 1.0 / 20.0,
+        fractional_unit: Some(0.0001),
+        max_live_mem_candles: 15000,
+        historical_sync_days: 33,
+        buffer_padding_bars: 200,
+        opt_num_threads: 4,
     };
 
-    let account_tx = event_bus.account_tx.clone();
+    let live_engine = ExecutionEngineFactory::create_live(
+        &symbol,
+        60.0,
+        20.0,
+        market_filter,
+        executor,
+        account_tx,
+    );
 
     let actor = AssetActor::new(
         symbol,
         strategy_id.to_string(), // strategy_id
         db_store.clone(),
         db_store,
-        monitor, // Truyền monitor vào Actor
         dna_rx,  // Channel nhận DNA từ Optimizer
         data_tx,
         emergency_rx,
         status_tx, // Truyền Sender trạng thái vào đây
-        trade_tx,
         account_rx,
-        account_tx,
-        market_filter,
-        Some(executor),
-        60.0, // allocated_capital
-        20.0, // leverage
-        execution_mode,
+        live_engine,
+        engine_config,
     ).with_strategy(test_strategy);
     
     let actor_handle = tokio::spawn(async move {

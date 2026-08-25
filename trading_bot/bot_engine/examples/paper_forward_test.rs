@@ -22,11 +22,14 @@ use bot_engine::models::models::AssetState;
 use bot_engine::models::repository::{StrategyRepository, CandleRepository};
 use bot_engine::models::weight_monitor::WeightMonitor;
 use bot_engine::models::bus::EventBus;
-use bot_engine::models::config::ExecutionMode;
+use bot_engine::models::config::EngineConfig;
 use bot_engine::controller::asset_actor::AssetActor;
+use bot_engine::execution::engine::ExecutionEngineFactory;
 use bot_engine::optimizer::prospector_runner::ProspectorRunner;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
+
+
 
 // ============================================================================
 // ⚙️ BẢNG CẤU HÌNH TẬP TRUNG (TEST & RE-OPTIMIZER CONFIGURATION)
@@ -35,8 +38,8 @@ const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "paper_forward_v3";
 
 // 1. Cấu hình Dữ liệu & Cửa sổ Thời gian
-const TOTAL_FETCH_DAYS: i64 = 32;      // Tổng số ngày dữ liệu kéo từ Binance (33 ngày: 30 ngày train + 3 ngày forward test)
-const TRAIN_WINDOW_DAYS: i64 = 30;     // Độ dài cửa sổ huấn luyện GA Optimizer (In-Sample: 30 ngày)
+const TOTAL_FETCH_DAYS: i64 = 47;      // Tổng số ngày dữ liệu kéo từ Binance (33 ngày: 30 ngày train + 3 ngày forward test)
+const TRAIN_WINDOW_DAYS: i64 = 31;     // Độ dài cửa sổ huấn luyện GA Optimizer (In-Sample: 30 ngày)
 
 // 2. Cấu hình Tần suất Re-Optimizer định kỳ
 const STEP_INTERVAL_MINS: i64 = 240;   // Tần suất Re-Optimize định kỳ (1440 phút = 24 giờ)
@@ -45,7 +48,7 @@ const ENABLE_SMART_SEEDING: bool = true; // Tiêm hạt giống Rank 1 Champion 
 // 3. Cấu hình Mô phỏng Execution & Bộ nhớ Trượt
 const INITIAL_CAPITAL: f64 = 60.0;     // Quỹ vốn giả lập ($60 USD)
 const LEVERAGE: f64 = 20.0;            // Đòn bẩy giả lập (20x)
-const MAX_LIVE_MEM_CANDLES: usize = 4000; // Cửa sổ bộ nhớ trượt cho strategy.init (Tối ưu 30x tốc độ)
+const MAX_LIVE_MEM_CANDLES: usize = 43100; // Cửa sổ bộ nhớ trượt cho strategy.init (Tối ưu 30x tốc độ)
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -121,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = if Path::new(config_local).exists() {
         config_local
     } else {
-        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\trading_bot_demo\examples\helios_optimizer_config.json"#
+        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\helios\examples\helios_optimizer_config.json"#
     };
 
     // Khởi tạo kênh truyền tín hiệu Event-Driven cho DNA Hot-Swapping (Optimizer -> AssetActor)
@@ -149,8 +152,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (event_bus, _trade_rx, emergency_rx, mut status_rx) = EventBus::new();
     let data_tx = event_bus.data_tx.clone();
-    let trade_tx = event_bus.trade_tx.clone();
+    let _trade_tx = event_bus.trade_tx.clone();
     let status_tx = event_bus.status_tx.clone();
+
     let account_tx = event_bus.account_tx.clone();
     let account_rx = event_bus.account_tx.subscribe();
 
@@ -164,28 +168,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let market_filter = syncer.fetch_market_filter(SYMBOL).await.unwrap_or_default();
     let strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
 
-    // Khởi tạo AssetActor ở chế độ ExecutionMode::Paper
+    let engine_config = EngineConfig {
+        initial_cash: INITIAL_CAPITAL,
+        commission_rate: 0.0004,
+        margin_rate: 1.0 / LEVERAGE,
+        fractional_unit: Some(0.0001),
+        max_live_mem_candles: MAX_LIVE_MEM_CANDLES,
+        historical_sync_days: TOTAL_FETCH_DAYS as u64,
+        buffer_padding_bars: 200,
+        opt_num_threads: 4,
+    };
+
+    let paper_engine = ExecutionEngineFactory::create_paper(
+        SYMBOL,
+        INITIAL_CAPITAL,
+        LEVERAGE,
+        0.0004,
+        market_filter,
+        Some(account_tx.clone()),
+    );
+
+    // Khởi tạo AssetActor ở chế độ PaperExecutionEngine
     let mut actor = AssetActor::new(
         SYMBOL.to_string(),
         STRATEGY_ID.to_string(),
         db_store.clone(),
         db_store.clone(),
-        monitor.clone(),
         dna_rx,
         data_tx.clone(),
         emergency_rx,
         status_tx,
-        trade_tx,
         account_rx,
-        account_tx.clone(),
-        market_filter,
-        None, // executor = None (Không dùng Binance REST Trade API)
-        INITIAL_CAPITAL,
-        LEVERAGE,
-        ExecutionMode::Paper, // Chế độ Paper Trader Giả lập
+        paper_engine,
+        engine_config,
     )
-    .with_strategy(strategy)
-    .with_max_mem_candles(MAX_LIVE_MEM_CANDLES);
+    .with_strategy(strategy);
 
     // Nạp dữ liệu lịch sử vào Rolling Buffer ĐẾN MỐC BẮT ĐẦU OUT-OF-SAMPLE
     if let Err(e) = actor.handle_initial_sync_until(train_end_ts).await {

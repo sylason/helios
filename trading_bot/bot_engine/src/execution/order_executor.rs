@@ -2,11 +2,12 @@ use tracing::{info, warn, error};
 use rust_decimal::prelude::FromPrimitive;
 
 use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
-    TradeApi, NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum,
+    NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum,
     NewAlgoOrderParams, NewAlgoOrderWorkingTypeEnum, NewAlgoOrderAlgoTypeEnum,
     NewAlgoOrderTypeEnum, NewAlgoOrderClosePositionEnum,
     CancelAllAlgoOpenOrdersParams, NewAlgoOrderSideEnum
 };
+
 use binance_sdk::derivatives_trading_usds_futures::rest_api::RestApi;
 use binance_sdk::config::ConfigurationRestApi;
 use chrono::Utc;

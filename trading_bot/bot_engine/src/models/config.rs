@@ -46,3 +46,94 @@ impl AppConfig {
         }
     }
 }
+
+/// Cấu hình tập trung cho toàn bộ Động cơ Bot (EngineConfig)
+/// Gom toàn bộ các hằng số hardcoded về một nguồn duy nhất (Single Source of Truth).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EngineConfig {
+    /// Vốn ban đầu (USD / USDT)
+    pub initial_cash: f64,
+    /// Tỷ lệ phí giao dịch (Ví dụ: 0.0004 = 0.04% Taker fee)
+    pub commission_rate: f64,
+    /// Tỷ lệ ký quỹ (Ví dụ: 0.05 = đòn bẩy 20x, 1.0 = Spot)
+    pub margin_rate: f64,
+    /// Đơn vị làm tròn số lượng nhỏ nhất (Fractional Unit)
+    pub fractional_unit: Option<f64>,
+    /// Số lượng nến 1m tối đa lưu trữ trong Rolling Buffer RAM
+    pub max_live_mem_candles: usize,
+    /// Số ngày nến lịch sử cần đồng bộ khi khởi động (Ví dụ: 33 ngày)
+    pub historical_sync_days: u64,
+    /// Số nến đệm thêm để bảo toàn nến vào vị thế (Padding bars)
+    pub buffer_padding_bars: usize,
+    /// Số luồng tính toán tối ưu hóa đa luồng
+    pub opt_num_threads: usize,
+}
+
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            initial_cash: 60.0,
+            commission_rate: 0.0004,
+            margin_rate: 0.05,
+            fractional_unit: Some(0.0001),
+            max_live_mem_candles: 15000,
+            historical_sync_days: 33,
+            buffer_padding_bars: 200,
+            opt_num_threads: 4,
+        }
+    }
+}
+
+impl EngineConfig {
+    /// Kiểm định tính hợp lệ của cấu hình
+    pub fn validate(&self) -> Result<(), String> {
+        if self.initial_cash <= 0.0 {
+            return Err("initial_cash must be positive".to_string());
+        }
+        if self.commission_rate < 0.0 {
+            return Err("commission_rate cannot be negative".to_string());
+        }
+        if self.max_live_mem_candles < 1000 {
+            return Err("max_live_mem_candles must be at least 1000 for MTF warmup".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// Trình phân giải đường dẫn an toàn (PathResolver)
+/// Giúp tìm đúng file config/database ở bất kỳ thư mục làm việc (CWD) nào.
+pub struct PathResolver;
+
+impl PathResolver {
+    /// Tìm file theo đường dẫn tương đối, tự động kiểm tra CWD và Workspace Root
+    pub fn resolve(relative_path: &str) -> std::path::PathBuf {
+        let p = std::path::Path::new(relative_path);
+        if p.exists() {
+            return p.to_path_buf();
+        }
+
+        // Kiểm tra từ biến môi trường CARGO_MANIFEST_DIR
+        if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+            let candidate = std::path::Path::new(&manifest_dir).join(relative_path);
+            if candidate.exists() {
+                return candidate;
+            }
+
+            // Kiểm tra lùi về root workspace
+            if let Some(parent) = std::path::Path::new(&manifest_dir).parent() {
+                let root_candidate = parent.join(relative_path);
+                if root_candidate.exists() {
+                    return root_candidate;
+                }
+                if let Some(grandparent) = parent.parent() {
+                    let gp_candidate = grandparent.join(relative_path);
+                    if gp_candidate.exists() {
+                        return gp_candidate;
+                    }
+                }
+            }
+        }
+
+        p.to_path_buf()
+    }
+}

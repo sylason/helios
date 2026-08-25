@@ -13,21 +13,31 @@ use crate::models::weight_monitor::WeightMonitor;
 use binance_sdk::common::models::{RateLimitType, Interval as BinanceInterval};
 use tracing::{info, error, debug};
 use std::sync::Arc;
-use crate::data_engine::sqlite_impl::SqliteStore;
 
 pub struct InitialSync {
     rest_client: RestApi,
-    db: Arc<SqliteStore>,
+    db: Arc<dyn CandleRepository>,
     monitor: Arc<WeightMonitor>,
 }
 
 impl InitialSync {
-    pub fn new(db: Arc<SqliteStore>, monitor: Arc<WeightMonitor>) -> Self {
+    /// Khởi tạo InitialSync kết nối Binance Mainnet
+    pub fn new(db: Arc<dyn CandleRepository>, monitor: Arc<WeightMonitor>) -> Self {
+        Self::with_testnet(db, monitor, false)
+    }
+
+    /// Khởi tạo InitialSync với tùy chọn Testnet hoặc Production
+    pub fn with_testnet(db: Arc<dyn CandleRepository>, monitor: Arc<WeightMonitor>, use_testnet: bool) -> Self {
         let rest_conf = ConfigurationRestApi::builder().build().expect("Cấu hình REST lỗi");
-        let rest_client = binance_sdk::derivatives_trading_usds_futures::DerivativesTradingUsdsFuturesRestApi::production(rest_conf);
+        let rest_client = if use_testnet {
+            binance_sdk::derivatives_trading_usds_futures::DerivativesTradingUsdsFuturesRestApi::testnet(rest_conf)
+        } else {
+            binance_sdk::derivatives_trading_usds_futures::DerivativesTradingUsdsFuturesRestApi::production(rest_conf)
+        };
         
         Self { rest_client, db, monitor }
     }
+
 
     /// Tải dữ liệu lịch sử nến 1m để lấp đầy khoảng trống (Gap Filler)
     pub async fn fill_gap(&self, symbol: &str, default_limit_days: i64) -> Result<Vec<Candle>, Box<dyn std::error::Error>> {

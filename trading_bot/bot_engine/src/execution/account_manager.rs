@@ -1,12 +1,13 @@
 use binance_sdk::config::ConfigurationRestApi;
 use binance_sdk::derivatives_trading_usds_futures::{
     rest_api::{
-        RestApi, AccountApi, TradeApi,
+        RestApi,
         ChangeInitialLeverageParams, ChangeMarginTypeParams, AccountInformationV2Params,
         ChangeMarginTypeMarginTypeEnum
     },
     DerivativesTradingUsdsFuturesRestApi
 };
+
 use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
     CancelAllOpenOrdersParams, CancelAllAlgoOpenOrdersParams, NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum
 };

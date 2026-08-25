@@ -42,7 +42,11 @@ impl HeliosBridge {
         };
 
         // 2.5 TIỀN TÍNH TOÁN MTF (Resampling) cho các Timeframe chuẩn
-        let tf_list: Vec<String> = vec!["3m".into(), "5m".into(), "15m".into(), "1h".into(), "4h".into()];
+        let tf_list: Vec<String> = vec![
+            "3m".into(), "5m".into(), "15m".into(), "30m".into(),
+            "1h".into(), "2h".into(), "3h".into(), "4h".into(),
+            "6h".into(), "12h".into(), "1d".into()
+        ];
         let _ = ferro_trade::utils::resample::precompute_timeframes(&tf_list, &df, &cache, &raw_cache.datetime);
 
         let data_view = ferro_trade::data::DataView::new(raw_cache);
@@ -143,6 +147,7 @@ impl HeliosBridge {
         slice_start: usize,
         live_position: Option<&crate::controller::asset_actor::LivePositionState>,
         strategy: &mut dyn Strategy,
+        current_equity: f64,
     ) -> Vec<Action> {
         if candles.is_empty() {
             return Vec::new();
@@ -160,12 +165,13 @@ impl HeliosBridge {
         static LIVE_MTF_STORE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, GlobalMtfCache>>> = std::sync::OnceLock::new();
 
         struct GlobalMtfCache {
-            symbol: String,
+            _symbol: String,
             last_candle_count: usize,
-            last_candle_ts: i64,
+            _last_candle_ts: i64,
             cache: Arc<ferro_trade::data::global_cache::GlobalCache>,
             tf_buckets: std::collections::HashMap<String, i64>,
         }
+
 
         let last_candle_ts = candles.last().map(|c| c.timestamp).unwrap_or(0);
         let candles_len = candles.len();
@@ -177,9 +183,9 @@ impl HeliosBridge {
             } else {
                 let new_cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
                 *store = GlobalMtfCache {
-                    symbol: symbol.to_string(),
+                    _symbol: symbol.to_string(),
                     last_candle_count: candles_len,
-                    last_candle_ts,
+                    _last_candle_ts: last_candle_ts,
                     cache: new_cache.clone(),
                     tf_buckets: std::collections::HashMap::new(),
                 };
@@ -188,14 +194,15 @@ impl HeliosBridge {
         } else {
             let new_cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
             store_map.insert(symbol.to_string(), GlobalMtfCache {
-                symbol: symbol.to_string(),
+                _symbol: symbol.to_string(),
                 last_candle_count: candles_len,
-                last_candle_ts,
+                _last_candle_ts: last_candle_ts,
                 cache: new_cache.clone(),
                 tf_buckets: std::collections::HashMap::new(),
             });
             new_cache
         };
+
 
         let raw_cache = ferro_trade::data::RawDataCache::new(&df).expect("RawDataCache error");
         let base_times = &raw_cache.datetime;
@@ -206,8 +213,14 @@ impl HeliosBridge {
             ("3m", 3 * 60 * 1000i64),
             ("5m", 5 * 60 * 1000i64),
             ("15m", 15 * 60 * 1000i64),
+            ("30m", 30 * 60 * 1000i64),
             ("1h", 60 * 60 * 1000i64),
+            ("2h", 2 * 60 * 60 * 1000i64),
+            ("3h", 3 * 60 * 60 * 1000i64),
             ("4h", 4 * 60 * 60 * 1000i64),
+            ("6h", 6 * 60 * 60 * 1000i64),
+            ("12h", 12 * 60 * 60 * 1000i64),
+            ("1d", 24 * 60 * 60 * 1000i64),
         ];
 
         for (tf_str, tf_ms) in &tf_specs {
@@ -298,7 +311,7 @@ impl HeliosBridge {
         {
             let mut tick_context = TickContext {
                 i: last_idx,
-                equity: 10000.0,
+                equity: current_equity,
                 data_view: &data_view,
                 indicator_manager: &indicator_manager,
                 trades: &live_trades,
@@ -311,7 +324,7 @@ impl HeliosBridge {
         actions_buffer.to_vec()
     }
 
-    /// Chuyá»ƒn Ä‘á»•i danh sÃ¡ch Candle (shared model) sang DataFrame (ferro_trade format)
+    /// Chuyển đổi danh sách Candle (shared model) sang DataFrame (ferro_trade format)
     fn candles_to_df(candles: &[Candle]) -> PolarsResult<DataFrame> {
         let n = candles.len();
         let mut dt_vec = Vec::with_capacity(n);
@@ -348,8 +361,8 @@ impl HeliosBridge {
         ])
     }
 
-    /// [DIAGNOSTIC] Cháº¡y láº¡i toÃ n bá»™ pipeline Backtest giá»‘ng há»‡t nhÆ° optimizer/v2_run_helios
-    /// Sá»­ dá»¥ng bá»™ DNA Ä‘Ã£ tá»‘i Æ°u vÃ  `BacktestBuilder` cá»§a `ferro_trade` Ä‘á»ƒ Ä‘áº£m báº£o káº¿t quáº£ 1:1.
+    /// [DIAGNOSTIC] Chạy lại toàn bộ pipeline Backtest giống hệt như optimizer/v2_run_helios
+    /// Sử dụng bộ DNA đã tối ưu và `BacktestBuilder` của `ferro_trade` để đảm bảo kết quả 1:1.
     pub fn diagnostic_backtest(
         candles: &[Candle],
         dna: &[f64],
@@ -366,7 +379,11 @@ impl HeliosBridge {
         let df = Self::candles_to_df(candles).map_err(|e| e.to_string())?;
 
         // 2. Khởi tạo Backtest giống hệt prospector_runner
-        let available_tfs: Vec<String> = vec!["3m".into(), "5m".into(), "15m".into(), "1h".into(), "4h".into()];
+        let available_tfs: Vec<String> = vec![
+            "3m".into(), "5m".into(), "15m".into(), "30m".into(),
+            "1h".into(), "2h".into(), "3h".into(), "4h".into(),
+            "6h".into(), "12h".into(), "1d".into()
+        ];
         let backtest = ferro_trade::backtest::BacktestBuilder::new()
 
             .data(df)
@@ -390,7 +407,7 @@ impl HeliosBridge {
 
         // 3. Tiền tính toán MTF bằng Prospector
         let mut prospector_config = ferro_trade::optimizer::prospector::ProspectorConfig::default();
-        prospector_config.available_timeframes = vec!["3m".into(), "5m".into(), "15m".into(), "1h".into(), "4h".into()];
+        prospector_config.available_timeframes = available_tfs;
         let prospector = ferro_trade::optimizer::prospector::Prospector::new(prospector_config)
             .map_err(|e| e.to_string())?;
         

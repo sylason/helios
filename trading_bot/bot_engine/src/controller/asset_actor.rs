@@ -3,16 +3,14 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{info, error, warn, debug};
 use crate::models::models::{Candle, AssetState, EmergencyCmd, TradeSignal, Asset, StatusUpdate};
 use crate::models::repository::{CandleRepository, StrategyRepository};
-use crate::models::weight_monitor::WeightMonitor;
 use crate::optimizer::helios_bridge::HeliosBridge;
 use ferro_trade::strategy::Strategy;
-use crate::execution::paper_trader::PaperTrader;
-use ferro_trade::broker::actions::Action;
+use crate::models::account_state::AccountEvent;
+use crate::models::config::EngineConfig;
+use crate::execution::engine::ExecutionEngine;
 
-use crate::models::account_state::{AccountState, PositionState, AccountEvent};
-
-pub const MAX_LIVE_MEM_CANDLES: usize = 15000;
-
+/// Trạng thái Vị thế Đang Mở (Live Position Snapshot)
+/// Được chia sẻ giữa ExecutionEngine, AssetActor và Strategy
 #[derive(Debug, Clone)]
 pub struct LivePositionState {
     pub symbol: String,
@@ -25,37 +23,24 @@ pub struct LivePositionState {
     pub opening_playbook_tag: Option<String>,
 }
 
-
+/// Actor quản lý một Tài sản Giao dịch (AssetActor)
+/// Đóng vai trò Bộ não Điều phối (Orchestrator), tích hợp Strategy và ủy quyền thực thi sang ExecutionEngine.
 pub struct AssetActor {
-    symbol: String,
-    strategy_id: String,
-    state: AssetState,
-    asset: Asset,
-    candle_repo: Arc<dyn CandleRepository>,
-    strategy_repo: Arc<dyn StrategyRepository>,
-    monitor: Arc<WeightMonitor>,
-    dna_rx: tokio::sync::watch::Receiver<Option<crate::models::models::OptimizedDna>>,
-    data_rx: broadcast::Receiver<(Candle, bool)>,
-    account_rx: broadcast::Receiver<AccountEvent>,
-    account_tx: broadcast::Sender<AccountEvent>,
-    emergency_rx: mpsc::Receiver<EmergencyCmd>,
-    status_tx: mpsc::Sender<StatusUpdate>,
-    _trade_tx: mpsc::Sender<TradeSignal>,
-    strategy: Option<Box<dyn Strategy + Send>>,
-    paper_trader: PaperTrader,
-    market_filter: crate::models::market_info::MarketFilter,
-    
-    // Khối 2: Account & Position State
-    pub account_state: AccountState,
-    pub position_state: PositionState,
-    pub live_position: Option<LivePositionState>,
-    pub execution_mode: crate::models::config::ExecutionMode,
-    // Khối 3: Order Executor
-    pub executor: Option<Arc<crate::execution::order_executor::OrderExecutor>>,
-    pub allocated_capital: f64,
-    pub leverage: f64,
-    pub max_live_mem_candles: usize,
-    pub is_submitting_order: bool,
+    pub symbol: String,
+    pub strategy_id: String,
+    pub state: AssetState,
+    pub asset: Asset,
+    pub candle_repo: Arc<dyn CandleRepository>,
+    pub strategy_repo: Arc<dyn StrategyRepository>,
+    pub dna_rx: tokio::sync::watch::Receiver<Option<crate::models::models::OptimizedDna>>,
+    pub data_rx: broadcast::Receiver<(Candle, bool)>,
+    pub account_rx: broadcast::Receiver<AccountEvent>,
+    pub emergency_rx: mpsc::Receiver<EmergencyCmd>,
+    pub status_tx: mpsc::Sender<StatusUpdate>,
+    pub _trade_tx: Option<mpsc::Sender<TradeSignal>>,
+    pub strategy: Option<Box<dyn Strategy + Send>>,
+    pub execution_engine: Box<dyn ExecutionEngine>,
+    pub config: EngineConfig,
 }
 
 impl AssetActor {
@@ -64,50 +49,30 @@ impl AssetActor {
         strategy_id: String,
         candle_repo: Arc<dyn CandleRepository>,
         strategy_repo: Arc<dyn StrategyRepository>,
-        monitor: Arc<WeightMonitor>,
         dna_rx: tokio::sync::watch::Receiver<Option<crate::models::models::OptimizedDna>>,
         data_tx: broadcast::Sender<(Candle, bool)>,
         emergency_rx: mpsc::Receiver<EmergencyCmd>,
         status_tx: mpsc::Sender<StatusUpdate>,
-        trade_tx: mpsc::Sender<TradeSignal>,
         account_rx: broadcast::Receiver<AccountEvent>,
-        account_tx: broadcast::Sender<AccountEvent>,
-        market_filter: crate::models::market_info::MarketFilter,
-        executor: Option<Arc<crate::execution::order_executor::OrderExecutor>>,
-        allocated_capital: f64,
-        leverage: f64,
-        execution_mode: crate::models::config::ExecutionMode,
+        execution_engine: Box<dyn ExecutionEngine>,
+        config: EngineConfig,
     ) -> Self {
-        let mut paper_trader = PaperTrader::new(symbol.clone(), allocated_capital, 0.0004);
-        paper_trader.leverage = leverage;
-
         Self {
             symbol: symbol.clone(),
             strategy_id,
             state: AssetState::InitialSync,
-            asset: Asset::new(symbol.clone()),
+            asset: Asset::new(symbol),
             candle_repo,
             strategy_repo,
-            monitor,
             dna_rx,
             data_rx: data_tx.subscribe(),
             account_rx,
-            account_tx,
             emergency_rx,
             status_tx,
-            _trade_tx: trade_tx,
+            _trade_tx: None,
             strategy: None,
-            paper_trader,
-            market_filter,
-            account_state: AccountState::default(),
-            position_state: PositionState::new(&symbol),
-            live_position: None,
-            execution_mode,
-            executor,
-            allocated_capital,
-            leverage,
-            max_live_mem_candles: MAX_LIVE_MEM_CANDLES,
-            is_submitting_order: false,
+            execution_engine,
+            config,
         }
     }
 
@@ -117,9 +82,21 @@ impl AssetActor {
         self
     }
 
+    /// Thiết lập kênh TradeSignal (nếu cần)
+    pub fn with_trade_tx(mut self, trade_tx: mpsc::Sender<TradeSignal>) -> Self {
+        self._trade_tx = Some(trade_tx);
+        self
+    }
+
+    /// Thiết lập cấu hình Động cơ (EngineConfig)
+    pub fn with_config(mut self, config: EngineConfig) -> Self {
+        self.config = config;
+        self
+    }
+
     /// Thiết lập kích thước cửa sổ nến bộ nhớ tối đa
     pub fn with_max_mem_candles(mut self, max_candles: usize) -> Self {
-        self.max_live_mem_candles = max_candles;
+        self.config.max_live_mem_candles = max_candles;
         self
     }
 
@@ -141,11 +118,7 @@ impl AssetActor {
             warn!("⚠️ [{}] Failed to load optimized DNA: {}. Using defaults.", self.symbol, e);
         }
 
-        // 3. Chạy chu kỳ tối ưu hóa đầu tiên nếu chưa có DNA
-        self.update_state(AssetState::Optimizing, "Đang tìm kiếm bộ tham số tối ưu (GA)...").await;
-        // if self.needs_optimization() { ... }
-
-        // 4. Chuyển sang chế độ Trading và bắt đầu vòng lặp chính
+        // 3. Chuyển sang trạng thái sẵn sàng Trading
         self.update_state(AssetState::Trading, "Hệ thống Helios đã sẵn sàng!").await;
         info!("✅ [{}] is now TRADING.", self.symbol);
 
@@ -177,18 +150,12 @@ impl AssetActor {
                                 error!("❌ [DIAGNOSTIC BACKTEST] Failed to run: {}", e);
                             }
                         }
-
-                        if self.execution_mode == crate::models::config::ExecutionMode::Paper {
-                            let last_close = rolling_buffer.last().map(|c| c.close).unwrap_or(0.0);
-                            let time_str = chrono::Utc::now().format("%Y-%m-%d %H:%M").to_string();
-                            self.paper_trader.log_cumulative_report(last_close, &time_str);
-                        }
                     }
                 }
 
                 // Lắng nghe trạng thái tài khoản và vị thế
                 Ok(acc_evt) = self.account_rx.recv() => {
-                    self.on_account_event(acc_evt).await;
+                    self.execution_engine.on_account_event(&acc_evt).await;
                 }
 
                 // Lắng nghe nến real-time từ MarketData
@@ -237,69 +204,27 @@ impl AssetActor {
         }
     }
 
+    /// Kiểm tra và cập nhật DNA từ Receiver nếu có DNA mới từ Re-Optimizer
+    pub fn check_and_update_dna(&mut self) {
+        if self.dna_rx.has_changed().unwrap_or(false) {
+            let dna_data = self.dna_rx.borrow_and_update();
+            if let Some(ref dna) = *dna_data {
+                if let Some(ref mut strategy) = self.strategy {
+                    strategy.update_from_dna(&dna.dna);
+                    info!("✨ [{}] Đã cập nhật bộ não Helios với DNA mới từ Re-Optimizer! (Fitness: {:.4})", self.symbol, dna.fitness);
+                }
+            }
+        }
+    }
+
     /// In báo cáo tích lũy kết quả Paper Trader
     pub fn log_paper_report(&self, current_price: f64, time_label: &str) {
-        self.paper_trader.log_cumulative_report(current_price, time_label);
+        self.execution_engine.log_paper_report(current_price, time_label);
     }
 
     /// Xuất báo cáo vị thế và lịch sử tất cả lệnh cho Paper Trader
     pub fn log_all_trades_report(&self, current_price: f64) {
-        self.paper_trader.log_all_trades(current_price);
-    }
-
-    /// Lắng nghe và cập nhật trạng thái tài khoản / vị thế thời gian thực
-    async fn on_account_event(&mut self, evt: AccountEvent) {
-        match evt {
-            AccountEvent::AccountUpdate { wallet_balance, available_balance } => {
-                self.account_state.wallet_balance = wallet_balance;
-                self.account_state.available_balance = available_balance;
-                info!("💼 [{}] Account Update: Wallet = {:.2}, Available = {:.2}", 
-                      self.symbol, wallet_balance, available_balance);
-            }
-            AccountEvent::PositionUpdate { symbol, position_amt, entry_price, unrealized_profit } => {
-                if symbol == self.symbol {
-                    self.position_state.position_amt = position_amt;
-                    self.position_state.entry_price = entry_price;
-                    self.position_state.unrealized_profit = unrealized_profit;
-                    self.is_submitting_order = false;
-                    info!("📈 [{}] Position Update: Amt = {:.4}, Entry = {:.2}, uPnL = {:.2}", 
-                          self.symbol, position_amt, entry_price, unrealized_profit);
-
-                    // Đồng bộ LivePositionState cho Trailing SL
-                    if position_amt != 0.0 {
-                        let current_bar = self.asset.get_candles_vec().len().saturating_sub(1);
-                        if let Some(ref mut live_pos) = self.live_position {
-                            live_pos.position_amt = position_amt;
-                            live_pos.entry_price = entry_price;
-                        } else {
-                            let current_time = chrono::Utc::now().timestamp_millis();
-                            self.live_position = Some(LivePositionState {
-                                symbol: symbol.clone(),
-                                position_amt,
-                                entry_price,
-                                entry_timestamp: current_time,
-                                live_entry_bar: current_bar,
-                                current_sl_price: None,
-                                current_tp_price: None,
-                                opening_playbook_tag: None,
-                            });
-
-                            info!("🛡️ [{}] Khởi tạo LivePositionState mới cho Trailing SL (entry_bar: {})", symbol, current_bar);
-                        }
-                    } else {
-                        if self.live_position.is_some() {
-                            info!("🧹 [{}] Vị thế đã đóng trên Binance. Clear LivePositionState.", symbol);
-                        }
-                        self.live_position = None;
-                    }
-                }
-            }
-            AccountEvent::OrderTradeUpdate { symbol, side: _, order_type: _, order_status: _, avg_price: _, orig_qty: _, executed_qty: _, client_order_id: _, order_id: _ } => {
-                if symbol == self.symbol {
-                    self.is_submitting_order = false;
-                }
-            }
-        }
+        self.execution_engine.log_all_trades_report(current_price);
     }
 
     /// Truy vấn Database để lấy bộ DNA tốt nhất đã được lưu
@@ -321,23 +246,10 @@ impl AssetActor {
         Ok(())
     }
 
-    /// Kiểm tra và cập nhật DNA từ Receiver nếu có DNA mới từ Re-Optimizer
-    pub fn check_and_update_dna(&mut self) {
-        if self.dna_rx.has_changed().unwrap_or(false) {
-            let dna_data = self.dna_rx.borrow_and_update();
-            if let Some(ref dna) = *dna_data {
-                if let Some(ref mut strategy) = self.strategy {
-                    strategy.update_from_dna(&dna.dna);
-                    info!("✨ [{}] Đã cập nhật bộ não Helios với DNA mới từ Re-Optimizer! (Fitness: {:.4})", self.symbol, dna.fitness);
-                }
-            }
-        }
-    }
-
     pub async fn handle_initial_sync_until(&mut self, until_ts: i64) -> Result<(), String> {
         info!("📥 [{}] Syncing history until timestamp {} into Rolling Buffer...", self.symbol, until_ts);
         
-        let start_time = until_ts - (33 * 24 * 60 * 60 * 1000);
+        let start_time = until_ts - (self.config.historical_sync_days as i64 * 24 * 60 * 60 * 1000);
         let historical_candles = self.candle_repo.get_candles_by_range(&self.symbol, start_time, until_ts).await.map_err(|e| e.to_string())?;
         
         let count = historical_candles.len();
@@ -368,8 +280,8 @@ impl AssetActor {
 
         let current_close = candle.close;
 
-        // 2. Chỉ lưu nến vào Database nếu không phải Paper mode và không phải nến lịch sử
-        if self.execution_mode != crate::models::config::ExecutionMode::Paper && !is_historical {
+        // 2. Lưu nến vào Database nếu không phải nến lịch sử
+        if !is_historical {
             if let Err(e) = self.candle_repo.save_candle(candle.clone()).await {
                 error!("❌ [{}] Failed to save candle: {}", self.symbol, e);
             }
@@ -378,142 +290,42 @@ impl AssetActor {
         // 3. Nếu đang ở trạng thái Trading, thực thi chiến lược
         if self.state == AssetState::Trading {
             let full_buffer = self.asset.get_candles_vec();
+            let live_position = self.execution_engine.get_position();
             
-            // Cắt nến bộ nhớ: Đảm bảo cửa sổ luôn chứa nến mở vị thế (live_entry_bar)
-            let max_mem = if let Some(ref pos) = self.live_position {
+            // Cắt nến bộ nhớ: Đảm bảo cửa sổ luôn chứa nến mở vị thế (live_entry_bar) và padding an toàn
+            let max_mem = if let Some(ref pos) = live_position {
                 let pos_age = full_buffer.len().saturating_sub(pos.live_entry_bar);
-                self.max_live_mem_candles.max(pos_age + 200)
+                self.config.max_live_mem_candles.max(pos_age + self.config.buffer_padding_bars)
             } else {
-                self.max_live_mem_candles
+                self.config.max_live_mem_candles
             };
 
             let slice_start = full_buffer.len().saturating_sub(max_mem);
             let rolling_buffer = &full_buffer[slice_start..];
 
-            // BƯỚC 3.1: Quét nến real-time cho PaperTrader xem có dính Trailing SL/TP từ nến trước hay không (CHẠY TRƯỚC khi Strategy dời SL)
-            if self.execution_mode == crate::models::config::ExecutionMode::Paper {
-                if self.paper_trader.on_candle(&candle, Some(&self.account_tx)) {
-                    if self.paper_trader.position_type == crate::execution::paper_trader::PositionType::None {
-                        self.live_position = None;
-                    }
-                }
-            }
+            // BƯỚC 3.1: Quét nến real-time cho ExecutionEngine (Paper Trader tự kiểm tra Trailing SL/TP tại đây)
+            let _ = self.execution_engine.on_candle(&candle).await;
 
-            // BƯỚC 3.2: Gọi HeliosBridge::evaluate_live_tick để đánh giá tín hiệu và dời Trailing SL cho nến tiếp theo
+            // BƯỚC 3.2: Lấy số dư vốn thực tế và trạng thái vị thế mới nhất
+            let current_equity = self.execution_engine.get_equity();
+            let current_position = self.execution_engine.get_position();
+
+            // BƯỚC 3.3: Gọi HeliosBridge::evaluate_live_tick để đánh giá tín hiệu và dời Trailing SL cho nến tiếp theo
             if let Some(ref mut strategy) = self.strategy {
-                let actions = HeliosBridge::evaluate_live_tick(&self.symbol, rolling_buffer, slice_start, self.live_position.as_ref(), strategy.as_mut());
+                let actions = HeliosBridge::evaluate_live_tick(
+                    &self.symbol,
+                    rolling_buffer,
+                    slice_start,
+                    current_position.as_ref(),
+                    strategy.as_mut(),
+                    current_equity,
+                );
                 
                 if !actions.is_empty() {
                     info!("🎯 [{}] Strategy generated {} actions on candle {}!", self.symbol, actions.len(), current_close);
                     for action in actions {
-                        use ferro_trade::broker::policies::RiskPolicy;
-                        use crate::execution::paper_trader::PositionType;
-
-                        // Trích xuất tag, initial_sl & initial_tp từ action
-                        let (playbook_tag, initial_sl, initial_tp) = match &action {
-                            Action::Buy { policy, tag, .. } | Action::Sell { policy, tag, .. } => {
-                                let (sl, tp) = match policy {
-                                    Some(RiskPolicy::FixedPrice { sl_price, tp_price }) => (*sl_price, *tp_price),
-                                    _ => (None, None),
-                                };
-                                (tag.clone(), sl, tp)
-                            }
-                            _ => (None, None, None),
-                        };
-
-                        // Cập nhật giá SL/TP nội bộ nếu có Action::UpdateTradeSlTp
-                        if let Action::UpdateTradeSlTp { new_sl_price, new_tp_price, .. } = action {
-                            if let Some(ref mut pos) = self.live_position {
-                                pos.current_sl_price = new_sl_price;
-                                pos.current_tp_price = new_tp_price;
-                            }
-                        }
-
-                        // --- ENFORCE EXCLUSIVE ORDER RULE ---
-                        let position_amt = self.position_state.position_amt;
-                        if let Action::Buy { .. } = action {
-                            if position_amt > 0.0 || self.is_submitting_order {
-                                info!("ℹ️ [{}] Đang có vị thế Long ({}) hoặc đang gửi lệnh, bỏ qua tín hiệu Buy (Exclusive Order).", self.symbol, position_amt);
-                                continue;
-                            }
-                        } else if let Action::Sell { .. } = action {
-                            if position_amt < 0.0 || self.is_submitting_order {
-                                info!("ℹ️ [{}] Đang có vị thế Short ({}) hoặc đang gửi lệnh, bỏ qua tín hiệu Sell (Exclusive Order).", self.symbol, position_amt);
-                                continue;
-                            }
-                        }
-                        
-                        // Phân định chế độ thực thi qua ExecutionMode
-                        use crate::models::config::ExecutionMode;
-                        match self.execution_mode {
-                            ExecutionMode::Paper => {
-                                info!("📝 [{}] [PAPER MODE] Process Action: {:?}", self.symbol, action);
-                                self.paper_trader.process_action(action.clone(), current_close, Some(&self.account_tx));
-
-                                // Cập nhật live_position để Helios nhận đúng tag, initial_sl & initial_tp ở các nến sau
-                                if self.paper_trader.position_type != PositionType::None {
-                                    let current_bar = full_buffer.len().saturating_sub(1);
-                                    let pos_amt = match self.paper_trader.position_type {
-                                        PositionType::Long => self.paper_trader.position_size,
-                                        PositionType::Short => -self.paper_trader.position_size,
-                                        PositionType::None => 0.0,
-                                    };
-                                    if let Some(ref mut pos) = self.live_position {
-                                        pos.position_amt = pos_amt;
-                                        pos.entry_price = self.paper_trader.entry_price;
-                                        if playbook_tag.is_some() {
-                                            pos.opening_playbook_tag = playbook_tag;
-                                        }
-                                        if initial_sl.is_some() {
-                                            pos.current_sl_price = initial_sl;
-                                        }
-                                        if initial_tp.is_some() {
-                                            pos.current_tp_price = initial_tp;
-                                        }
-                                    } else {
-                                        let current_time = chrono::Utc::now().timestamp_millis();
-                                        self.live_position = Some(LivePositionState {
-                                            symbol: self.symbol.clone(),
-                                            position_amt: pos_amt,
-                                            entry_price: self.paper_trader.entry_price,
-                                            entry_timestamp: current_time,
-                                            live_entry_bar: current_bar,
-                                            current_sl_price: initial_sl,
-                                            current_tp_price: initial_tp,
-                                            opening_playbook_tag: playbook_tag,
-                                        });
-                                    }
-                                } else {
-                                    self.live_position = None;
-                                }
-                            }
-
-                            ExecutionMode::Testnet | ExecutionMode::RealTrade => {
-                                if is_historical {
-                                    info!("🕰️ [{}] Nến Lịch sử. Bỏ qua Action {:?} (Gap Filler Order Spam Prevention).", self.symbol, action);
-                                } else if let Some(ref executor) = self.executor {
-                                    let usable_capital = self.account_state.available_balance;
-                                    let leverage = self.leverage;
-                                    let symbol = self.symbol.clone();
-                                    let action_clone = action.clone();
-                                    let executor_clone = executor.clone();
-                                    self.is_submitting_order = true;
-                                    
-                                    tokio::spawn(async move {
-                                        if let Err(e) = executor_clone.execute_action(&symbol, action_clone, current_close, usable_capital, position_amt, leverage).await {
-                                            error!("❌ [{}] Lỗi thực thi lệnh qua OrderExecutor: {:?}", symbol, e);
-                                        }
-                                    });
-                                } else {
-                                    warn!("⚠️ [{}] [{:?}] Executor bị None nhưng execution_mode là Real/Testnet!", self.symbol, self.execution_mode);
-                                }
-                            }
-                            ExecutionMode::DryRun => {
-                                info!("🧪 [{}] [DRY_RUN MODE] Would execute Action: {:?} @ {:.2}", self.symbol, action, current_close);
-                            }
-                            ExecutionMode::Diagnostic => {
-                                info!("📊 [{}] [DIAGNOSTIC MODE] Action logged: {:?} @ {:.2}", self.symbol, action, current_close);
-                            }
+                        if let Err(e) = self.execution_engine.execute_action(&action, current_close).await {
+                            error!("❌ [{}] Lỗi thực thi action {:?}: {:?}", self.symbol, action, e);
                         }
                     }
                 } else {
@@ -523,7 +335,7 @@ impl AssetActor {
 
             // Đồng bộ AccountEvent vừa phát ra ngay lập tức
             while let Ok(acc_evt) = self.account_rx.try_recv() {
-                self.on_account_event(acc_evt).await;
+                self.execution_engine.on_account_event(&acc_evt).await;
             }
         }
     }

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch, broadcast};
+use tokio::sync::broadcast;
 use tokio::time::{sleep, Duration};
 use tracing::{info, warn, error, debug};
 use binance_sdk::config::{ConfigurationWebsocketStreams, ConfigurationWebsocketApi, ConfigurationRestApi};
@@ -9,8 +9,8 @@ use binance_sdk::derivatives_trading_usds_futures::{
     DerivativesTradingUsdsFuturesRestApi,
     websocket_streams::{KlineCandlestickStreamsParams, KlineCandlestickStreamsIntervalEnum},
     rest_api::RestApi,
-    websocket_api::{NewOrderParams, NewOrderSideEnum},
 };
+
 
 fn parse_interval(tf: &str) -> KlineCandlestickStreamsIntervalEnum {
     match tf {
@@ -157,7 +157,7 @@ impl WsManager {
         let api_key = self.api_key.clone();
         let api_secret = self.api_secret.clone();
         let use_testnet = self.use_testnet;
-        let weight_monitor = self.weight_monitor.clone();
+        let _weight_monitor = self.weight_monitor.clone();
         let account_tx = self.account_tx.clone();
 
         tokio::spawn(async move {
@@ -263,7 +263,7 @@ impl WsManager {
 
                 info!("Đang kết nối WebSocket Trade API...");
                 match client.connect().await {
-                    Ok(connection) => {
+                    Ok(_connection) => {
                         info!("✅ Đã kết nối Trade API");
                         // Luồng này sẽ được dùng để bắn lệnh. 
                         // Do tính chất Request-Response của WS API, chúng ta cần lưu trữ connection này trong 1 channel

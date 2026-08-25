@@ -1,12 +1,4 @@
 PS E:\Projects\Automations\trading_backtest\trading_bot\bot_engine> cargo run --release --example paper_forward_test
-   Compiling ahash v0.8.12
-   Compiling hashbrown v0.14.5
-   Compiling dashmap v6.2.1
-   Compiling hashlink v0.9.1
-   Compiling rusqlite v0.31.0
-   Compiling ferro_trade v0.1.0 (E:\Projects\Automations\trading_backtest\ferro_trade)
-   Compiling helios v0.1.0 (E:\Projects\Automations\trading_backtest\strategies_backtests\helios)
-   Compiling bot_engine v0.1.0 (E:\Projects\Automations\trading_backtest\trading_bot\bot_engine)
 warning: unused imports: `mpsc` and `watch`
  --> src\execution\ws_manager.rs:2:19
   |
@@ -60,15 +52,15 @@ warning: unused variable: `weight_monitor`
     |             ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_weight_monitor`
 
 warning: fields `monitor` and `market_filter` are never read
-  --> src\controller\asset_actor.rs:34:5
+  --> src\controller\asset_actor.rs:36:5
    |
-27 | pub struct AssetActor {
+29 | pub struct AssetActor {
    |            ---------- fields in this struct
 ...
-34 |     monitor: Arc<WeightMonitor>,
+36 |     monitor: Arc<WeightMonitor>,
    |     ^^^^^^^
 ...
-44 |     market_filter: crate::models::market_info::MarketFilter,
+46 |     market_filter: crate::models::market_info::MarketFilter,
    |     ^^^^^^^^^^^^^
    |
    = note: `#[warn(dead_code)]` on by default
@@ -85,39 +77,77 @@ warning: fields `symbol` and `last_candle_ts` are never read
     |             ^^^^^^^^^^^^^^
 
 warning: `bot_engine` (lib) generated 10 warnings (run `cargo fix --lib -p bot_engine` to apply 3 suggestions)
-    Finished `release` profile [optimized] target(s) in 2m 08s
+    Finished `release` profile [optimized] target(s) in 8.72s
      Running `target\release\examples\paper_forward_test.exe`
-2026-08-22T02:14:23.776462Z  INFO paper_forward_test: ================================================================================
-2026-08-22T02:14:23.776720Z  INFO paper_forward_test: 🧪 BẮT ĐẦU THỬ NGHIỆM FULL ENGINE PAPER FORWARD TEST (15-MIN RE-OPT)
-2026-08-22T02:14:23.776905Z  INFO paper_forward_test:    Symbol: ETHUSDT, Strategy: paper_forward_v3
-2026-08-22T02:14:23.777110Z  INFO paper_forward_test:    Total Fetch: 32 days | Train Window: 30 days | Re-Opt Frequency: 240 mins
-2026-08-22T02:14:23.777222Z  INFO paper_forward_test:    Execution Mode: ExecutionMode::Paper (Sliding Window Memory: 4000 candles)
-2026-08-22T02:14:23.777369Z  INFO paper_forward_test: ================================================================================
-2026-08-22T02:14:24.158937Z  INFO bot_engine::data_engine::sqlite_impl: 📂 SQLite initialized at: examples/storage/paper_forward_v3.db
-2026-08-22T02:14:24.159422Z  INFO paper_forward_test: 📥 [Data Ingestion] Đang đồng bộ dữ liệu 32 ngày từ Binance...
-2026-08-22T02:14:24.161434Z  INFO bot_engine::data_engine::binance_rest: 📥 [API] Dữ liệu lịch sử chưa đủ (0 / 46080). Bắt đầu đồng bộ lùi về quá khứ...
-2026-08-22T02:14:40.454624Z  INFO bot_engine::data_engine::binance_rest: ✅ [API] Hoàn tất Backward Sync. Đã kéo thêm: 46035 nến.
-2026-08-22T02:14:40.455376Z  INFO bot_engine::data_engine::binance_rest: 🔄 Tìm thấy nến cuối cùng. Đang tải dữ liệu lấp khoảng trống (Gap Filler) từ 1787364900000...
-2026-08-22T02:14:40.567247Z  INFO bot_engine::data_engine::binance_rest: ✅ Hoàn tất đồng bộ lịch sử về hiện tại. Tổng số nến: 0
-2026-08-22T02:14:40.612937Z  INFO paper_forward_test: 📊 [Data Summary] Tổng số nến: 46035 | Từ: 2026-07-21 02:15:00 UTC -> Đến: 2026-08-22 02:14:00 UTC
-2026-08-22T02:14:40.613146Z  INFO paper_forward_test: --------------------------------------------------------------------------------
-2026-08-22T02:14:40.613407Z  INFO paper_forward_test: 🧬 [PHASE 1 - INITIAL TRAIN] Khởi chạy Prospector GA Optimizer ban đầu...
-2026-08-22T02:14:40.613719Z  INFO paper_forward_test:    📌 Dữ liệu Huấn Luyện (In-Sample): [2026-07-21 02:15:00 UTC] -> [2026-08-20 02:15:00 UTC]
-2026-08-22T02:14:40.614001Z  INFO bot_engine::optimizer::prospector_runner: 🧬 [Optimizer] Bắt đầu chu kỳ tối ưu hóa cho ETHUSDT (Khoảng MS: 1784600100000 -> 1787192100000)...
-2026-08-22T02:14:40.649016Z  INFO bot_engine::optimizer::prospector_runner: 🧬 [Optimizer] Đã lấy 43158 nến từ Database.
-2026-08-22T02:14:40.722849Z  INFO bot_engine::optimizer::prospector_runner: 🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...
+2026-08-24T04:43:51.048432Z  INFO paper_forward_test: ================================================================================
+2026-08-24T04:43:51.049192Z  INFO paper_forward_test: 🧪 BẮT ĐẦU THỬ NGHIỆM FULL ENGINE PAPER FORWARD TEST (15-MIN RE-OPT)
+2026-08-24T04:43:51.049357Z  INFO paper_forward_test:    Symbol: ETHUSDT, Strategy: paper_forward_v3
+2026-08-24T04:43:51.049533Z  INFO paper_forward_test:    Total Fetch: 77 days | Train Window: 62 days | Re-Opt Frequency: 240 mins
+2026-08-24T04:43:51.049704Z  INFO paper_forward_test:    Execution Mode: ExecutionMode::Paper (Sliding Window Memory: 86400 candles)
+2026-08-24T04:43:51.049861Z  INFO paper_forward_test: ================================================================================
+2026-08-24T04:43:51.626396Z  INFO bot_engine::data_engine::sqlite_impl: 📂 SQLite initialized at: examples/storage/paper_forward_v3.db
+2026-08-24T04:43:51.626575Z  INFO paper_forward_test: 📥 [Data Ingestion] Đang đồng bộ dữ liệu 77 ngày từ Binance...
+2026-08-24T04:43:51.669604Z  INFO bot_engine::data_engine::binance_rest: 📥 [API] Dữ liệu lịch sử chưa đủ (0 / 110880). Bắt đầu đồng bộ lùi về quá khứ...
+2026-08-24T04:44:30.622567Z  INFO bot_engine::data_engine::binance_rest: ✅ [API] Hoàn tất Backward Sync. Đã kéo thêm: 110771 nến.
+2026-08-24T04:44:30.631120Z  INFO bot_engine::data_engine::binance_rest: 🔄 Tìm thấy nến cuối cùng. Đang tải dữ liệu lấp khoảng trống (Gap Filler) từ 1787546640000...
+2026-08-24T04:44:30.840309Z  INFO bot_engine::data_engine::binance_rest: ✅ Hoàn tất đồng bộ lịch sử về hiện tại. Tổng số nến: 1
+2026-08-24T04:44:30.955567Z  INFO paper_forward_test: 📊 [Data Summary] Tổng số nến: 110772 | Từ: 2026-06-08 04:44:00 UTC -> Đến: 2026-08-24 04:44:00 UTC
+2026-08-24T04:44:30.955898Z  INFO paper_forward_test: --------------------------------------------------------------------------------
+2026-08-24T04:44:30.956141Z  INFO paper_forward_test: 🧬 [PHASE 1 - INITIAL TRAIN] Khởi chạy Prospector GA Optimizer ban đầu...
+2026-08-24T04:44:30.956353Z  INFO paper_forward_test:    📌 Dữ liệu Huấn Luyện (In-Sample): [2026-06-08 04:44:00 UTC] -> [2026-08-09 04:44:00 UTC]
+2026-08-24T04:44:30.963925Z  INFO bot_engine::optimizer::prospector_runner: 🧬 [Optimizer] Bắt đầu chu kỳ tối ưu hóa cho ETHUSDT (Khoảng MS: 1780893840000 -> 1786250640000)...
+2026-08-24T04:44:31.035132Z  INFO bot_engine::optimizer::prospector_runner: 🧬 [Optimizer] Đã lấy 89193 nến từ Database.
+2026-08-24T04:44:31.507455Z  INFO bot_engine::optimizer::prospector_runner: 🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...
 --- Prospector Helios v2.0 (Dynamic Dispatcher) Starting ---
-[Prospector] 🔍 Validating precomputed MTF data for Timeframes: ["3m", "5m", "15m", "1h", "4h"]
-  [WARNING] MTF data for '3m' was not precomputed in BacktestBuilder! Please configure .timeframes(&[...]) when building Backtest.
-  [WARNING] MTF data for '5m' was not precomputed in BacktestBuilder! Please configure .timeframes(&[...]) when building Backtest.
-  [WARNING] MTF data for '15m' was not precomputed in BacktestBuilder! Please configure .timeframes(&[...]) when building Backtest.
-  [WARNING] MTF data for '1h' was not precomputed in BacktestBuilder! Please configure .timeframes(&[...]) when building Backtest.
-  [WARNING] MTF data for '4h' was not precomputed in BacktestBuilder! Please configure .timeframes(&[...]) when building Backtest.
+[Prospector] 🔍 Validating precomputed MTF data for Timeframes: ["5m", "15m", "1h", "6h"]
 [Prospector] ✅ MTF Cache validation completed (100% Zero-Polars Runtime).
 Workers: 3
+[Prospector] 🎲 Random Restart triggered (1/3). Scout Job #2 queued.
+[Prospector] Scout Job #2 done in 4.50s
+[Prospector] 🌟 Scout Job #2 PROMOTED to Hotspot: Warmup Period (Scout history <= warmup_jobs) (fitness=8.23, variance=586634.96868)
+[Prospector] 🎲 Random Restart triggered (2/3). Scout Job #4 queued.
+[Prospector] 🎲 Random Restart triggered (3/3). Scout Job #6 queued.
+[Prospector] ✋ Random Restart limit reached (3/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (4/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (5/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (6/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (7/3). No more exploration.
+[Prospector] Scout Job #6 done in 2.03s
+[Prospector] 🌟 Scout Job #6 PROMOTED to Hotspot: Warmup Period (Scout history <= warmup_jobs) (fitness=4.79, variance=464084.66802)
+[Prospector] ✋ Random Restart limit reached (8/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (9/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (10/3). No more exploration.
+[Prospector] Scout Job #4 done in 3.68s
+[Prospector] 🌟 Scout Job #4 PROMOTED to Hotspot: Warmup Period (Scout history <= warmup_jobs) (fitness=-50.00, variance=739254.32099)
+[Prospector] ✋ Random Restart limit reached (11/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (12/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (13/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (14/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (15/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (16/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (17/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (18/3). No more exploration.
+[Prospector] ✋ Random Restart limit reached (19/3). No more exploration.
+--- Prospector Finished in 127.20s ---
+[Prospector] 🧹 Starting cleanup process...
+[Prospector] 💾 Successfully exported 10 champions to helios_champions_results.json
+2026-08-24T04:46:40.817401Z  INFO bot_engine::optimizer::prospector_runner: 🏆 [Optimizer] TOP 1 FOUND! Return: 68.82%, Max DD: -26.86%, Trades: 114
+2026-08-24T04:46:41.000148Z  INFO bot_engine::data_engine::sqlite_impl: 🧬 [ETHUSDT] DNA for strategy 'paper_forward_v3' saved to DB.
+2026-08-24T04:46:41.000487Z  INFO bot_engine::optimizer::prospector_runner: 💾 [Optimizer] Đã lưu DNA mới nhất vào Database.
+2026-08-24T04:46:41.000711Z  INFO bot_engine::optimizer::prospector_runner: 📢 [Optimizer] Đã phát tín hiệu (Event-Driven) mang DNA mới tới các Actor.
+2026-08-24T04:46:41.002288Z  INFO paper_forward_test: --------------------------------------------------------------------------------
+2026-08-24T04:46:41.002549Z  INFO paper_forward_test: 🚀 [PHASE 2 - ENGINE SETUP] Khởi tạo EventBus & AssetActor (ExecutionMode::Paper)...
+2026-08-24T04:46:41.470887Z  INFO bot_engine::controller::asset_actor: 📥 [ETHUSDT] Syncing history until timestamp 1786250640000 into Rolling Buffer...
+2026-08-24T04:46:41.598155Z  INFO bot_engine::controller::asset_actor: ✅ [ETHUSDT] Synchronized 47473 historical 1m candles into Rolling Buffer (Total buffer: 43200).
+2026-08-24T04:46:41.600027Z  INFO paper_forward_test: --------------------------------------------------------------------------------
+2026-08-24T04:46:41.600050Z  INFO paper_forward_test: 📢 [UI_STATUS] [ETHUSDT] Trading -> Hệ thống Helios đã sẵn sàng!
+2026-08-24T04:46:41.600220Z  INFO paper_forward_test: 🔄 [PHASE 3 - FORWARD EXECUTION] Khởi chạy luồng mô phỏng đồng bộ & Re-Optimize ngầm...
+2026-08-24T04:46:41.600411Z  INFO paper_forward_test: --------------------------------------------------------------------------------
+2026-08-24T04:46:41.827404Z  INFO paper_forward_test: 📊 Số nến Out-Of-Sample sẽ bơm: 21579 nến (Từ 2026-08-09 04:45 đến 2026-08-24 04:44:00 UTC)
+2026-08-24T04:46:41.827737Z  INFO bot_engine::controller::asset_actor: ✨ [ETHUSDT] Đã cập nhật bộ não Helios với DNA mới từ Re-Optimizer! (Fitness: 68.8214)
 
-thread '<unnamed>' (5528) panicked at E:\Projects\Automations\trading_backtest\ferro_trade\src\backtest\context.rs:136:18:
-[FATAL] MTF OHLCV for 5m not found in cache. Did you forget to precompute?
+thread 'main' (12448) panicked at E:\Projects\Automations\trading_backtest\ferro_trade\src\backtest\context.rs:136:18:
+[FATAL] MTF OHLCV for 6h not found in cache. Did you forget to precompute?
 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 error: process didn't exit successfully: `target\release\examples\paper_forward_test.exe` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)
 PS E:\Projects\Automations\trading_backtest\trading_bot\bot_engine>

@@ -1,8 +1,24 @@
 use thiserror::Error;
 use binance_sdk::common::errors::ConnectorError;
+use crate::data_engine::error::DataError;
+use crate::execution::error::ExecutionError;
+use crate::optimizer::error::OptimizerError;
 
+/// Enum Lỗi gốc phân cấp toàn hệ thống (Hierarchical Root BotError)
 #[derive(Error, Debug)]
 pub enum BotError {
+    #[error("Data error: {0}")]
+    Data(#[from] DataError),
+
+    #[error("Execution error: {0}")]
+    Execution(#[from] ExecutionError),
+
+    #[error("Optimizer error: {0}")]
+    Optimizer(#[from] OptimizerError),
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+
     #[error("API Error {code}: {msg}")]
     ApiError {
         code: i32,
@@ -24,35 +40,34 @@ pub enum BotError {
     #[error("State Error: {0}")]
     StateError(String),
 
+    #[error("Strategy error: {0}")]
+    StrategyError(String),
+
+    #[error("Unauthorized access: {0}")]
+    Unauthorized(String),
+
+    #[error("Validation error: {0}")]
+    Validation(String),
+
     #[error("Internal Error: {0}")]
     Internal(String),
 }
 
+impl From<rusqlite::Error> for BotError {
+    fn from(err: rusqlite::Error) -> Self {
+        BotError::Data(DataError::from(err))
+    }
+}
+
 impl From<ConnectorError> for BotError {
     fn from(err: ConnectorError) -> Self {
-        match err {
-            ConnectorError::NetworkError(msg) => BotError::NetworkError(msg),
-            ConnectorError::ConnectorClientError { msg, code } |
-            ConnectorError::UnauthorizedError { msg, code } |
-            ConnectorError::ForbiddenError { msg, code } |
-            ConnectorError::TooManyRequestsError { msg, code } |
-            ConnectorError::RateLimitBanError { msg, code } |
-            ConnectorError::NotFoundError { msg, code } |
-            ConnectorError::BadRequestError { msg, code } => BotError::ApiError {
-                code: code.unwrap_or(-1) as i32,
-                msg,
-            },
-            ConnectorError::ServerError { msg, status_code } => BotError::ApiError {
-                code: status_code.unwrap_or(500) as i32,
-                msg,
-            },
-        }
+        BotError::Execution(ExecutionError::from(err))
     }
 }
 
 impl From<serde_json::Error> for BotError {
     fn from(err: serde_json::Error) -> Self {
-        BotError::ParseError(err.to_string())
+        BotError::Execution(ExecutionError::from(err))
     }
 }
 
@@ -64,3 +79,4 @@ impl From<anyhow::Error> for BotError {
         }
     }
 }
+
