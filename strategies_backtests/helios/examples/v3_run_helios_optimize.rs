@@ -116,31 +116,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 7. KÍCH HOẠT HỆ THỐNG
     println!(">>> STARTING HELIOS V3 EVOLUTION <<<");
     
-    // Hàm mục tiêu: Tối ưu hóa cho Lợi nhuận và bảo vệ Drawdown
+    // Hàm mục tiêu Quant Tối ưu (Pure Calmar Score): Lãi cao, Drawdown thấp, Gồng siêu sóng bền bỉ
     let objective = |stats: &ferro_trade::stats::Stats| {
-        let total_days = 30.0; // Khoảng thời gian ước tính 1 tháng (43000 bars 1m)
-        let trades_per_day = stats.total_trades as f64 / total_days;
-        
-        // 1. Phải có ít nhất khoảng 1 lệnh mỗi 2 ngày (0.5 trades/day) -> Tránh overfit với quá ít lệnh
-        if trades_per_day < 0.5 {
-            return -2000.0 * (1.0 - trades_per_day); 
-        }
-        
         let ret = stats.return_pct;
         let dd = stats.max_drawdown_pct.abs();
-        
-        // 2. Giới hạn đỏ Drawdown: Phạt cực nặng nếu lỗ hơn 40%
-        if dd > 40.0 {
-            return -5000.0 - dd; 
+        let trades = stats.total_trades;
+
+        // Phòng vệ Edge Cases: Cần ít nhất 2 lệnh độc lập và lợi nhuận dương
+        if ret.is_nan() || ret <= 0.0 || trades < 2 {
+            return -100.0 - dd;
         }
 
-        if ret.is_nan() || ret <= 0.0 {
-            return -50.0;
-        }
-
-        // 3. Tối đa lợi nhuận nếu nằm trong ngưỡng an toàn
-        // (Khuyến khích trade nhiều nếu return bằng nhau)
-        ret + (trades_per_day * 0.1)
+        // Điểm số Calmar tối thượng với hằng số làm mượt +3.0 bảo vệ rung lắc
+        ret / (dd + 3.0)
     };
 
     // Chạy Prospector với HeliosStrategyV3 (Sử dụng clone để giữ lại một bản cho chẩn đoán cuối game)
