@@ -14,7 +14,6 @@ use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use tracing::{info, warn, error};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use bot_engine::data_engine::binance_rest::InitialSync;
 use bot_engine::data_engine::sqlite_impl::SqliteStore;
@@ -29,7 +28,8 @@ use bot_engine::optimizer::helios_bridge::HeliosBridge;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
 
-
+#[path = "common/mod.rs"]
+mod common;
 
 // ============================================================================
 // ⚙️ CẤU HÌNH TẦN SUẤT CHẠY OPTIMIZER (N MINS) VÀ SINGLE BACKTEST (M MINS)
@@ -37,26 +37,17 @@ use ferro_trade::strategy::Strategy;
 const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
-const TOTAL_FETCH_DAYS: i64 = 32;        // Tổng số ngày dữ liệu tải về (365 ngày)
+const TOTAL_FETCH_DAYS: i64 = 91;        // Tổng số ngày dữ liệu tải về (365 ngày)
 const TRAIN_WINDOW_DAYS: i64 = 30;       // Cửa sổ nến huấn luyện GA (30 ngày)
 
-const REOPT_INTERVAL_MINS: i64 = 360;    // N MINUTES: Tần suất chạy lại GA Optimizer (VD: 360 phút / 6 giờ, 44640 / 31 days)
-const BACKTEST_INTERVAL_MINS: i64 = 2;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút / 1 giờ, 1440 phút / 24 giờ)
+const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Optimizer (VD: 360 phút / 6 giờ, 44640 / 31 days)
+const BACKTEST_INTERVAL_MINS: i64 = 3;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút / 1 giờ, 1440 phút / 24 giờ)
 const ENABLE_PAPER_TRADE: bool = false;   // CÔNG TẮC TẮT/MỞ PAPER TRADE: true = Bật Paper Trading ($60 initial equity), false = Tắt (chỉ chạy Diagnostic)
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Khởi tạo Log hệ thống
-    std::fs::create_dir_all("examples/logs")?;
-    let log_filename = format!("{}.log", STRATEGY_ID);
-    let file_appender = tracing_appender::rolling::never("examples/logs", &log_filename);
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-    tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
-        .with(fmt::layer().with_writer(std::io::stdout))
-        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
-        .init();
+    // 1. Khởi tạo Log hệ thống từ module dùng chung
+    let _guard = common::init_logging(STRATEGY_ID)?;
 
     info!("================================================================================");
     info!("🧪 BẮT ĐẦU ĐÁNH GIÁ CHIẾN LƯỢC TỊNH TIẾN CÓ SMART SEEDING 0.5%");

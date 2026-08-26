@@ -328,6 +328,9 @@ impl AssetActor {
                             error!("❌ [{}] Lỗi thực thi action {:?}: {:?}", self.symbol, action, e);
                         }
                     }
+                    // Gán chính xác nến mở vị thế theo chỉ số nến hiện tại trong full_buffer
+                    let current_bar_idx = full_buffer.len().saturating_sub(1);
+                    self.execution_engine.set_live_entry_bar(current_bar_idx);
                 } else {
                     debug!("🧠 [{}] Strategy evaluated. No actions generated on close {}.", self.symbol, current_close);
                 }

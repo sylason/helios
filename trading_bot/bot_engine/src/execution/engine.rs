@@ -24,6 +24,9 @@ pub trait ExecutionEngine: Send + Sync {
     /// Hook nhận sự kiện tài khoản từ EventBus (dành cho Live/Testnet engine cập nhật từ WS)
     async fn on_account_event(&mut self, event: &AccountEvent);
 
+    /// Gán chỉ số nến mở vị thế chính xác (live_entry_bar) trong bộ đệm
+    fn set_live_entry_bar(&mut self, _bar_idx: usize) {}
+
     /// Báo cáo tích lũy kết quả Paper Trading (No-op cho Live)
     fn log_paper_report(&self, _current_price: f64, _time_label: &str) {}
 

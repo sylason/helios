@@ -14,7 +14,6 @@ use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use tracing::{info, warn, error};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use bot_engine::data_engine::binance_rest::InitialSync;
 use bot_engine::data_engine::sqlite_impl::SqliteStore;
@@ -29,7 +28,8 @@ use bot_engine::optimizer::prospector_runner::ProspectorRunner;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
 
-
+#[path = "common/mod.rs"]
+mod common;
 
 // ============================================================================
 // ⚙️ BẢNG CẤU HÌNH TẬP TRUNG (TEST & RE-OPTIMIZER CONFIGURATION)
@@ -52,17 +52,8 @@ const MAX_LIVE_MEM_CANDLES: usize = 43100; // Cửa sổ bộ nhớ trượt cho
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Khởi tạo Hệ thống Log (Console + File log chuyên dụng)
-    std::fs::create_dir_all("examples/logs")?;
-    let log_filename = format!("{}.log", STRATEGY_ID);
-    let file_appender = tracing_appender::rolling::never("examples/logs", &log_filename);
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-    tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
-        .with(fmt::layer().with_writer(std::io::stdout))
-        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
-        .init();
+    // 1. Khởi tạo Hệ thống Log từ module dùng chung
+    let _guard = common::init_logging(STRATEGY_ID)?;
 
     info!("================================================================================");
     info!("🧪 BẮT ĐẦU THỬ NGHIỆM FULL ENGINE PAPER FORWARD TEST (15-MIN RE-OPT)");

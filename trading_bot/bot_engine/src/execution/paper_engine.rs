@@ -118,6 +118,17 @@ impl ExecutionEngine for PaperExecutionEngine {
         self.live_position.clone()
     }
 
+    fn set_live_entry_bar(&mut self, bar_idx: usize) {
+        if let Some(ref mut pos) = self.live_position {
+            if pos.live_entry_bar == 0 {
+                pos.live_entry_bar = bar_idx;
+            }
+        }
+        if self.paper_trader.entry_bar_index == 0 {
+            self.paper_trader.entry_bar_index = bar_idx;
+        }
+    }
+
     async fn on_account_event(&mut self, _event: &AccountEvent) {
         // Paper Engine tự chủ 100%, bỏ qua các sự kiện từ ngoài để tránh ô nhiễm state
     }
