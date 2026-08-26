@@ -41,6 +41,7 @@ pub struct AssetActor {
     pub strategy: Option<Box<dyn Strategy + Send>>,
     pub execution_engine: Box<dyn ExecutionEngine>,
     pub config: EngineConfig,
+    pub initial_sync_until: Option<i64>,
 }
 
 impl AssetActor {
@@ -73,12 +74,19 @@ impl AssetActor {
             strategy: None,
             execution_engine,
             config,
+            initial_sync_until: None,
         }
     }
 
     /// Thiết lập Strategy cho Actor (Dependency Injection)
     pub fn with_strategy(mut self, strategy: Box<dyn Strategy + Send>) -> Self {
         self.strategy = Some(strategy);
+        self
+    }
+
+    /// Thiết lập mốc thời gian đồng bộ lịch sử ban đầu (phục vụ mô phỏng Forward Test)
+    pub fn with_sync_until(mut self, until_ts: i64) -> Self {
+        self.initial_sync_until = Some(until_ts);
         self
     }
 
@@ -263,6 +271,10 @@ impl AssetActor {
     }
 
     pub async fn handle_initial_sync(&mut self) -> Result<(), String> {
+        if let Some(until_ts) = self.initial_sync_until {
+            return self.handle_initial_sync_until(until_ts).await;
+        }
+
         let latest = self.candle_repo.get_latest_candle(&self.symbol).await.map_err(|e| e.to_string())?;
         if let Some(latest_candle) = latest {
             self.handle_initial_sync_until(latest_candle.timestamp).await

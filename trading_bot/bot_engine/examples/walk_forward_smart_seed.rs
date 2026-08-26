@@ -41,7 +41,7 @@ const TOTAL_FETCH_DAYS: i64 = 91;        // Tổng số ngày dữ liệu tải 
 const TRAIN_WINDOW_DAYS: i64 = 30;       // Cửa sổ nến huấn luyện GA (30 ngày)
 
 const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Optimizer (VD: 360 phút / 6 giờ, 44640 / 31 days)
-const BACKTEST_INTERVAL_MINS: i64 = 3;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút / 1 giờ, 1440 phút / 24 giờ)
+const BACKTEST_INTERVAL_MINS: i64 = 60;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút / 1 giờ, 1440 phút / 24 giờ)
 const ENABLE_PAPER_TRADE: bool = false;   // CÔNG TẮC TẮT/MỞ PAPER TRADE: true = Bật Paper Trading ($60 initial equity), false = Tắt (chỉ chạy Diagnostic)
 
 #[tokio::main]
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = if Path::new(config_local).exists() {
         config_local
     } else {
-        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\trading_bot_demo\examples\helios_optimizer_config.json"#
+        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\helios\examples\helios_optimizer_config.json"#
     };
 
     let (dna_tx, dna_rx) = tokio::sync::watch::channel(None);
@@ -179,7 +179,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         account_rx,
         paper_engine,
         engine_config,
-    ).with_strategy(strategy);
+    )
+    .with_strategy(strategy)
+    .with_sync_until(train_end_ts);
 
     tokio::spawn(async move {
         actor.run().await;

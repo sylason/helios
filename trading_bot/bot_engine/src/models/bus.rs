@@ -22,11 +22,11 @@ pub struct EventBus {
 
 impl EventBus {
     pub fn new() -> (Self, mpsc::Receiver<TradeSignal>, mpsc::Receiver<EmergencyCmd>, mpsc::Receiver<StatusUpdate>) {
-        let (data_tx, _) = broadcast::channel(100);
+        let (data_tx, _) = broadcast::channel(4096);
         let (trade_tx, trade_rx) = mpsc::channel(50);
         let (emergency_tx, emergency_rx) = mpsc::channel(10);
         let (status_tx, status_rx) = mpsc::channel(100);
-        let (account_tx, _) = broadcast::channel(50);
+        let (account_tx, _) = broadcast::channel(512);
 
         (
             Self {
