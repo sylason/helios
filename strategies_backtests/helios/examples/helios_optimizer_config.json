@@ -1,4 +1,10 @@
 {
+  "account": {
+    "initial_cash": 60.0,
+    "commission_rate": 0.0004,
+    "margin_rate": 0.05,
+    "fractional_unit": 0.0001
+  },
   "prospector": {
     "worker_config": {
       "population_size": 100,

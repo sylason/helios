@@ -13,6 +13,9 @@ use ferro_trade::strategy::Strategy;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // KHAI BÁO STRATEGY ID ĐANG DÙNG (Dùng để định danh log và db)
@@ -94,33 +97,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Optimizer chạy ngay lập tức vì ta đã đảm bảo xong 33 ngày data
         loop {
             // Chạy optimizer
-            let local_config = "helios_optimizer_config.json";
-            let config_in_dir = "config/helios_optimizer_config.json";
-            let default_path = r#"E:\Projects\Automations\trading_backtest\strategies_backtests\trading_bot_demo\examples\helios_optimizer_config.json"#;
-            let relative_1 = "strategies_backtests/trading_bot_demo/examples/helios_optimizer_config.json";
-            let relative_2 = "../strategies_backtests/trading_bot_demo/examples/helios_optimizer_config.json";
-            let relative_3 = "../../strategies_backtests/trading_bot_demo/examples/helios_optimizer_config.json";
-
-            let config_path = if std::path::Path::new(local_config).exists() {
-                local_config
-            } else if std::path::Path::new(config_in_dir).exists() {
-                config_in_dir
-            } else if std::path::Path::new(relative_1).exists() {
-                relative_1
-            } else if std::path::Path::new(relative_2).exists() {
-                relative_2
-            } else if std::path::Path::new(relative_3).exists() {
-                relative_3
-            } else {
-                default_path
-            };
+            let config_path = common::resolve_strategy_config_path("helios");
 
             let db_opt_path = format!("examples/storage/{}_prospector.db", strategy_id);
             if let Err(e) = bot_engine::optimizer::prospector_runner::ProspectorRunner::run_optimization_cycle_smart_seed(
                 &symbol_opt,
                 strategy_id,
                 db_for_opt.clone(),
-                config_path,
+                &config_path,
                 &db_opt_path,
                 Some(dna_tx.clone())
             ).await {

@@ -87,3 +87,23 @@ Khi một cặp tiền đang ở trạng thái `INACTIVE` và người dùng b�
 1. **Trên Giao Diện (UI):** Dòng của cặp tiền đó biến mất khỏi Active Watchlist Table.
 2. **Khả Năng Thêm Lại:** Nút **`[➕ THÊM CẶP TIỀN]`** trên thanh công cụ cho phép mở bảng tìm kiếm để thêm lại bất kỳ lúc nào.
 3. **Trong Backend:** Gửi lệnh `UNSUBSCRIBE` lên Binance WebSocket, gỡ khỏi `routing_table` và giải phóng RAM. Dữ liệu nến lịch sử và nhật ký trade cũ trong SQLite được giữ nguyên vẹn để phục vụ báo cáo thống kê.
+
+---
+
+## 🛡️ 5. Tiếp Quản Vị Thế Có Sẵn (Adopt & Protect) & Cấu Hình ISOLATED Margin
+
+Khi `start_asset(symbol)` được kích hoạt:
+1. **Tự Động Thiết Lập Ký Quỹ Cô Lập (ISOLATED Margin):**
+   - Gọi REST API `POST /fapi/v1/marginType` chuyển sang `ISOLATED` và `POST /fapi/v1/leverage` đặt đòn bẩy `20x`.
+   - Mục đích: Cách ly rủi ro tuyệt đối; nếu có sự cố rủi ro thanh lý, chỉ mất tối đa số vốn cấp cho cặp tiền đó, ví tổng an toàn $100\%$.
+2. **Tiếp Quản Vị Thế Có Sẵn (Adopt & Protect):**
+   - `AccountManager` gọi API Binance kiểm tra xem cặp tiền đó có đang mở vị thế sẵn hay không (từ phiên chạy trước hoặc do người dùng mở tay).
+   - Nếu có vị thế mở $\rightarrow$ Tự động đồng bộ `Entry Price`, `Side` và `Size` vào `AssetActor` và **ngay lập tức đặt lệnh Trailing SL bảo vệ vị thế đó**.
+
+---
+
+## 🚨 6. Nguyên Tắc Cô Lập Lỗi Theo Từng Asset (Fault Isolation)
+
+Nếu một cặp tiền gặp sự cố nghiêm trọng từ sàn Binance (Ví dụ: `code: -2019 Margin is insufficient` do thiếu tiền ký quỹ):
+- **Chỉ cô lập lỗi tại đúng cặp tiền đó:** Cặp tiền gặp sự cố tự động chuyển sang trạng thái `ERROR` hoặc `PAUSED`, phát cảnh báo Toast màu đỏ lên UI.
+- **Không làm sập hệ thống:** Tất cả các cặp tiền khác (`BTCUSDT`, `SOLUSDT`...) **vẫn tiếp tục vận hành và giao dịch bình thường $100\%$**, không bị gián đoạn.

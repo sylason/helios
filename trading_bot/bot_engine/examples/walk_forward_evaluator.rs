@@ -9,17 +9,13 @@
 // 5. [FEATURE A] Định kỳ N phút: Tự động chạy lại Re-Optimizer (Genetic Algorithm) trên cửa sổ 30 ngày gần nhất, phát DNA mới qua watch::channel.
 // 6. [FEATURE B] Định kỳ M phút: Tự động trích xuất nến Rolling Buffer 30 ngày và gọi HeliosBridge::diagnostic_backtest để đo đạc chỉ số lợi nhuận, Max DD, Win Rate và in bảng Báo cáo Đánh giá Tịnh tiến (Walk-Forward Metric Report).
 
-use std::sync::Arc;
 use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use tracing::{info, warn, error};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use bot_engine::data_engine::binance_rest::InitialSync;
-use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::repository::{StrategyRepository, CandleRepository};
-use bot_engine::models::weight_monitor::WeightMonitor;
 use bot_engine::models::bus::EventBus;
 use bot_engine::models::config::EngineConfig;
 use bot_engine::controller::asset_actor::AssetActor;
@@ -29,7 +25,8 @@ use bot_engine::optimizer::helios_bridge::HeliosBridge;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
 
-
+#[path = "common/mod.rs"]
+mod common;
 
 // ============================================================================
 // ⚙️ CẤU HÌNH TẦN SUẤT CHẠY OPTIMIZER (N MINS) VÀ SINGLE BACKTEST (M MINS)
@@ -47,16 +44,7 @@ const ENABLE_PAPER_TRADE: bool = false;   // CÔNG TẮC TẮT/MỞ PAPER TRADE:
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Khởi tạo Log hệ thống
-    std::fs::create_dir_all("examples/logs")?;
-    let log_filename = format!("{}.log", STRATEGY_ID);
-    let file_appender = tracing_appender::rolling::never("examples/logs", &log_filename);
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-    tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
-        .with(fmt::layer().with_writer(std::io::stdout))
-        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
-        .init();
+    let _guard = common::init_logging(STRATEGY_ID)?;
 
     info!("================================================================================");
     info!("🧪 BẮT ĐẦU ĐÁNH GIÁ CHIẾN LƯỢC TỊNH TIẾN (WALK-FORWARD EVALUATOR)");
@@ -67,10 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("================================================================================");
 
     // 2. Khởi tạo Database SQLite & Weight Monitor
-    std::fs::create_dir_all("examples/storage")?;
-    let db_path = format!("examples/storage/{}.db", STRATEGY_ID);
-    let db_store = Arc::new(SqliteStore::new(&db_path)?);
-    let monitor = Arc::new(WeightMonitor::new(2400));
+    let (db_store, monitor) = common::setup_sqlite_and_monitor(STRATEGY_ID, 2400)?;
 
     // 3. Nạp dữ liệu lịch sử N ngày
     info!("📥 [Data Ingestion] Đang đồng bộ dữ liệu {} ngày từ Binance...", TOTAL_FETCH_DAYS);
@@ -105,12 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = std::fs::remove_file(&prospector_db);
     }
 
-    let config_local = "examples/helios_optimizer_config.json";
-    let config_path = if Path::new(config_local).exists() {
-        config_local
-    } else {
-        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\trading_bot_demo\examples\helios_optimizer_config.json"#
-    };
+    let config_path = common::resolve_strategy_config_path("helios");
 
     let (dna_tx, dna_rx) = tokio::sync::watch::channel(None);
 
@@ -118,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SYMBOL,
         STRATEGY_ID,
         db_store.clone(),
-        config_path,
+        &config_path,
         &prospector_db,
         Some(dna_tx.clone()),
         train_start_ts,

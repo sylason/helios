@@ -9,17 +9,14 @@
 // 5. AssetActor nhận nến real-time qua EventBus, tính toán tín hiệu, Hot-Swap DNA ngầm qua `dna_rx`,
 //    và thực thi lệnh giả lập (High/Low SL scanning & PnL tracking) qua PaperTrader.
 
-use std::sync::Arc;
 use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use tracing::{info, warn, error};
 
 use bot_engine::data_engine::binance_rest::InitialSync;
-use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::models::AssetState;
 use bot_engine::models::repository::{StrategyRepository, CandleRepository};
-use bot_engine::models::weight_monitor::WeightMonitor;
 use bot_engine::models::bus::EventBus;
 use bot_engine::models::config::EngineConfig;
 use bot_engine::controller::asset_actor::AssetActor;
@@ -64,10 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("================================================================================");
 
     // 2. Khởi tạo Database SQLite & Weight Monitor
-    std::fs::create_dir_all("examples/storage")?;
-    let db_path = format!("examples/storage/{}.db", STRATEGY_ID);
-    let db_store = Arc::new(SqliteStore::new(&db_path)?);
-    let monitor = Arc::new(WeightMonitor::new(2400));
+    let (db_store, monitor) = common::setup_sqlite_and_monitor(STRATEGY_ID, 2400)?;
 
     // 3. Nạp dữ liệu lịch sử N ngày từ Binance REST API
     info!("📥 [Data Ingestion] Đang đồng bộ dữ liệu {} ngày từ Binance...", TOTAL_FETCH_DAYS);
@@ -111,12 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = std::fs::remove_file(&prospector_db);
     }
 
-    let config_local = "examples/helios_optimizer_config.json";
-    let config_path = if Path::new(config_local).exists() {
-        config_local
-    } else {
-        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\helios\examples\helios_optimizer_config.json"#
-    };
+    let config_path = common::resolve_strategy_config_path("helios");
 
     // Khởi tạo kênh truyền tín hiệu Event-Driven cho DNA Hot-Swapping (Optimizer -> AssetActor)
     let (dna_tx, dna_rx) = tokio::sync::watch::channel(None);
@@ -125,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SYMBOL,
         STRATEGY_ID,
         db_store.clone(),
-        config_path,
+        &config_path,
         &prospector_db,
         Some(dna_tx.clone()),
         train_start_ts,

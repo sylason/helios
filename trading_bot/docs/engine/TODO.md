@@ -26,7 +26,9 @@ Danh sách nhiệm vụ phát triển Lõi `bot_engine` Multi-Asset Server theo 
 - [ ] `[E3.3]` Triển khai các lệnh ngắt: `graceful_stop`, `cancel_graceful_stop`, `force_stop_immediate`, `remove_asset`.
 - [ ] `[E3.4]` Tích hợp công thức tính vốn lãi kép lũy tiến kèm vốn sàn (Compounding Capital Floor) và Luồng Điều Chuyển Vốn (Rebalancing).
 - [ ] `[E3.5]` Cấu hình cố định `Mark Price` cho toàn bộ các lệnh Trailing SL trong `OrderExecutor`.
-- [ ] `[E3.6]` Viết Unit Test kiểm tra toàn bộ luồng chuyển đổi trạng thái FSM của `EngineController`.
+- [ ] `[E3.6]` Tích hợp cơ chế tự động cấu hình `ISOLATED Margin` và tiếp quản vị thế có sẵn (`Adopt & Protect`).
+- [ ] `[E3.7]` Tích hợp cơ chế cô lập lỗi theo từng Asset (`Fault Isolation`).
+- [ ] `[E3.8]` Viết Unit Test kiểm tra toàn bộ luồng chuyển đổi trạng thái FSM của `EngineController`.
 
 ---
 

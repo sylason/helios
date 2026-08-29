@@ -136,4 +136,25 @@ impl PathResolver {
 
         p.to_path_buf()
     }
+
+    /// Tự động tìm kiếm đường dẫn cấu hình chiến lược (Strategy Config Resolver)
+    pub fn resolve_strategy_config(strategy_id: &str) -> String {
+        let candidates = [
+            format!("examples/{}_optimizer_config.json", strategy_id),
+            format!("config/{}_optimizer_config.json", strategy_id),
+            format!("{}_optimizer_config.json", strategy_id),
+            format!("../../strategies_backtests/{}/examples/{}_optimizer_config.json", strategy_id, strategy_id),
+            format!("strategies_backtests/{}/examples/{}_optimizer_config.json", strategy_id, strategy_id),
+            format!("../strategies_backtests/{}/examples/{}_optimizer_config.json", strategy_id, strategy_id),
+        ];
+
+        for cand in &candidates {
+            let p = Self::resolve(cand);
+            if p.exists() {
+                return p.to_string_lossy().into_owned();
+            }
+        }
+
+        candidates[0].clone()
+    }
 }

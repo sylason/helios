@@ -9,17 +9,14 @@
 // 5. [FEATURE A - SMART SEEDING 0.5%]: Định kỳ N phút, trước khi Re-Optimize, lấy duy nhất 1 cá thể Rank 1 Champion từ chu kỳ trước làm Seed tiêm vào Generation 0 (chiếm 0.5% quần thể), 99.5% còn lại là cá thể mới ngẫu nhiên.
 // 6. [FEATURE B]: Định kỳ M phút, tự động trích xuất nến Rolling Buffer 30 ngày và gọi HeliosBridge::diagnostic_backtest để đo đạc hiệu suất Out-Of-Sample.
 
-use std::sync::Arc;
 use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use tracing::{info, warn, error, debug};
 
 use bot_engine::data_engine::binance_rest::InitialSync;
-use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::repository::{StrategyRepository, CandleRepository};
 use bot_engine::models::models::Candle;
-use bot_engine::models::weight_monitor::WeightMonitor;
 use bot_engine::models::bus::EventBus;
 use bot_engine::models::config::EngineConfig;
 use bot_engine::controller::asset_actor::AssetActor;
@@ -59,11 +56,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("   🌱 [SMART SEEDING]: Chiếm 0.5% quần thể (chỉ 1 Champion Rank 1), 99.5% cá thể mới");
     info!("================================================================================");
 
-    // 2. Khởi tạo Database SQLite & Weight Monitor
-    std::fs::create_dir_all("examples/storage")?;
-    let db_path = format!("examples/storage/{}.db", STRATEGY_ID);
-    let db_store = Arc::new(SqliteStore::new(&db_path)?);
-    let monitor = Arc::new(WeightMonitor::new(2400));
+    // 2. Khởi tạo Database SQLite & Weight Monitor qua module dùng chung
+    let (db_store, monitor) = common::setup_sqlite_and_monitor(STRATEGY_ID, 2400)?;
 
     // 3. Nạp dữ liệu lịch sử N ngày
     info!("📥 [Data Ingestion] Đang đồng bộ dữ liệu {} ngày từ Binance...", TOTAL_FETCH_DAYS);
@@ -98,12 +92,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = std::fs::remove_file(&prospector_db);
     }
 
-    let config_local = "examples/helios_optimizer_config.json";
-    let config_path = if Path::new(config_local).exists() {
-        config_local
-    } else {
-        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\helios\examples\helios_optimizer_config.json"#
-    };
+    // Tự động tìm kiếm file cấu hình chiến lược qua Config Resolver dùng chung
+    let config_path = common::resolve_strategy_config_path("helios");
 
     let (dna_tx, dna_rx) = tokio::sync::watch::channel(None);
 
@@ -111,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         SYMBOL,
         STRATEGY_ID,
         db_store.clone(),
-        config_path,
+        &config_path,
         &prospector_db,
         Some(dna_tx.clone()),
         train_start_ts,

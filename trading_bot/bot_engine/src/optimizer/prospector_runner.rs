@@ -17,16 +17,41 @@ use polars::prelude::*;
 use crate::models::repository::{CandleRepository, StrategyRepository};
 use crate::data_engine::sqlite_impl::SqliteStore;
 
-// --- Định nghĩa Constants cứng từ common.rs của Helios ---
-pub const INITIAL_CASH: f64 = 60.0;
-pub const COMMISSION: f64 = 0.0004;
-pub const MARGIN: f64 = 1.0 / 20.0;
-pub const FRACTIONAL_UNIT: f64 = 0.0001;
+/// Cấu hình tài khoản và môi trường khớp lệnh cho Optimizer (Single Source of Truth)
+#[derive(Debug, Clone, Deserialize)]
+pub struct AccountOptimizerConfig {
+    #[serde(default = "default_initial_cash")]
+    pub initial_cash: f64,
+    #[serde(default = "default_commission")]
+    pub commission_rate: f64,
+    #[serde(default = "default_margin")]
+    pub margin_rate: f64,
+    #[serde(default = "default_fractional_unit")]
+    pub fractional_unit: Option<f64>,
+}
+
+fn default_initial_cash() -> f64 { 60.0 }
+fn default_commission() -> f64 { 0.0004 }
+fn default_margin() -> f64 { 1.0 / 20.0 }
+fn default_fractional_unit() -> Option<f64> { Some(0.0001) }
+
+impl Default for AccountOptimizerConfig {
+    fn default() -> Self {
+        Self {
+            initial_cash: default_initial_cash(),
+            commission_rate: default_commission(),
+            margin_rate: default_margin(),
+            fractional_unit: default_fractional_unit(),
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
-struct FullOptimizerConfig {
-    prospector: ProspectorConfig,
-    cache_config: Option<ferro_trade::data::global_cache::CacheConfig>,
+pub struct FullOptimizerConfig {
+    pub prospector: ProspectorConfig,
+    #[serde(default)]
+    pub account: Option<AccountOptimizerConfig>,
+    pub cache_config: Option<ferro_trade::data::global_cache::CacheConfig>,
 }
 
 pub struct ProspectorRunner;
@@ -149,13 +174,14 @@ impl ProspectorRunner {
             let mut prospector_config = full_config.prospector;
             prospector_config.db_path = prospector_db_path_owned.clone();
 
+            let account = full_config.account.unwrap_or_default();
             let backtest = BacktestBuilder::new()
                 .data(df)
                 .timeframes(&prospector_config.available_timeframes)
-                .cash(INITIAL_CASH)
-                .commission(COMMISSION)
-                .margin(MARGIN)
-                .fractional_unit(Some(FRACTIONAL_UNIT))
+                .cash(account.initial_cash)
+                .commission(account.commission_rate)
+                .margin(account.margin_rate)
+                .fractional_unit(account.fractional_unit)
                 .trade_on_close(true)
                 .exclusive_orders(true)
                 .hedging(false)

@@ -363,6 +363,15 @@ impl HeliosBridge {
         candles: &[Candle],
         dna: &[f64],
     ) -> Result<ferro_trade::backtest::engine::BacktestResult, String> {
+        Self::diagnostic_backtest_with_config(candles, dna, &crate::models::config::EngineConfig::default())
+    }
+
+    /// [DIAGNOSTIC] Chạy lại toàn bộ pipeline Backtest với cấu hình EngineConfig động
+    pub fn diagnostic_backtest_with_config(
+        candles: &[Candle],
+        dna: &[f64],
+        config: &crate::models::config::EngineConfig,
+    ) -> Result<ferro_trade::backtest::engine::BacktestResult, String> {
         if candles.is_empty() {
             return Err("Empty candles".into());
         }
@@ -380,13 +389,12 @@ impl HeliosBridge {
             .map(|tf| tf.as_polars_rule().to_string())
             .collect();
         let backtest = ferro_trade::backtest::BacktestBuilder::new()
-
             .data(df)
             .timeframes(&available_tfs)
-            .cash(60.0) // INITIAL_CASH
-            .commission(0.0004) // COMMISSION
-            .margin(1.0 / 20.0) // MARGIN
-            .fractional_unit(Some(0.0001)) // FRACTIONAL_UNIT
+            .cash(config.initial_cash)
+            .commission(config.commission_rate)
+            .margin(config.margin_rate)
+            .fractional_unit(config.fractional_unit)
             .trade_on_close(true)
             .exclusive_orders(true)
             .hedging(false)
@@ -398,7 +406,6 @@ impl HeliosBridge {
             ])
             .build()
             .map_err(|e| e.to_string())?;
-
 
         // 3. Tiền tính toán MTF bằng Prospector
         let mut prospector_config = ferro_trade::optimizer::prospector::ProspectorConfig::default();

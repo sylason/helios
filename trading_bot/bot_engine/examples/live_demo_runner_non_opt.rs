@@ -8,19 +8,18 @@
 // 4. Tịnh tiến cửa sổ Out-of-Sample 30 ngày (Rolling Window) mỗi 15 phút.
 // 5. Tái sử dụng hàm `HeliosBridge::diagnostic_backtest` có sẵn trong `bot_engine` để kiểm tra kết quả nhanh & chuẩn xác.
 
-use std::sync::Arc;
 use std::path::Path;
 
 use chrono::{TimeZone, Utc};
 use tracing::{info, warn, error};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use bot_engine::data_engine::binance_rest::InitialSync;
-use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::repository::{StrategyRepository, CandleRepository};
-use bot_engine::models::weight_monitor::WeightMonitor;
 use bot_engine::optimizer::prospector_runner::ProspectorRunner;
 use bot_engine::optimizer::helios_bridge::HeliosBridge;
+
+#[path = "common/mod.rs"]
+mod common;
 
 // ============================================================================
 // ⚙️ CẤU HÌNH THỬ NGHIỆM FORWARD TEST (NGƯỜI DÙNG CÓ THỂ ĐIỀU CHỈNH)
@@ -36,29 +35,18 @@ const STEP_INTERVAL_MINS: i64 = 15;    // Bước tịnh tiến Forward Backtest
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Khởi tạo hệ thống Log (Console + File log chuyên dụng)
-    std::fs::create_dir_all("examples/logs")?;
-    let log_filename = format!("{}.log", STRATEGY_ID);
-    let file_appender = tracing_appender::rolling::never("examples/logs", &log_filename);
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-
-    tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))
-        .with(fmt::layer().with_writer(std::io::stdout))
-        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
-        .init();
+    let _guard = common::init_logging(STRATEGY_ID)?;
 
     info!("================================================================================");
-    info!("🧪 BẮT ĐẦU THÍ NGHIỆM DNA DECAY FORWARD TEST (OUT-OF-SAMPLE SLIDING WINDOW)");
+    info!("🧪 BẮT ĐẦU FORWARD TEST KIỂM THỬ ĐỘ SUY GIẢM DNA (FIXED TRAINED DNA DECAY TEST)");
     info!("   Symbol: {}, Strategy: {}", SYMBOL, STRATEGY_ID);
-    info!("   Total Fetch: {} days | Train Window: {} days | Eval Window: {} days | Step: {} mins", 
-          TOTAL_FETCH_DAYS, TRAIN_WINDOW_DAYS, EVAL_WINDOW_DAYS, STEP_INTERVAL_MINS);
+    info!("   Total Fetch: {} days | Train Window: {} days | Step Interval: {} mins", 
+          TOTAL_FETCH_DAYS, TRAIN_WINDOW_DAYS, STEP_INTERVAL_MINS);
+    info!("   Engine Mode: Single Backtest Evaluation (HeliosBridge::diagnostic_backtest)");
     info!("================================================================================");
 
     // 2. Khởi tạo Database SQLite & Weight Monitor
-    std::fs::create_dir_all("examples/storage")?;
-    let db_path = format!("examples/storage/{}.db", STRATEGY_ID);
-    let db_store = Arc::new(SqliteStore::new(&db_path)?);
-    let monitor = Arc::new(WeightMonitor::new(2400));
+    let (db_store, monitor) = common::setup_sqlite_and_monitor(STRATEGY_ID, 2400)?;
 
     // 3. Nạp dữ liệu lịch sử N ngày từ Binance REST API
     info!("📥 [Data Ingestion] Đang đồng bộ dữ liệu {} ngày từ Binance...", TOTAL_FETCH_DAYS);
@@ -104,18 +92,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("🧹 Đã dọn dẹp file Prospector DB cũ: {}", prospector_db);
     }
 
-    let config_local = "examples/helios_optimizer_config.json";
-    let config_path = if Path::new(config_local).exists() {
-        config_local
-    } else {
-        r#"E:\Projects\Automations\trading_backtest\strategies_backtests\trading_bot_demo\examples\helios_optimizer_config.json"#
-    };
+    let config_path = common::resolve_strategy_config_path("helios");
 
     if let Err(e) = ProspectorRunner::run_optimization_cycle_range(
         SYMBOL,
         STRATEGY_ID,
         db_store.clone(),
-        config_path,
+        &config_path,
         &prospector_db,
         None,
         train_start_ts,
