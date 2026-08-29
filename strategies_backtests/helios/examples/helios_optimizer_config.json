@@ -8,11 +8,12 @@
       "tournament_size": 7,
       "min_trades": 7,
       "n_top_candidates": 7,
-      "max_stale_generations": 3,
+      "max_stale_generations": 2,
+      "min_significant_fitness_delta": 0.001,
       "mutation_strategy": {
         "type": "AdaptiveDynamic",
         "base_mutpb": 0.20,
-        "hyper_mutpb": 0.75,
+        "hyper_mutpb": 0.40,
         "stale_generations": 2,
         "mut_gene_rate": 0.35
       }
@@ -25,7 +26,8 @@
       "tournament_size": 3,
       "min_trades": 3,
       "n_top_candidates": 3,
-      "max_stale_generations": 3,
+      "max_stale_generations": 2,
+      "min_significant_fitness_delta": 0.001,
       "mutation_strategy": {
         "type": "MultiGene",
         "mutpb": 0.25,
@@ -64,7 +66,7 @@
     "fitness_cache_limit": 50000,
     "resampled_data_limit": 100,
     "lookup_table_limit": 1000,
-    "indicators_limit": 10000,
-    "locks_limit": 2000
+    "indicators_limit": 50000,
+    "locks_limit": 50000
   }
 }
