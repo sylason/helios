@@ -1,36 +1,55 @@
 # 👑 Engine Facade, Asset Lifecycle & DNA Expiry Architecture
 
-Tài liệu chi tiết về Tầng điều phối trung tâm (`EngineController`), Máy trạng thái đối xứng (Symmetric FSM) và Cơ chế kiểm tra hạn sử dụng DNA khi khởi động bot.
+Tài liệu chi tiết về Tầng điều phối trung tâm (`EngineController`), Máy trạng thái đối xứng (Symmetric FSM), Toàn bộ luồng vòng đời của 1 Asset và Cơ chế kiểm tra hạn sử dụng DNA khi khởi động bot.
 
 ---
 
-## 🔄 1. Máy Trạng Thái Đối Xứng (Symmetric Finite State Machine)
+## 🔄 1. Toàn Bộ Luồng Vòng Đời Của 1 Asset (Asset Lifecycle Flowchart)
 
 Mỗi Cặp tiền (Asset) trong hệ thống được quản lý bởi một Máy trạng thái nghiêm ngặt, đảm bảo mọi hành động Bật đều có Tắt, và mọi tiến trình đang chạy đều có thể Hủy (Cancel):
 
 ```mermaid
-stateDiagram-v2
-    [*] --> INACTIVE
+flowchart TD
+    Inactive(["⚪ 1. INACTIVE (Tắt hoàn toàn)"]) -->|Bấm START BOT| Starting["🟡 2. STARTING (Khởi động)"]
+    
+    subgraph S_STARTING ["Giai Đoạn Khởi Động & Kiểm Tra An Toàn"]
+        Starting --> CheckData{"Đủ 33 ngày nến?"}
+        CheckData -- Chưa đủ --> SyncData["Tải nến bù (InitialSync)"] --> CheckDNA
+        CheckData -- Đã đủ --> CheckDNA{"DNA còn hạn sử dụng?<br>(< STEP_INTERVAL_MINS)"}
+        
+        CheckDNA -- Còn hạn --> LoadFast["Nạp ngay DNA cũ (<1s)"]
+        CheckDNA -- Hết hạn / Chưa có --> RunJIT["Xếp hàng chạy GA JIT (15-30s)"]
+        
+        Starting -.->|Bấm CANCEL START| Inactive
+    end
 
-    INACTIVE --> STARTING: 1. start_asset()
-    STARTING --> INACTIVE: cancel_start()
-    STARTING --> RUNNING_ACTIVE: DNA Valid & Initialized
+    LoadFast --> RunningActive(["🟢 3. RUNNING_ACTIVE (Giao dịch tự động)"])
+    RunJIT --> RunningActive
 
-    RUNNING_ACTIVE --> PAUSED: 2. pause_trading()
-    PAUSED --> RUNNING_ACTIVE: resume_trading()
+    subgraph S_RUNNING ["Giai Đoạn Vận Hành Thực Tế 24/7"]
+        RunningActive --> CandleLoop["Nhận nến 1m từ WebSocket"]
+        CandleLoop --> Evaluate["Đánh giá chiến lược Helios V3"]
+        Evaluate --> OrderExec["Thực thi Lệnh / Trailing SL"]
+        OrderExec --> ReOptCheck{"Tới chu kỳ Re-Optimize?"}
+        ReOptCheck -- Có --> JIT_Opt["Chạy GA ngầm -> Hot-swap DNA"] --> CandleLoop
+        ReOptCheck -- Không --> CandleLoop
+    end
 
-    RUNNING_ACTIVE --> GRACEFUL_STOPPING: 3. graceful_stop()
-    GRACEFUL_STOPPING --> RUNNING_ACTIVE: cancel_graceful_stop()
-    GRACEFUL_STOPPING --> INACTIVE: Position Closed (FLAT)
+    RunningActive -->|Bấm PAUSE| Paused(["⏸️ 4. PAUSED (Tạm dừng)"])
+    Paused -->|Bấm RESUME| RunningActive
 
-    RUNNING_ACTIVE --> INACTIVE: 4. force_stop_immediate()
-    PAUSED --> INACTIVE: force_stop_immediate()
-    GRACEFUL_STOPPING --> INACTIVE: force_stop_immediate()
+    RunningActive -->|Bấm GRACEFUL STOP| GracefulStopping(["🟠 5. GRACEFUL_STOPPING (Chờ chốt SL)"])
+    GracefulStopping -->|Bấm CANCEL & RESUME| RunningActive
+    GracefulStopping -->|Vị thế về 0| Inactive
+    
+    RunningActive -->|Bấm FORCE STOP| Inactive
+    GracefulStopping -->|Bấm FORCE STOP| Inactive
+    Paused -->|Bấm FORCE STOP| Inactive
 ```
 
 ---
 
-## 🧬 2. Cơ Chế Kiểm Tra Hạn Sử Dụng Của DNA (DNA Expiry Check)
+## 🧬 2. Cơ Chế Kiểm Tra Hạn Sử Dụng Của DNA (DNA Freshness Guard)
 
 Khi người dùng bấm **[START BOT]** cho một cặp tiền:
 1. **Kiểm tra DNA trong Database:**
@@ -59,3 +78,12 @@ Khi người dùng bấm **[START BOT]** cho một cặp tiền:
 | `cancel_graceful_stop(symbol)` | `symbol: String` | Đổi ý không dừng nữa, tiếp tục cho phép bot giao dịch bình thường. |
 | `force_stop_immediate(symbol)` | `symbol: String` | Hủy toàn bộ lệnh Algo trên Binance, đóng Market vị thế ngay tức khắc. |
 | `remove_asset(symbol)` | `symbol: String` | Ngắt WebSocket stream, xóa khỏi Watchlist và giải phóng 100% RAM. |
+
+---
+
+## 🗑️ 4. Cơ Chế Xóa Cặp Tiền Khỏi Watchlist (`remove_asset`)
+
+Khi một cặp tiền đang ở trạng thái `INACTIVE` và người dùng bấm nút **`[🗑️ REMOVE]`**:
+1. **Trên Giao Diện (UI):** Dòng của cặp tiền đó biến mất khỏi Active Watchlist Table.
+2. **Khả Năng Thêm Lại:** Nút **`[➕ THÊM CẶP TIỀN]`** trên thanh công cụ cho phép mở bảng tìm kiếm để thêm lại bất kỳ lúc nào.
+3. **Trong Backend:** Gửi lệnh `UNSUBSCRIBE` lên Binance WebSocket, gỡ khỏi `routing_table` và giải phóng RAM. Dữ liệu nến lịch sử và nhật ký trade cũ trong SQLite được giữ nguyên vẹn để phục vụ báo cáo thống kê.

@@ -13,11 +13,12 @@ use std::sync::Arc;
 use std::path::Path;
 
 use chrono::{TimeZone, Utc};
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 
 use bot_engine::data_engine::binance_rest::InitialSync;
 use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::repository::{StrategyRepository, CandleRepository};
+use bot_engine::models::models::Candle;
 use bot_engine::models::weight_monitor::WeightMonitor;
 use bot_engine::models::bus::EventBus;
 use bot_engine::models::config::EngineConfig;
@@ -167,6 +168,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(account_tx),
     );
 
+    let (sync_tx, sync_rx) = tokio::sync::mpsc::channel::<(Candle, bool)>(64);
+
     let actor = AssetActor::new(
         SYMBOL.to_string(),
         STRATEGY_ID.to_string(),
@@ -181,7 +184,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         engine_config,
     )
     .with_strategy(strategy)
-    .with_sync_until(train_end_ts);
+    .with_sync_until(train_end_ts)
+    .with_sync_data_rx(sync_rx);
 
     tokio::spawn(async move {
         actor.run().await;
@@ -208,8 +212,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for candle in oos_candles {
         let current_ts = candle.timestamp;
 
-        // Bơm nến real-time qua EventBus
-        let _ = data_tx.send((candle.clone(), false));
+        // Bơm nến đồng bộ có Backpressure (is_historical = true để tắt I/O SQLite thừa thãi)
+        let _ = sync_tx.send((candle.clone(), true)).await;
 
         // ------------------------------------------------------------------------
         // [FEATURE B] ĐỊNH KỲ M PHÚT: CHẠY SINGLE BACKTEST ĐÁNH GIÁ CHẨN ĐOÁN
@@ -254,11 +258,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let opt_start_str = Utc.timestamp_millis_opt(opt_start_ts).unwrap().format("%Y-%m-%d %H:%M").to_string();
             let opt_end_str = Utc.timestamp_millis_opt(current_ts).unwrap().format("%Y-%m-%d %H:%M").to_string();
 
-            let all_start_str = Utc.timestamp_millis_opt(train_start_ts).unwrap().format("%Y-%m-%d %H:%M").to_string();
-            info!("📊 [CUMULATIVE PERIODIC REPORT #{:04}] Báo cáo kết quả Paper Trades tích lũy từ mốc khởi đầu [{}] -> [{}]", 
-                  reopt_count, all_start_str, opt_end_str);
-
-            info!("🧬 [RE-OPTIMIZE TRIGGERED #{:04}] Chạy GA Optimizer trên cửa sổ [{} -> {}]", 
+            info!("🧬 [RE-OPTIMIZE TRIGGERED #{:04}] Cửa sổ tối ưu GA: [{} -> {}]", 
                   reopt_count, opt_start_str, opt_end_str);
 
             // [SMART SEEDING]: Lấy 1 cá thể Rank 1 Champion duy nhất từ kết quả trước đó
@@ -272,7 +272,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Dọn dẹp cache đệm prospector_db cũ để 99.5% quần thể được làm mới ngẫu nhiên (LHS Sampling)
             if Path::new(&prospector_db).exists() {
                 let _ = std::fs::remove_file(&prospector_db);
-                info!("🧹 [SMART SEEDING] Đã reset prospector_db để làm mới 99.5% quần thể còn lại.");
+                debug!("🧹 [SMART SEEDING] Đã reset prospector_db để làm mới 99.5% quần thể còn lại.");
             }
 
             let db_opt = db_store.clone();
@@ -294,11 +294,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 warn!("⚠️ Lỗi Re-Optimize lần {}: {}", reopt_count, e);
             } else if let Ok(Some(best_dna)) = db_store.get_best_dna(SYMBOL, STRATEGY_ID).await {
                 current_dna_vec = best_dna.dna.clone();
-                info!("✨ [RE-OPTIMIZE COMPLETE #{:04}] DNA mới cập nhật thành công! (Fitness: {:.2}%)", 
-                      reopt_count, best_dna.fitness);
             }
         }
     }
+
+    // Đóng kênh truyền nến để AssetActor hoàn tất các nến còn đọng và xuất báo cáo tổng kết
+    drop(sync_tx);
+    drop(data_tx);
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     info!("================================================================================");
     info!("✅ KẾT THÚC BÀI ĐÁNH GIÁ WALK-FORWARD EVALUATOR VỚI SMART SEEDING!");

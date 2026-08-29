@@ -6,9 +6,18 @@ use ferro_trade::backtest::context::{InitContext, TickContext};
 use ferro_trade::strategy::Strategy;
 use ferro_trade::broker::actions::Action;
 use ferro_trade::stats::{Stats, StatsInput, compute_stats};
+use ferro_trade::data::Timeframe;
 use smallvec::SmallVec;
 use crate::models::models::Candle;
 use tracing::{debug, error};
+
+/// Danh sách các khung thời gian tiêu chuẩn cho chiến lược Helios V3
+pub const HELIOS_REQUIRED_TIMEFRAMES: [Timeframe; 4] = [
+    Timeframe::T5m,
+    Timeframe::T15m,
+    Timeframe::T1h,
+    Timeframe::T4h,
+];
 
 pub struct HeliosBridge;
 
@@ -41,12 +50,11 @@ impl HeliosBridge {
             }
         };
 
-        // 2.5 TIỀN TÍNH TOÁN MTF (Resampling) cho các Timeframe chuẩn
-        let tf_list: Vec<String> = vec![
-            "3m".into(), "5m".into(), "15m".into(), "30m".into(),
-            "1h".into(), "2h".into(), "3h".into(), "4h".into(),
-            "6h".into(), "12h".into(), "1d".into()
-        ];
+        // 2.5 TIỀN TÍNH TOÁN MTF (Resampling) theo danh sách Timeframe chuẩn từ ferro_trade
+        let tf_list: Vec<String> = HELIOS_REQUIRED_TIMEFRAMES
+            .iter()
+            .map(|tf| tf.as_polars_rule().to_string())
+            .collect();
         let _ = ferro_trade::utils::resample::precompute_timeframes(&tf_list, &df, &cache, &raw_cache.datetime);
 
         let data_view = ferro_trade::data::DataView::new(raw_cache);
@@ -209,45 +217,33 @@ impl HeliosBridge {
         let base_df = &df;
 
         let store = store_map.get_mut(symbol).unwrap();
-        let tf_specs = [
-            ("3m", 3 * 60 * 1000i64),
-            ("5m", 5 * 60 * 1000i64),
-            ("15m", 15 * 60 * 1000i64),
-            ("30m", 30 * 60 * 1000i64),
-            ("1h", 60 * 60 * 1000i64),
-            ("2h", 2 * 60 * 60 * 1000i64),
-            ("3h", 3 * 60 * 60 * 1000i64),
-            ("4h", 4 * 60 * 60 * 1000i64),
-            ("6h", 6 * 60 * 60 * 1000i64),
-            ("12h", 12 * 60 * 60 * 1000i64),
-            ("1d", 24 * 60 * 60 * 1000i64),
-        ];
 
-        for (tf_str, tf_ms) in &tf_specs {
-            let current_bucket = last_candle_ts / tf_ms;
-            let prev_bucket = store.tf_buckets.get(*tf_str).copied().unwrap_or(-1);
+        for &tf in &HELIOS_REQUIRED_TIMEFRAMES {
+            let current_bucket = tf.get_bucket_index(last_candle_ts);
+            let prev_bucket = store.tf_buckets.get(&tf.to_string()).copied().unwrap_or(-1);
 
-            if let Ok(tf) = std::str::FromStr::from_str(tf_str) {
-                let maybe_flat = if current_bucket != prev_bucket || cache.get_resampled_ohlcv(tf).is_none() {
-                    if let Ok(df_res) = ferro_trade::utils::resample::resample_ohlcv(tf_str, base_df) {
-                        if let Ok(flat_ohlcv) = ferro_trade::utils::resample::df_to_resampled_ohlcv(&df_res) {
-                            let flat_arc = Arc::new(flat_ohlcv);
-                            cache.put_resampled_ohlcv(tf, flat_arc.clone());
-                            store.tf_buckets.insert((*tf_str).to_string(), current_bucket);
-                            Some(flat_arc)
-                        } else { None }
+            let maybe_flat = if current_bucket != prev_bucket || cache.get_resampled_ohlcv(tf).is_none() {
+                if let Ok(df_res) = ferro_trade::utils::resample::resample_ohlcv(tf.as_polars_rule(), base_df) {
+                    if let Ok(flat_ohlcv) = ferro_trade::utils::resample::df_to_resampled_ohlcv(&df_res) {
+                        let flat_arc = Arc::new(flat_ohlcv);
+                        cache.put_resampled_ohlcv(tf, flat_arc.clone());
+                        store.tf_buckets.insert(tf.to_string(), current_bucket);
+                        Some(flat_arc)
                     } else { None }
-                } else {
-                    cache.get_resampled_ohlcv(tf)
-                };
+                } else { None }
+            } else {
+                cache.get_resampled_ohlcv(tf)
+            };
 
-                if let Some(flat_arc) = maybe_flat {
-                    let table = Arc::new(ferro_trade::utils::resample::create_lookup_table(base_times, &flat_arc.datetime));
-                    cache.put_lookup(tf, table);
-                }
+            if let Some(flat_arc) = maybe_flat {
+                let table = Arc::new(ferro_trade::utils::resample::create_lookup_table(base_times, &flat_arc.datetime));
+                cache.put_lookup(tf, table);
             }
         }
         drop(store_map);
+
+        // [CRITICAL FIX] Xóa sạch cache indicators cũ để đảm bảo nến mới được tính toán chỉ báo tươi mới 100%
+        cache.clear_indicators();
 
         let data_view = ferro_trade::data::DataView::new(raw_cache);
         drop(df);
@@ -379,11 +375,10 @@ impl HeliosBridge {
         let df = Self::candles_to_df(candles).map_err(|e| e.to_string())?;
 
         // 2. Khởi tạo Backtest giống hệt prospector_runner
-        let available_tfs: Vec<String> = vec![
-            "3m".into(), "5m".into(), "15m".into(), "30m".into(),
-            "1h".into(), "2h".into(), "3h".into(), "4h".into(),
-            "6h".into(), "12h".into(), "1d".into()
-        ];
+        let available_tfs: Vec<String> = HELIOS_REQUIRED_TIMEFRAMES
+            .iter()
+            .map(|tf| tf.as_polars_rule().to_string())
+            .collect();
         let backtest = ferro_trade::backtest::BacktestBuilder::new()
 
             .data(df)

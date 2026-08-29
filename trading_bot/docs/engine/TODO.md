@@ -24,12 +24,13 @@ Danh sách nhiệm vụ phát triển Lõi `bot_engine` Multi-Asset Server theo 
 - [ ] `[E3.1]` Tạo struct `EngineController` làm Facade trung tâm quản lý danh sách các `AssetActor`.
 - [ ] `[E3.2]` Triển khai các lệnh điều khiển: `start_asset`, `cancel_start`, `pause_trading`, `resume_trading`.
 - [ ] `[E3.3]` Triển khai các lệnh ngắt: `graceful_stop`, `cancel_graceful_stop`, `force_stop_immediate`, `remove_asset`.
-- [ ] `[E3.4]` Tích hợp công thức tính vốn lãi kép lũy tiến kèm vốn sàn (Compounding Capital Floor).
-- [ ] `[E3.5]` Viết Unit Test kiểm tra toàn bộ luồng chuyển đổi trạng thái FSM của `EngineController`.
+- [ ] `[E3.4]` Tích hợp công thức tính vốn lãi kép lũy tiến kèm vốn sàn (Compounding Capital Floor) và Luồng Điều Chuyển Vốn (Rebalancing).
+- [ ] `[E3.5]` Cấu hình cố định `Mark Price` cho toàn bộ các lệnh Trailing SL trong `OrderExecutor`.
+- [ ] `[E3.6]` Viết Unit Test kiểm tra toàn bộ luồng chuyển đổi trạng thái FSM của `EngineController`.
 
 ---
 
 ## 🔌 Giai đoạn 4: Tích Hợp Tauri IPC Bridge & System Tray
-- [ ] `[E4.1]` Khởi tạo các Tauri Commands (`cmd_start_asset`, `cmd_pause_asset`, `cmd_force_stop_asset`, `cmd_get_full_snapshot`).
+- [ ] `[E4.1]` Khởi tạo các Tauri Commands (`cmd_start_asset`, `cmd_pause_asset`, `cmd_force_stop_asset`, `cmd_get_full_snapshot`, `cmd_rebalance_capital`).
 - [ ] `[E4.2]` Thiết lập Tauri Event Emitter phát Delta Events (`event_candle_tick`, `event_sl_updated`, `event_order_filled`).
 - [ ] `[E4.3]` Cấu hình System Tray trong `src-tauri` và chặn sự kiện đóng cửa sổ để hiện Bảng Thoát Tổng Hợp.

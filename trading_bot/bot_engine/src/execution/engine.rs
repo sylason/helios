@@ -12,8 +12,28 @@ pub trait ExecutionEngine: Send + Sync {
     /// Thực thi một hành động giao dịch từ Strategy (Mua, Bán, Cập nhật SL/TP)
     async fn execute_action(&mut self, action: &Action, current_price: f64) -> Result<(), BotError>;
 
+    /// Thực thi một hành động giao dịch với ngữ cảnh nến (timestamp, bar_index)
+    async fn execute_action_ctx(
+        &mut self, 
+        action: &Action, 
+        current_price: f64, 
+        _timestamp: i64, 
+        _bar_idx: usize
+    ) -> Result<(), BotError> {
+        self.execute_action(action, current_price).await
+    }
+
     /// Quét nến mới (quét Trailing SL/TP local cho Paper, hoặc no-op cho Live)
     async fn on_candle(&mut self, candle: &Candle) -> Result<(), BotError>;
+
+    /// Quét nến mới với chỉ số nến trong bộ đệm
+    async fn on_candle_ctx(
+        &mut self, 
+        candle: &Candle, 
+        _bar_idx: usize
+    ) -> Result<(), BotError> {
+        self.on_candle(candle).await
+    }
 
     /// Lấy số dư vốn thực tế hiện tại (Equity)
     fn get_equity(&self) -> f64;

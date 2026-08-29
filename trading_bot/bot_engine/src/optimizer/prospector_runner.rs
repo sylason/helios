@@ -119,6 +119,7 @@ impl ProspectorRunner {
     ) -> Result<(), String> {
         info!("🧬 [Optimizer] Bắt đầu chu kỳ tối ưu hóa cho {} (Khoảng MS: {} -> {})...", symbol, start_time, end_time);
 
+        let opt_start_timer = std::time::Instant::now();
         let candles = db.get_candles_by_range(symbol, start_time, end_time).await.map_err(|e| e.to_string())?;
         if candles.is_empty() {
             warn!("⚠️ [Optimizer] Không có dữ liệu nến cho {} để tối ưu hóa.", symbol);
@@ -131,7 +132,8 @@ impl ProspectorRunner {
             return Ok(());
         }
 
-        info!("🧬 [Optimizer] Đã lấy {} nến từ Database.", candles.len());
+        let num_candles = candles.len();
+        info!("🧬 [Optimizer] Đã lấy {} nến từ Database. Bắt đầu tối ưu hóa...", num_candles);
 
         // 1. Load Cấu hình Prospector & Cache từ file JSON trước
         let file = File::open(config_path).map_err(|e| e.to_string())?;
@@ -235,12 +237,16 @@ impl ProspectorRunner {
             Ok::<_, String>(top_champ)
         }).await.map_err(|e| e.to_string())??;
 
+        let opt_elapsed = opt_start_timer.elapsed();
+
         if let Some(champion) = champion_opt {
             let ret = champion.stats.return_pct;
             let dd = champion.stats.max_drawdown_pct;
             let trades = champion.stats.total_trades;
+            let win_rate = champion.stats.win_rate_pct;
 
-            info!("🏆 [Optimizer] TOP 1 FOUND! Return: {:.2}%, Max DD: {:.2}%, Trades: {}", ret, dd, trades);
+            info!("⏱️ [OPTIMIZER DURATION] {:.2?} | Candles: {} | Best Return: {:.2}% | Max DD: {:.2}% | Trades: {} (Win: {:.1}%)", 
+                  opt_elapsed, num_candles, ret, dd, trades, win_rate);
 
             // Lưu DNA vào bảng optimized_params
             if let Some(dna) = champion.dna {
@@ -265,18 +271,16 @@ impl ProspectorRunner {
                     updated_at: now,
                 };
 
-
                 db.save_best_dna(opt_dna.clone()).await.map_err(|e| e.to_string())?;
-                info!("💾 [Optimizer] Đã lưu DNA mới nhất vào Database.");
 
                 // Phát tín hiệu Event-Driven
                 if let Some(tx) = &dna_tx {
                     let _ = tx.send(Some(opt_dna));
-                    info!("📢 [Optimizer] Đã phát tín hiệu (Event-Driven) mang DNA mới tới các Actor.");
                 }
+                info!("✨ [OPTIMIZER] New DNA deployed to Actor (Fitness: {:.2}%).", ret);
             }
         } else {
-            warn!("⚠️ [Optimizer] Không tìm thấy Champion nào có Return > 0.");
+            warn!("⚠️ [Optimizer] Không tìm thấy Champion nào có Return > 0 (Thời gian chạy: {:.2?}).", opt_elapsed);
         }
 
         Ok(())
