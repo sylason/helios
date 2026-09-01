@@ -30,17 +30,34 @@ use ferro_trade::strategy::Strategy;
 mod common;
 
 // ============================================================================
-// ⚙️ CẤU HÌNH TẦN SUẤT CHẠY OPTIMIZER (N MINS) VÀ SINGLE BACKTEST (M MINS)
+// ⚙️ BẢNG ĐIỀU KHIỂN & CẤU HÌNH TRUNG TÂM (CENTRAL TEST HARNESS CONFIG)
 // ============================================================================
+// 1. Nhận diện & Mục tiêu
 const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
-const TOTAL_FETCH_DAYS: i64 = 91;        // Tổng số ngày dữ liệu tải về (365 ngày)
-const TRAIN_WINDOW_DAYS: i64 = 30;       // Cửa sổ nến huấn luyện GA (30 ngày)
+// 2. Dữ liệu & Cửa sổ thời gian
+const TOTAL_FETCH_DAYS: i64 = 91;        // Tổng số ngày dữ liệu tải về từ Binance (VD: 91 ngày, 365 ngày)
+const TRAIN_WINDOW_DAYS: i64 = 30;       // Độ dài cửa sổ nến huấn luyện In-Sample (30 ngày)
 
-const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Optimizer (VD: 360 phút / 6 giờ, 44640 / 31 days)
-const BACKTEST_INTERVAL_MINS: i64 = 60;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút / 1 giờ, 1440 phút / 24 giờ)
-const ENABLE_PAPER_TRADE: bool = false;   // CÔNG TẮC TẮT/MỞ PAPER TRADE: true = Bật Paper Trading ($60 initial equity), false = Tắt (chỉ chạy Diagnostic)
+// 3. Chu kỳ Vòng lặp Tịnh tiến
+const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Re-Optimizer (VD: 240 phút = 4h, 360 phút = 6h)
+const BACKTEST_INTERVAL_MINS: i64 = 60;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút = 1h)
+
+// 4. Tài khoản & Đòn bẩy
+const INITIAL_CASH: f64 = 60.0;          // Vốn khởi tạo ($60)
+const LEVERAGE: f64 = 20.0;              // Đòn bẩy tài khoản (20x)
+const COMMISSION_RATE: f64 = 0.0004;     // Tỷ lệ phí giao dịch (0.04% Maker/Taker Binance Futures)
+const FRACTIONAL_UNIT: f64 = 0.0001;     // Đơn vị bước nhảy khối lượng
+
+// 5. Bộ nhớ Nến & Hiệu năng Động cơ
+const MAX_LIVE_MEM_CANDLES: usize = 43100; // Số nến tối đa lưu trong Rolling Buffer (>= 12000 để đủ 50 nến 4h)
+const BUFFER_PADDING_BARS: usize = 200;    // Số nến dự phòng an toàn
+const WEIGHT_LIMIT: u32 = 2400;            // Giới hạn IP Rate Limit Binance
+const CHANNEL_CAPACITY: usize = 64;        // Dung lượng kênh Backpressure Async Channel
+
+// 6. Công tắc Tính năng
+const ENABLE_PAPER_TRADE: bool = true;    // true: Bật Paper Trading ($60 vốn thật giả lập); false: Tắt (chỉ chạy Diagnostic Eval)
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,13 +68,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🧪 BẮT ĐẦU ĐÁNH GIÁ CHIẾN LƯỢC TỊNH TIẾN CÓ SMART SEEDING 0.5%");
     info!("   Symbol: {}, Strategy: {}", SYMBOL, STRATEGY_ID);
     info!("   Total Fetch: {} days | Train Window: {} days", TOTAL_FETCH_DAYS, TRAIN_WINDOW_DAYS);
-    info!("   📌 [N MINS] Tần suất Re-Optimize GA:      {} phút", REOPT_INTERVAL_MINS);
-    info!("   📌 [M MINS] Tần suất Single Backtest Eval: {} phút", BACKTEST_INTERVAL_MINS);
+    info!("   📌 [N MINS] Tần suất Re-Optimize GA:       {} phút", REOPT_INTERVAL_MINS);
+    info!("   📌 [M MINS] Tần suất Single Backtest Eval:  {} phút", BACKTEST_INTERVAL_MINS);
+    info!("   💰 [ACCOUNT] Initial Cash: ${:.2} | Leverage: {:.0}x | Comm: {:.4}", 
+          INITIAL_CASH, LEVERAGE, COMMISSION_RATE);
+    info!("   🧠 [MEMORY] Max Live Candles: {} (Đảm bảo 50+ nến MTF 4h)", MAX_LIVE_MEM_CANDLES);
     info!("   🌱 [SMART SEEDING]: Chiếm 0.5% quần thể (chỉ 1 Champion Rank 1), 99.5% cá thể mới");
+    info!("   🎯 [PAPER TRADING]: {}", if ENABLE_PAPER_TRADE { "BẬT (Active)" } else { "TẮT (Only Diagnostic)" });
     info!("================================================================================");
 
     // 2. Khởi tạo Database SQLite & Weight Monitor qua module dùng chung
-    let (db_store, monitor) = common::setup_sqlite_and_monitor(STRATEGY_ID, 2400)?;
+    let (db_store, monitor) = common::setup_sqlite_and_monitor(STRATEGY_ID, WEIGHT_LIMIT)?;
 
     // 3. Nạp dữ liệu lịch sử N ngày
     info!("📥 [Data Ingestion] Đang đồng bộ dữ liệu {} ngày từ Binance...", TOTAL_FETCH_DAYS);
@@ -118,70 +139,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 6. KHỞI TẠO BỘ MÁY ASSETACTOR PAPER MODE
-    info!("--------------------------------------------------------------------------------");
-    info!("🚀 [ENGINE SETUP] Khởi tạo AssetActor ở chế độ ExecutionMode::Paper...");
+    let sync_tx = if ENABLE_PAPER_TRADE {
+        info!("--------------------------------------------------------------------------------");
+        info!("🚀 [ENGINE SETUP] Khởi tạo AssetActor ở chế độ ExecutionMode::Paper...");
 
-    let (event_bus, _trade_rx, emergency_rx, mut status_rx) = EventBus::new();
-    let data_tx = event_bus.data_tx.clone();
-    let _trade_tx = event_bus.trade_tx.clone();
-    let status_tx = event_bus.status_tx.clone();
+        let (event_bus, _trade_rx, emergency_rx, mut status_rx) = EventBus::new();
+        let data_tx = event_bus.data_tx.clone();
+        let status_tx = event_bus.status_tx.clone();
+        let account_tx = event_bus.account_tx.clone();
+        let account_rx = event_bus.account_tx.subscribe();
 
-    let account_tx = event_bus.account_tx.clone();
-    let account_rx = event_bus.account_tx.subscribe();
+        tokio::spawn(async move {
+            while let Some(update) = status_rx.recv().await {
+                info!("📢 [UI_STATUS] [{}] {:?} -> {}", update.symbol, update.state, update.message);
+            }
+        });
 
-    tokio::spawn(async move {
-        while let Some(update) = status_rx.recv().await {
-            info!("📢 [UI_STATUS] [{}] {:?} -> {}", update.symbol, update.state, update.message);
-        }
-    });
+        let market_filter = syncer.fetch_market_filter(SYMBOL).await.unwrap_or_default();
+        let strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
 
-    let market_filter = syncer.fetch_market_filter(SYMBOL).await.unwrap_or_default();
-    let strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
+        let engine_config = EngineConfig {
+            initial_cash: INITIAL_CASH,
+            commission_rate: COMMISSION_RATE,
+            margin_rate: 1.0 / LEVERAGE,
+            fractional_unit: Some(FRACTIONAL_UNIT),
+            max_live_mem_candles: MAX_LIVE_MEM_CANDLES,
+            historical_sync_days: TOTAL_FETCH_DAYS as u64,
+            buffer_padding_bars: BUFFER_PADDING_BARS,
+            opt_num_threads: 4,
+        };
 
-    let engine_config = EngineConfig {
-        initial_cash: 60.0,
-        commission_rate: 0.0004,
-        margin_rate: 1.0 / 20.0,
-        fractional_unit: Some(0.0001),
-        max_live_mem_candles: 15000,
-        historical_sync_days: TOTAL_FETCH_DAYS as u64,
-        buffer_padding_bars: 200,
-        opt_num_threads: 4,
+        let paper_engine = ExecutionEngineFactory::create_paper(
+            SYMBOL,
+            INITIAL_CASH,
+            LEVERAGE,
+            COMMISSION_RATE,
+            market_filter,
+            Some(account_tx),
+        );
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<(Candle, bool)>(CHANNEL_CAPACITY);
+
+        let actor = AssetActor::new(
+            SYMBOL.to_string(),
+            STRATEGY_ID.to_string(),
+            db_store.clone(),
+            db_store.clone(),
+            dna_rx,
+            data_tx.clone(),
+            emergency_rx,
+            status_tx,
+            account_rx,
+            paper_engine,
+            engine_config,
+        )
+        .with_strategy(strategy)
+        .with_sync_until(train_end_ts)
+        .with_sync_data_rx(rx);
+
+        tokio::spawn(async move {
+            actor.run().await;
+        });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        Some(tx)
+    } else {
+        None
     };
-
-    let paper_engine = ExecutionEngineFactory::create_paper(
-        SYMBOL,
-        60.0,
-        20.0,
-        0.0004,
-        market_filter,
-        Some(account_tx),
-    );
-
-    let (sync_tx, sync_rx) = tokio::sync::mpsc::channel::<(Candle, bool)>(64);
-
-    let actor = AssetActor::new(
-        SYMBOL.to_string(),
-        STRATEGY_ID.to_string(),
-        db_store.clone(),
-        db_store.clone(),
-        dna_rx,
-        data_tx.clone(),
-        emergency_rx,
-        status_tx,
-        account_rx,
-        paper_engine,
-        engine_config,
-    )
-    .with_strategy(strategy)
-    .with_sync_until(train_end_ts)
-    .with_sync_data_rx(sync_rx);
-
-    tokio::spawn(async move {
-        actor.run().await;
-    });
-
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // 7. GIAI ĐOẠN OUT-OF-SAMPLE WITH PERIODIC RE-OPT & BACKTEST EVALUATION (CÓ SMART SEEDING)
     info!("--------------------------------------------------------------------------------");
@@ -203,7 +227,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let current_ts = candle.timestamp;
 
         // Bơm nến đồng bộ có Backpressure (is_historical = true để tắt I/O SQLite thừa thãi)
-        let _ = sync_tx.send((candle.clone(), true)).await;
+        if let Some(ref tx) = sync_tx {
+            let _ = tx.send((candle.clone(), true)).await;
+        }
 
         // ------------------------------------------------------------------------
         // [FEATURE B] ĐỊNH KỲ M PHÚT: CHẠY SINGLE BACKTEST ĐÁNH GIÁ CHẨN ĐOÁN
@@ -218,9 +244,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !window_candles.is_empty() && !current_dna_vec.is_empty() {
                 let current_time_str = Utc.timestamp_millis_opt(current_ts).unwrap().format("%Y-%m-%d %H:%M").to_string();
                 
+                let eval_start_instant = std::time::Instant::now();
                 match HeliosBridge::diagnostic_backtest(&window_candles, &current_dna_vec) {
                     Ok(result) => {
-                        info!("📊 [SINGLE BACKTEST EVAL #{:04}] Time: {} | Window: 30D ({} candles) | Return: {:.2}% | Max DD: {:.2}% | Trades: {} | Win Rate: {:.2}% | Paper Trade Active: {}", 
+                        let eval_duration = eval_start_instant.elapsed();
+                        info!("📊 [SINGLE BACKTEST EVAL #{:04}] Time: {} | Window: 30D ({} candles) | Return: {:.2}% | Max DD: {:.2}% | Trades: {} | Win Rate: {:.2}% | Duration: {:.2}ms | Paper Trade Active: {}", 
                               backtest_count, 
                               current_time_str,
                               window_candles.len(), 
@@ -228,6 +256,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                               result.stats.max_drawdown_pct, 
                               result.stats.total_trades,
                               result.stats.win_rate_pct,
+                              eval_duration.as_secs_f64() * 1000.0,
                               ENABLE_PAPER_TRADE);
                     }
                     Err(e) => {
@@ -290,7 +319,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Đóng kênh truyền nến để AssetActor hoàn tất các nến còn đọng và xuất báo cáo tổng kết
     drop(sync_tx);
-    drop(data_tx);
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     info!("================================================================================");

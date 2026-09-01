@@ -211,7 +211,12 @@ impl PaperTrader {
             self.losing_trades += 1;
         }
         
-        let bars_held = exit_bar_index.saturating_sub(self.entry_bar_index).max(1);
+        let duration_ms = exit_timestamp.saturating_sub(self.entry_timestamp);
+        let bars_held = if self.entry_timestamp > 0 && duration_ms > 0 {
+            (duration_ms / 60_000).max(1) as usize
+        } else {
+            exit_bar_index.saturating_sub(self.entry_bar_index).max(1)
+        };
 
         self.closed_trades.push(PaperTradeRecord {
             id: self.total_trades,

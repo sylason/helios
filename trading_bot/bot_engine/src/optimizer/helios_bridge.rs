@@ -150,7 +150,7 @@ impl HeliosBridge {
 
     /// Đánh giá tín hiệu ở nến HIỆN TẠI (i = full_len - 1) với Vị thế thật từ Binance WebSocket
     pub fn evaluate_live_tick(
-        symbol: &str,
+        _symbol: &str,
         candles: &[Candle],
         slice_start: usize,
         live_position: Option<&crate::controller::asset_actor::LivePositionState>,
@@ -169,81 +169,21 @@ impl HeliosBridge {
             }
         };
 
-        // Cache MTF Resampled Data & Lookup Tables theo mốc nến đóng của khung thời gian lớn
-        static LIVE_MTF_STORE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, GlobalMtfCache>>> = std::sync::OnceLock::new();
-
-        struct GlobalMtfCache {
-            _symbol: String,
-            last_candle_count: usize,
-            _last_candle_ts: i64,
-            cache: Arc<ferro_trade::data::global_cache::GlobalCache>,
-            tf_buckets: std::collections::HashMap<String, i64>,
-        }
-
-
-        let last_candle_ts = candles.last().map(|c| c.timestamp).unwrap_or(0);
-        let candles_len = candles.len();
-
-        let mut store_map = LIVE_MTF_STORE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new())).lock().unwrap();
-        let cache = if let Some(store) = store_map.get_mut(symbol) {
-            if store.last_candle_count <= candles_len {
-                store.cache.clone()
-            } else {
-                let new_cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
-                *store = GlobalMtfCache {
-                    _symbol: symbol.to_string(),
-                    last_candle_count: candles_len,
-                    _last_candle_ts: last_candle_ts,
-                    cache: new_cache.clone(),
-                    tf_buckets: std::collections::HashMap::new(),
-                };
-                new_cache
+        let cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
+        let raw_cache = match ferro_trade::data::RawDataCache::new(&df) {
+            Ok(c) => c,
+            Err(e) => {
+                error!("❌ HeliosBridge: Lỗi tạo RawDataCache trong evaluate_live_tick: {}", e);
+                return Vec::new();
             }
-        } else {
-            let new_cache = Arc::new(ferro_trade::data::global_cache::GlobalCache::new(ferro_trade::data::global_cache::CacheConfig::default()));
-            store_map.insert(symbol.to_string(), GlobalMtfCache {
-                _symbol: symbol.to_string(),
-                last_candle_count: candles_len,
-                _last_candle_ts: last_candle_ts,
-                cache: new_cache.clone(),
-                tf_buckets: std::collections::HashMap::new(),
-            });
-            new_cache
         };
 
-
-        let raw_cache = ferro_trade::data::RawDataCache::new(&df).expect("RawDataCache error");
-        let base_times = &raw_cache.datetime;
-        let base_df = &df;
-
-        let store = store_map.get_mut(symbol).unwrap();
-
-        for &tf in &HELIOS_REQUIRED_TIMEFRAMES {
-            let current_bucket = tf.get_bucket_index(last_candle_ts);
-            let prev_bucket = store.tf_buckets.get(&tf.to_string()).copied().unwrap_or(-1);
-
-            let maybe_flat = if current_bucket != prev_bucket || cache.get_resampled_ohlcv(tf).is_none() {
-                if let Ok(df_res) = ferro_trade::utils::resample::resample_ohlcv(tf.as_polars_rule(), base_df) {
-                    if let Ok(flat_ohlcv) = ferro_trade::utils::resample::df_to_resampled_ohlcv(&df_res) {
-                        let flat_arc = Arc::new(flat_ohlcv);
-                        cache.put_resampled_ohlcv(tf, flat_arc.clone());
-                        store.tf_buckets.insert(tf.to_string(), current_bucket);
-                        Some(flat_arc)
-                    } else { None }
-                } else { None }
-            } else {
-                cache.get_resampled_ohlcv(tf)
-            };
-
-            if let Some(flat_arc) = maybe_flat {
-                let table = Arc::new(ferro_trade::utils::resample::create_lookup_table(base_times, &flat_arc.datetime));
-                cache.put_lookup(tf, table);
-            }
-        }
-        drop(store_map);
-
-        // [CRITICAL FIX] Xóa sạch cache indicators cũ để đảm bảo nến mới được tính toán chỉ báo tươi mới 100%
-        cache.clear_indicators();
+        // [CRITICAL FIX MTF] Tiền tính toán MTF tươi mới 100% trên toàn bộ cửa sổ nến hiện tại (khớp 1:1 với diagnostic_backtest)
+        let tf_list: Vec<String> = HELIOS_REQUIRED_TIMEFRAMES
+            .iter()
+            .map(|tf| tf.as_polars_rule().to_string())
+            .collect();
+        let _ = ferro_trade::utils::resample::precompute_timeframes(&tf_list, &df, &cache, &raw_cache.datetime);
 
         let data_view = ferro_trade::data::DataView::new(raw_cache);
         drop(df);
@@ -276,7 +216,15 @@ impl HeliosBridge {
 
         if let Some(pos) = live_position {
             if pos.position_amt != 0.0 {
-                let mapped_entry_bar = pos.live_entry_bar.saturating_sub(slice_start);
+                // Tìm vị trí cây nến mở lệnh thực tế theo Timestamp (bất biến trước mọi thao tác cắt tỉa buffer)
+                let mapped_entry_bar = if pos.entry_timestamp > 0 {
+                    match candles.binary_search_by_key(&pos.entry_timestamp, |c| c.timestamp) {
+                        Ok(idx) => idx,
+                        Err(idx) => idx.saturating_sub(1),
+                    }
+                } else {
+                    pos.live_entry_bar.saturating_sub(slice_start)
+                };
                 let mut trade = ferro_trade::broker::trade::Trade::new(
                     1,
                     pos.position_amt,
@@ -290,7 +238,6 @@ impl HeliosBridge {
                 trade.sl_order_id = if pos.current_sl_price.is_some() { Some(1) } else { None };
                 trade.tp_order_id = if pos.current_tp_price.is_some() { Some(2) } else { None };
                 live_trades.push(trade);
-
 
                 live_position_snapshot = ferro_trade::broker::position::Position {
                     size: pos.position_amt,
