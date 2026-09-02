@@ -269,13 +269,13 @@ impl PaperTrader {
 
     /// In ra bảng log chi tiết tất cả các lệnh đã thực hiện và vị thế đang mở
     pub fn log_all_trades(&self, current_price: f64) {
-        info!("╔══════════════════════════════════════════════════════════════════════════════════════════════════╗");
-        info!("║ 📋 [PAPER TRADER] DANH SÁCH GIAO DỊCH ĐÃ ĐÓNG (Tổng số: {:<3})                                    ║", self.closed_trades.len());
-        info!("╠══════╦═══════╦══════════════╦════════════╦════════════╦════════════╦══════════╦══════════════════╣");
-        info!("║  ID  ║ SIDE  ║ PLAYBOOK     ║   ENTRY    ║    EXIT    ║ NET PnL ($)║ ROE (%)  ║ EXIT REASON      ║");
-        info!("╠══════╬═══════╬══════════════╬════════════╬════════════╬════════════╬══════════╬══════════════════╣");
+        info!("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        info!("║ 📋 [PAPER TRADER] DANH SÁCH GIAO DỊCH ĐÃ ĐÓNG (Tổng số: {:<3})                                                                              ║", self.closed_trades.len());
+        info!("╠══════╦═══════╦══════════════╦══════════════╦══════════════╦══════════╦════════════╦════════════╦════════════╦══════════╦════════════════════╣");
+        info!("║  ID  ║ SIDE  ║ PLAYBOOK     ║  OPEN TIME   ║  CLOSE TIME  ║   HELD   ║   ENTRY    ║    EXIT    ║ NET PnL ($)║ ROE (%)  ║ EXIT REASON        ║");
+        info!("╠══════╬═══════╬══════════════╬══════════════╬══════════════╬══════════╬════════════╬════════════╬════════════╬══════════╬════════════════════╣");
         if self.closed_trades.is_empty() {
-            info!("║                     (Chưa có giao dịch nào được đóng trong kỳ)                                   ║");
+            info!("║                                               (Chưa có giao dịch nào được đóng trong kỳ)                                                 ║");
         } else {
             for t in &self.closed_trades {
                 let icon = if t.net_pnl >= 0.0 { "🟢" } else { "🔴" };
@@ -285,11 +285,18 @@ impl PaperTrader {
                     PositionType::None => "NONE ",
                 };
                 let tag = t.opening_playbook_tag.as_deref().unwrap_or("NORMAL");
-                info!("║ {:04} ║ {}{} ║ {:<12} ║ {:>10.2} ║ {:>10.2} ║ {:>+10.2} ║ {:>+7.1}% ║ {:<16} ║",
-                    t.id, icon, side, tag, t.entry_price, t.exit_price, t.net_pnl, t.pnl_pct, t.exit_reason.as_str());
+                let open_time = chrono::DateTime::from_timestamp_millis(t.entry_timestamp)
+                    .map(|dt| dt.format("%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| "--".to_string());
+                let close_time = chrono::DateTime::from_timestamp_millis(t.exit_timestamp)
+                    .map(|dt| dt.format("%m-%d %H:%M").to_string())
+                    .unwrap_or_else(|| "--".to_string());
+                let held_str = format!("{} bars", t.bars_held);
+                info!("║ {:04} ║ {}{} ║ {:<12} ║ {:<12} ║ {:<12} ║ {:>8} ║ {:>10.2} ║ {:>10.2} ║ {:>+10.2} ║ {:>+7.1}% ║ {:<18} ║",
+                    t.id, icon, side, tag, open_time, close_time, held_str, t.entry_price, t.exit_price, t.net_pnl, t.pnl_pct, t.exit_reason.as_str());
             }
         }
-        info!("╚══════╩═══════╩══════════════╩════════════╩════════════╩════════════╩══════════╩══════════════════╝");
+        info!("╚══════╩═══════╩══════════════╩══════════════╩══════════════╩══════════╩════════════╩════════════╩════════════╩══════════╩════════════════════╝");
         
         if self.position_type != PositionType::None {
             let u_pnl = self.get_unrealized_pnl(current_price);
