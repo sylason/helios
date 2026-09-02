@@ -150,8 +150,27 @@ impl RiskManager {
                 continue;
             }
 
-            // Tính toán hệ số nhân Multiplier hiện tại (Progressive Decay)
-            let mut current_multiplier = if is_volatile && current_pnl > 0.0 {
+            let trade_margin = (trade.entry_price * trade.size.abs()) / leverage;
+            let current_roe = if trade_margin > 0.0 { current_pnl / trade_margin } else { 0.0 };
+            let peak_roe = if trade.entry_price > 0.0 {
+                if trade.is_long() {
+                    ((peak_val - trade.entry_price) / trade.entry_price) * leverage
+                } else {
+                    ((trade.entry_price - peak_val) / trade.entry_price) * leverage
+                }
+            } else {
+                0.0
+            };
+
+            // 1. Kiểm tra chế độ Siêu Sóng Mega Trend
+            let mega_trend_trigger_pnl = risk_cfg.mega_trend_pnl_trigger * trade.entry_price * trade.size.abs();
+            let is_mega_trend = current_pnl > 0.0 && (current_pnl >= mega_trend_trigger_pnl || current_roe >= 0.50);
+
+            // 2. Tính toán hệ số nhân Multiplier hiện tại
+            let mut current_multiplier = if is_mega_trend {
+                // CHẾ ĐỘ THẢ DIỀU SIÊU SÓNG: Dùng tsl_atr_loose (8.0 -> 15.0 ATR) để cho sóng bay cao
+                risk_cfg.tsl_atr_loose
+            } else if is_volatile && current_pnl > 0.0 {
                 if base_multiplier < risk_cfg.tsl_atr_loose {
                     risk_cfg.tsl_atr_loose
                 } else {
@@ -161,26 +180,12 @@ impl RiskManager {
                 base_multiplier
             };
 
-            let is_trend_or_momentum = if let Some(ref tag_str) = trade.tag {
-                tag_str == "TREND_PB" || tag_str == "MOMENTUM_IGN" || tag_str == "ABSORPTION"
-            } else {
-                false
-            };
-
-            if decay_cycles > 0 {
+            if decay_cycles > 0 && !is_mega_trend {
                 let progressive_factor = risk_cfg.tighten_step_multiplier.powi(decay_cycles as i32);
                 current_multiplier *= progressive_factor;
                 
-                let mega_pnl_trigger = risk_cfg.mega_trend_pnl_trigger;
-                let max_mega_cycles = risk_cfg.mega_trend_max_cycles;
-                let min_tight = if is_trend_or_momentum && current_pnl > mega_pnl_trigger && decay_cycles <= max_mega_cycles {
-                    risk_cfg.tsl_atr_normal
-                } else {
-                    risk_cfg.tsl_atr_tight
-                };
-
-                if current_multiplier < min_tight {
-                    current_multiplier = min_tight;
+                if current_multiplier < risk_cfg.tsl_atr_tight {
+                    current_multiplier = risk_cfg.tsl_atr_tight;
                 }
             }
 
@@ -196,16 +201,16 @@ impl RiskManager {
                 raw_sl.min(max_short_sl)
             };
 
-            // [ENHANCEMENT 1: BREAK-EVEN SAFETY TRIGGER]
-            // Khi lợi nhuận đạt khoảng đệm an toàn (uPnL >= +5% ROE hoặc >= 1.5 ATR),
-            // dời SL tối thiểu về điểm Hòa Vốn + Phí sàn (Break-Even Floor) để phòng ngừa đảo chiều đột ngột.
-            let trade_margin = (trade.entry_price * trade.size.abs()) / leverage;
-            let current_roe = if trade_margin > 0.0 { current_pnl / trade_margin } else { 0.0 };
-            let be_roe_trigger = 0.05; // 5% ROE
+            // [ENHANCEMENT 1: SQUEEZE-AWARE DYNAMIC BREAK-EVEN TRIGGER]
+            // Không hardcode: Ngưỡng kích hoạt tự động giãn nở theo độ nén Squeeze của Matrix
+            let sqz_multiplier = matrix.squeeze_multiplier[i].max(0.0);
+            let base_be_atr_mult = risk_cfg.base_sl_atr.max(1.0);
+            let dynamic_be_atr = current_atr * base_be_atr_mult * (1.0 + sqz_multiplier);
+            let be_roe_trigger = 0.08 * (1.0 + sqz_multiplier); // 8% -> 16%+ ROE tùy độ nén
             let be_price_buffer_pct = 0.0008; // 0.08% buffer bù đắp phí sàn 0.04% Maker/Taker
-            let is_be_triggered = current_pnl > 0.0 && (current_roe >= be_roe_trigger || current_pnl >= (1.5 * current_atr * trade.size.abs()));
+            let is_be_triggered = current_pnl > 0.0 && (current_roe >= be_roe_trigger || current_pnl >= (dynamic_be_atr * trade.size.abs()));
 
-            if is_be_triggered {
+            if is_be_triggered && !is_mega_trend {
                 if trade.is_long() {
                     let be_sl = trade.entry_price * (1.0 + be_price_buffer_pct);
                     calculated_sl = calculated_sl.max(be_sl);
@@ -215,7 +220,20 @@ impl RiskManager {
                 }
             }
 
-            // [ENHANCEMENT 2: MONOTONIC RATCHET GUARD]
+            // [ENHANCEMENT 2: MEGA TREND HARD PROFIT FLOOR]
+            // Khi siêu sóng đạt đỉnh cao: Khóa cứng tối thiểu 50% đỉnh lãi vào túi
+            if is_mega_trend {
+                let locked_roe = (peak_roe * 0.50).max(0.25); // Tối thiểu khóa +25% ROE
+                if trade.is_long() {
+                    let floor_sl = trade.entry_price * (1.0 + (locked_roe / leverage));
+                    calculated_sl = calculated_sl.max(floor_sl);
+                } else {
+                    let floor_sl = trade.entry_price * (1.0 - (locked_roe / leverage));
+                    calculated_sl = calculated_sl.min(floor_sl);
+                }
+            }
+
+            // [ENHANCEMENT 3: MONOTONIC RATCHET GUARD]
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
             // Chỉ kích hoạt khi vị thế có lãi danh nghĩa (current_pnl > 0.0).
             if current_pnl > 0.0 {
