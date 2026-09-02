@@ -464,7 +464,7 @@ pub struct RiskStopParams {
     pub min_initial_sl_pct: f64,
     
     /// 2. Chu Kỳ Đếm Nến Đi Ngang Kể Từ Đỉnh Lợi Nhuận (15 nến -> 720 nến / 12 tiếng, Step 30 nến -> 24 nấc)
-    #[dna(min = 15.0, max = 720.0, step = 30.0)]
+    #[dna(min = 15.0, max = 360.0, step = 15.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub time_countdown_bars: usize,
 

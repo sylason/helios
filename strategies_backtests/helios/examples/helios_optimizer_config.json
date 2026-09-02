@@ -11,9 +11,9 @@
       "n_generations": 7,
       "cxpb": 0.7,
       "mutpb": 0.3,
-      "tournament_size": 7,
+      "tournament_size": 5,
       "min_trades": 7,
-      "n_top_candidates": 7,
+      "n_top_candidates": 5,
       "max_stale_generations": 2,
       "min_significant_fitness_delta": 0.001,
       "mutation_strategy": {
@@ -25,7 +25,7 @@
       }
     },
     "scout_config": {
-      "population_size": 25,
+      "population_size": 20,
       "n_generations": 3,
       "cxpb": 0.7,
       "mutpb": 0.2,
@@ -40,8 +40,8 @@
         "mut_gene_rate": 0.35
       }
     },
-    "max_depth": 3,
-    "max_backlog_depth": 3,
+    "max_depth": 2,
+    "max_backlog_depth": 2,
     "zoom_factor": 0.5,
     "db_path": "helios_prospector_v3.db",
     "pruning_strategy": {
@@ -65,7 +65,7 @@
     "scout_method": "maximin_lhs",
     "exploration_strategy": "random_restart",
     "max_threads": 3,
-    "max_random_restarts": 3
+    "max_random_restarts": 5
   },
   "cache_config": {
     "enable_fitness_cache": true,

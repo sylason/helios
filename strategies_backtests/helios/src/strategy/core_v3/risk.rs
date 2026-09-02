@@ -186,24 +186,48 @@ impl RiskManager {
 
             let lev_cap_pct = (playbook_max_sl_pct).min(0.80 / leverage);
 
-            let new_sl = if trade.is_long() {
-                let calculated_sl = peak_val - (current_atr * current_multiplier);
+            let mut calculated_sl = if trade.is_long() {
+                let raw_sl = peak_val - (current_atr * current_multiplier);
                 let min_long_sl = trade.entry_price * (1.0 - lev_cap_pct);
-                calculated_sl.max(min_long_sl)
+                raw_sl.max(min_long_sl)
             } else {
-                let calculated_sl = peak_val + (current_atr * current_multiplier);
+                let raw_sl = peak_val + (current_atr * current_multiplier);
                 let max_short_sl = trade.entry_price * (1.0 + lev_cap_pct);
-                calculated_sl.min(max_short_sl)
+                raw_sl.min(max_short_sl)
             };
 
-            let should_update = if trade.is_long() {
-                new_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
-            } else {
-                new_sl < trade.sl_price.unwrap_or(f64::INFINITY)
-            };
+            // [ENHANCEMENT 1: BREAK-EVEN SAFETY TRIGGER]
+            // Khi lợi nhuận đạt khoảng đệm an toàn (uPnL >= +5% ROE hoặc >= 1.5 ATR),
+            // dời SL tối thiểu về điểm Hòa Vốn + Phí sàn (Break-Even Floor) để phòng ngừa đảo chiều đột ngột.
+            let trade_margin = (trade.entry_price * trade.size.abs()) / leverage;
+            let current_roe = if trade_margin > 0.0 { current_pnl / trade_margin } else { 0.0 };
+            let be_roe_trigger = 0.05; // 5% ROE
+            let be_price_buffer_pct = 0.0008; // 0.08% buffer bù đắp phí sàn 0.04% Maker/Taker
+            let is_be_triggered = current_pnl > 0.0 && (current_roe >= be_roe_trigger || current_pnl >= (1.5 * current_atr * trade.size.abs()));
 
-            if should_update {
-                tick.update_trade_sl_tp(trade.id, Some(new_sl), trade.tp_price);
+            if is_be_triggered {
+                if trade.is_long() {
+                    let be_sl = trade.entry_price * (1.0 + be_price_buffer_pct);
+                    calculated_sl = calculated_sl.max(be_sl);
+                } else {
+                    let be_sl = trade.entry_price * (1.0 - be_price_buffer_pct);
+                    calculated_sl = calculated_sl.min(be_sl);
+                }
+            }
+
+            // [ENHANCEMENT 2: MONOTONIC RATCHET GUARD]
+            // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
+            // Chỉ kích hoạt khi vị thế có lãi danh nghĩa (current_pnl > 0.0).
+            if current_pnl > 0.0 {
+                let should_update = if trade.is_long() {
+                    calculated_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
+                } else {
+                    calculated_sl < trade.sl_price.unwrap_or(f64::INFINITY)
+                };
+
+                if should_update {
+                    tick.update_trade_sl_tp(trade.id, Some(calculated_sl), trade.tp_price);
+                }
             }
         }
     }
