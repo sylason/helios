@@ -29,17 +29,22 @@
 ---
 
 ### Giai Đoạn 3: Chống Lặp Lệnh (Micro-Churn Re-entry Cooldown)
-- [ ] **3.1. Thêm bộ đệm Cooldown sau khi đóng hòa vốn trong `AssetActor`:**
-  - Khóa cùng Playbook Scanner trong $15$ nến nếu đóng lệnh ở mức PnL hòa vốn ($\approx 0.00\$$).
-- [ ] **3.2. Điều kiện bứt phá hủy Cooldown (Volatility Breakout Override):**
-  - Mở khóa tức thì nếu giá bứt phá vượt qua biên độ nến cũ $> 1.0 \times \text{ATR}$.
+- [x] **3.1. Thêm cờ bật/tắt `enable_re_entry_cooldown` và bộ đệm Cooldown sau khi đóng hòa vốn trong `config.rs` & `HeliosStrategyV3`:**
+  - Khóa cùng Playbook Scanner / Chiều lệnh trong $N$ nến (`re_entry_cooldown_bars`) nếu đóng lệnh ở mức PnL hòa vốn hoặc cắt lỗ nhỏ ($\le 0.001$).
+- [x] **3.2. Điều kiện bứt phá hủy Cooldown (Volatility Breakout Override):**
+  - Mở khóa tức thì nếu giá bứt phá vượt qua biên độ nến thoát lệnh cũ $\ge 1.5 \times \text{ATR}$.
+- [x] **3.3. Bộ Unit Tests kiểm chứng toàn diện:**
+  - Đã viết 5 test cases kiểm tra: Tắt toggle `false`, Chặn cùng chiều trong range, Cho phép ngược chiều, Mở khóa sớm khi có bứt phá biến động, Cho phép khi hết thời gian Cooldown. (100% tests PASS).
 
 ---
 
 ### Giai Đoạn 4: Tinh Chỉnh Hàm Mục Tiêu `Objective` trong `ProspectorRunner`
-- [ ] **4.1. Bổ sung Profit Factor (PF) & SQN vào hàm Fitness:**
-  - Phạt các bộ DNA có số lượng giao dịch ảo quá nhiều hoặc phân bổ PnL không đều.
-- [ ] **4.2. Cân bằng giữa Return, Max Drawdown và Trade Expectancy.**
+- [x] **4.1. Bổ sung Profit Factor (PF) & SQN vào hàm Fitness:**
+  - Phạt nặng các bộ DNA có Profit Factor mỏng ($PF < 1.15$), thưởng cho $PF \ge 1.50$ và SQN cao.
+- [x] **4.2. Cân bằng giữa Return, Max Drawdown và Trade Frequency:**
+  - Áp dụng trọng số tần suất lệnh $W_{\text{Freq}}$ (tối ưu $8 - 55$ lệnh/tháng, phạt quá ít hoặc quá nhiều).
+- [x] **4.3. Bộ Unit Tests kiểm chứng toàn diện:**
+  - Đã viết 3 test cases kiểm tra: Phạt return âm/NaN, Phạt số lệnh quá ít, Thưởng hệ thống có PF dày và SQN cao. (100% tests PASS).
 
 ---
 

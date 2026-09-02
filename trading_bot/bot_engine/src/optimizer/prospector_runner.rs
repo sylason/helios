@@ -197,6 +197,8 @@ impl ProspectorRunner {
                     StatItem::SharpeRatio,
                     StatItem::SortinoRatio,
                     StatItem::ProfitFactor,
+                    StatItem::Sqn,
+                    StatItem::Expectancy,
                 ])
                 .early_termination(EarlyTermination::Any(vec![
                     EarlyTermination::MaxDrawdown(40.0),
@@ -242,17 +244,7 @@ impl ProspectorRunner {
             }
 
             let objective = |stats: &ferro_trade::stats::Stats| {
-                let ret = stats.return_pct;
-                let dd = stats.max_drawdown_pct.abs();
-                let trades = stats.total_trades;
-
-                // Phòng vệ Edge Cases: Cần ít nhất 2 lệnh độc lập và lợi nhuận dương
-                if ret.is_nan() || ret <= 0.0 || trades < 2 {
-                    return -100.0 - dd;
-                }
-
-                // Điểm số Calmar tối thượng với hằng số làm mượt +3.0 bảo vệ rung lắc
-                ret / (dd + 3.0)
+                Self::calculate_enhanced_fitness(stats)
             };
 
             info!("🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...");
@@ -348,6 +340,53 @@ impl ProspectorRunner {
             s_vol.into(),
         ])
     }
+
+    /// Tính toán điểm số Fitness đa tiêu chí (Enhanced Calmar, Profit Factor, SQN, Trade Frequency)
+    pub fn calculate_enhanced_fitness(stats: &ferro_trade::stats::Stats) -> f64 {
+        let ret = stats.return_pct;
+        let dd = stats.max_drawdown_pct.abs();
+        let trades = stats.total_trades;
+
+        // 1. Phòng vệ Edge Cases: Cần ít nhất 2 lệnh độc lập và lợi nhuận dương
+        if ret.is_nan() || ret <= 0.0 || trades < 2 {
+            return -100.0 - dd;
+        }
+
+        // 2. Điểm số nền tảng (Smoothed Calmar)
+        let base_score = ret / (dd + 3.0);
+
+        // 3. Hệ số Profit Factor (PF Multiplier): Thưởng cho hệ thống có biên độ lãi dày
+        let pf = stats.profit_factor;
+        let pf_mult = if pf.is_nan() || pf <= 0.0 {
+            0.20
+        } else if pf < 1.15 {
+            (pf / 1.5).max(0.20)
+        } else if pf < 1.50 {
+            0.80 + (pf - 1.15) * 0.5714
+        } else {
+            (1.0 + (pf - 1.50) * 0.40).min(2.0)
+        };
+
+        // 4. Hệ số Độ Ổn Định Toán Học SQN (System Quality Number Multiplier)
+        let sqn = stats.sqn;
+        let sqn_mult = if sqn.is_nan() || sqn <= 0.0 {
+            1.0
+        } else {
+            1.0 + 0.10 * sqn.clamp(0.0, 5.0)
+        };
+
+        // 5. Trọng Số Tần Suất Giao Dịch (Trade Frequency Weight)
+        let freq_weight = if trades < 8 {
+            let ratio = trades as f64 / 8.0;
+            ratio * ratio
+        } else if trades <= 55 {
+            1.0
+        } else {
+            (1.0 - (trades - 55) as f64 * 0.008).max(0.70)
+        };
+
+        base_score * pf_mult * sqn_mult * freq_weight
+    }
 }
 
 #[cfg(test)]
@@ -371,5 +410,57 @@ mod tests {
         let df = ProspectorRunner::candles_to_df(&candles).unwrap();
         assert_eq!(df.height(), 1);
         assert_eq!(df.width(), 6);
+    }
+
+    #[test]
+    fn test_fitness_negative_or_nan() {
+        let mut stats = ferro_trade::stats::Stats::default();
+        stats.return_pct = -10.0;
+        stats.max_drawdown_pct = 15.0;
+        stats.total_trades = 20;
+
+        let fitness = ProspectorRunner::calculate_enhanced_fitness(&stats);
+        assert!(fitness < 0.0, "Lợi nhuận âm phải trả về điểm phạt âm");
+
+        stats.return_pct = f64::NAN;
+        let fitness_nan = ProspectorRunner::calculate_enhanced_fitness(&stats);
+        assert!(fitness_nan < 0.0, "Lợi nhuận NaN phải trả về điểm phạt âm");
+    }
+
+    #[test]
+    fn test_fitness_low_trades_penalty() {
+        let mut stats_few = ferro_trade::stats::Stats::default();
+        stats_few.return_pct = 100.0;
+        stats_few.max_drawdown_pct = 10.0;
+        stats_few.total_trades = 4; // Quá ít lệnh (< 8)
+        stats_few.profit_factor = 2.0;
+        stats_few.sqn = 3.0;
+
+        let mut stats_optimal = stats_few.clone();
+        stats_optimal.total_trades = 25; // Số lệnh tối ưu
+
+        let fit_few = ProspectorRunner::calculate_enhanced_fitness(&stats_few);
+        let fit_optimal = ProspectorRunner::calculate_enhanced_fitness(&stats_optimal);
+
+        assert!(fit_few < fit_optimal, "Ít lệnh phải bị phạt trọng số tần suất so với số lệnh tối ưu");
+    }
+
+    #[test]
+    fn test_fitness_high_pf_and_sqn_boost() {
+        let mut stats_solid = ferro_trade::stats::Stats::default();
+        stats_solid.return_pct = 200.0;
+        stats_solid.max_drawdown_pct = 10.0;
+        stats_solid.total_trades = 30;
+        stats_solid.profit_factor = 2.5; // PF rất dày
+        stats_solid.sqn = 3.5;          // SQN rất ổn định
+
+        let mut stats_fragile = stats_solid.clone();
+        stats_fragile.profit_factor = 1.05; // PF mỏng manh
+        stats_fragile.sqn = 0.5;
+
+        let fit_solid = ProspectorRunner::calculate_enhanced_fitness(&stats_solid);
+        let fit_fragile = ProspectorRunner::calculate_enhanced_fitness(&stats_fragile);
+
+        assert!(fit_solid > fit_fragile * 2.0, "Hệ thống có PF dày và SQN cao phải có điểm số vượt trội");
     }
 }
