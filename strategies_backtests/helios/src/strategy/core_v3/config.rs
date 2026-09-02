@@ -473,7 +473,14 @@ pub struct RiskStopParams {
     pub tighten_step_multiplier: f64,
 
     // =========================================================================
-    // 4. BỘ 3 PHÂN TẦNG ATR TRAILING STOP PHỔ QUÁT (0.5 -> 15.0 ATR KHÔNG CHỒNG CHÉO)
+    // 4. KÍCH HOẠT HÒA VỐN ĐỘNG (DYNAMIC BREAK-EVEN TRIGGER)
+    // =========================================================================
+    /// Ngưỡng ROE Cơ Sở Kích Hoạt Hòa Vốn Break-Even (3% -> 25% ROE, Step 1% -> 23 nấc)
+    #[dna(min = 0.03, max = 0.25, step = 0.01)]
+    pub base_be_roe_trigger: f64,
+
+    // =========================================================================
+    // 5. BỘ 3 PHÂN TẦNG ATR TRAILING STOP PHỔ QUÁT (0.5 -> 15.0 ATR KHÔNG CHỒNG CHÉO)
     // =========================================================================
     /// - Phân Tầng Siết Chặt: Dành cho thị trường Range / Reversal / Đỉnh sóng (0.5 -> 3.0 ATR, Step 0.10 -> 26 nấc)
     #[dna(min = 0.5, max = 3.0, step = 0.10)]
@@ -488,7 +495,7 @@ pub struct RiskStopParams {
     pub tsl_atr_loose: f64,
 
     // =========================================================================
-    // 5. CƠ CHẾ BẢO VỆ SIÊU SÓNG (MEGA TREND PROTECTION)
+    // 6. CƠ CHẾ BẢO VỆ SIÊU SÓNG (MEGA TREND PROTECTION)
     // =========================================================================
     /// Ngưỡng Lợi Nhuận Kích Hoạt Chế Độ Bảo Vệ Siêu Sóng (1.0% -> 20.0% giá, tương đương +20% -> +400% ROE trên 20x, Step 0.5% -> 39 nấc)
     #[dna(min = 0.01, max = 0.20, step = 0.005)]
@@ -499,8 +506,16 @@ pub struct RiskStopParams {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub mega_trend_max_cycles: usize,
 
+    /// Tỷ Lệ Khóa Lợi Nhuận Đỉnh Sóng Khi Kích Hoạt Mega Trend (20% -> 80% đỉnh lãi, Step 5% -> 13 nấc)
+    #[dna(min = 0.20, max = 0.80, step = 0.05)]
+    pub mega_trend_lock_ratio: f64,
+
+    /// Mức ROE Sàn Tối Thiểu Được Khóa Khi Kích Hoạt Mega Trend (10% -> 50% ROE, Step 5% -> 9 nấc)
+    #[dna(min = 0.10, max = 0.50, step = 0.05)]
+    pub mega_trend_min_lock_roe: f64,
+
     // =========================================================================
-    // 6. THAM SỐ PHỤ TRỢ & TÍCH LŨY
+    // 7. THAM SỐ PHỤ TRỢ & TÍCH LŨY & COOLDOWN
     // =========================================================================
     /// Thời Gian Ngâm Tối Đa Trước Khi Giải Phóng Vốn (60 nến -> 1440 nến / 24 tiếng, Step 60 nến -> 24 nấc)
     #[dna(min = 60.0, max = 1440.0, step = 60.0)]
@@ -517,7 +532,18 @@ pub struct RiskStopParams {
 
     /// Ngưỡng Tạm Dừng Siết SL Khi Thị Trường Tích Lũy Squeeze (Universal 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
-    pub squeeze_pause_threshold: f64,
+    /// Cờ Bật/Tắt Cơ Chế Giãn Cách Cooldown Sau Khi Hòa Vốn / Cắt Lỗ (true: BẬT, false: TẮT)
+    #[serde(default = "default_true")]
+    pub enable_re_entry_cooldown: bool,
+
+    /// Thời Gian Giãn Cách Sau Khi Hòa Vốn Chống Cào Lệnh (0 -> 60 nến, Step 5 nến -> 13 nấc)
+    #[dna(min = 0.0, max = 60.0, step = 5.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub re_entry_cooldown_bars: usize,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]

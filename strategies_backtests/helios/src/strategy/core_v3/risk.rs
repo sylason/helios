@@ -202,11 +202,12 @@ impl RiskManager {
             };
 
             // [ENHANCEMENT 1: SQUEEZE-AWARE DYNAMIC BREAK-EVEN TRIGGER]
-            // Không hardcode: Ngưỡng kích hoạt tự động giãn nở theo độ nén Squeeze của Matrix
+            // Không hardcode: Ngưỡng kích hoạt tự động giãn nở theo độ nén Squeeze của Matrix và DNA base_be_roe_trigger
             let sqz_multiplier = matrix.squeeze_multiplier[i].max(0.0);
             let base_be_atr_mult = risk_cfg.base_sl_atr.max(1.0);
             let dynamic_be_atr = current_atr * base_be_atr_mult * (1.0 + sqz_multiplier);
-            let be_roe_trigger = 0.08 * (1.0 + sqz_multiplier); // 8% -> 16%+ ROE tùy độ nén
+            let base_be_roe = if risk_cfg.base_be_roe_trigger > 0.0 { risk_cfg.base_be_roe_trigger } else { 0.08 };
+            let be_roe_trigger = base_be_roe * (1.0 + sqz_multiplier);
             let be_price_buffer_pct = 0.0008; // 0.08% buffer bù đắp phí sàn 0.04% Maker/Taker
             let is_be_triggered = current_pnl > 0.0 && (current_roe >= be_roe_trigger || current_pnl >= (dynamic_be_atr * trade.size.abs()));
 
@@ -221,9 +222,11 @@ impl RiskManager {
             }
 
             // [ENHANCEMENT 2: MEGA TREND HARD PROFIT FLOOR]
-            // Khi siêu sóng đạt đỉnh cao: Khóa cứng tối thiểu 50% đỉnh lãi vào túi
+            // Khi siêu sóng đạt đỉnh cao: Khóa cứng lợi nhuận đỉnh theo tỷ lệ DNA mega_trend_lock_ratio
             if is_mega_trend {
-                let locked_roe = (peak_roe * 0.50).max(0.25); // Tối thiểu khóa +25% ROE
+                let lock_ratio = if risk_cfg.mega_trend_lock_ratio > 0.0 { risk_cfg.mega_trend_lock_ratio } else { 0.50 };
+                let min_lock_roe = if risk_cfg.mega_trend_min_lock_roe > 0.0 { risk_cfg.mega_trend_min_lock_roe } else { 0.25 };
+                let locked_roe = (peak_roe * lock_ratio).max(min_lock_roe);
                 if trade.is_long() {
                     let floor_sl = trade.entry_price * (1.0 + (locked_roe / leverage));
                     calculated_sl = calculated_sl.max(floor_sl);
