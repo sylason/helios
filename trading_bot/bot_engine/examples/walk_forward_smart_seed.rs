@@ -42,7 +42,7 @@ const TRAIN_WINDOW_DAYS: i64 = 30;       // Độ dài cửa sổ nến huấn l
 
 // 3. Chu kỳ Vòng lặp Tịnh tiến
 const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Re-Optimizer (VD: 240 phút = 4h, 360 phút = 6h)
-const BACKTEST_INTERVAL_MINS: i64 = 60;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút = 1h)
+const BACKTEST_INTERVAL_MINS: i64 = 300;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (VD: 60 phút = 1h)
 
 // 4. Tài khoản & Đòn bẩy
 const INITIAL_CASH: f64 = 60.0;          // Vốn khởi tạo ($60)

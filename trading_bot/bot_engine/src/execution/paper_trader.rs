@@ -67,6 +67,7 @@ pub struct PaperTrader {
     pub commission_rate: f64,
     pub entry_commission: f64, // Phí mở lệnh của vị thế hiện tại
     pub leverage: f64,
+    pub initial_sl_price: Option<f64>, // Mức giá StopLoss ban đầu khi mở lệnh
     pub current_sl_price: Option<f64>, // Mức giá Trailing StopLoss bảo vệ
     pub current_tp_price: Option<f64>, // Mức giá TakeProfit chốt lời
     pub entry_timestamp: i64,          // Thời điểm mở vị thế (ms)
@@ -90,6 +91,7 @@ impl PaperTrader {
             commission_rate,
             entry_commission: 0.0,
             leverage: 1.0,
+            initial_sl_price: None,
             current_sl_price: None,
             current_tp_price: None,
             entry_timestamp: 0,
@@ -211,11 +213,16 @@ impl PaperTrader {
             self.losing_trades += 1;
         }
         
-        let duration_ms = exit_timestamp.saturating_sub(self.entry_timestamp);
-        let bars_held = if self.entry_timestamp > 0 && duration_ms > 0 {
-            (duration_ms / 60_000).max(1) as usize
+        let bar_diff = exit_bar_index.saturating_sub(self.entry_bar_index);
+        let duration = exit_timestamp.saturating_sub(self.entry_timestamp);
+        let bars_held = if bar_diff > 0 {
+            bar_diff
+        } else if duration >= 60_000 {
+            (duration / 60_000) as usize
+        } else if duration >= 60 {
+            (duration / 60) as usize
         } else {
-            exit_bar_index.saturating_sub(self.entry_bar_index).max(1)
+            1
         };
 
         self.closed_trades.push(PaperTradeRecord {
@@ -250,6 +257,7 @@ impl PaperTrader {
         self.entry_price = 0.0;
         self.position_size = 0.0;
         self.entry_commission = 0.0;
+        self.initial_sl_price = None;
         self.current_sl_price = None;
         self.current_tp_price = None;
         self.entry_timestamp = 0;
@@ -330,6 +338,7 @@ impl PaperTrader {
         self.position_size = trade_value / current_price;
         self.entry_price = current_price;
         self.position_type = pos_type;
+        self.initial_sl_price = initial_sl;
         self.current_sl_price = initial_sl;
         self.current_tp_price = initial_tp;
         self.entry_timestamp = entry_timestamp;
@@ -385,11 +394,12 @@ impl PaperTrader {
             let dist_sl = (candle.open - sl).abs();
             let dist_tp = (candle.open - tp).abs();
             if dist_sl <= dist_tp {
-                let is_tsl = match self.position_type {
-                    PositionType::Long => sl > self.entry_price,
-                    PositionType::Short => sl < self.entry_price,
-                    PositionType::None => false,
-                };
+                let is_tsl = self.initial_sl_price.is_some() 
+                    && (self.current_sl_price != self.initial_sl_price || match self.position_type {
+                        PositionType::Long => sl > self.entry_price,
+                        PositionType::Short => sl < self.entry_price,
+                        PositionType::None => false,
+                    });
                 let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
                 let exec_sl = match self.position_type {
                     PositionType::Long => if candle.open < sl { candle.open } else { sl },
@@ -408,11 +418,12 @@ impl PaperTrader {
             return true;
         } else if is_sl_hit {
             let sl = sl_opt.unwrap();
-            let is_tsl = match self.position_type {
-                PositionType::Long => sl > self.entry_price,
-                PositionType::Short => sl < self.entry_price,
-                PositionType::None => false,
-            };
+            let is_tsl = self.initial_sl_price.is_some() 
+                && (self.current_sl_price != self.initial_sl_price || match self.position_type {
+                    PositionType::Long => sl > self.entry_price,
+                    PositionType::Short => sl < self.entry_price,
+                    PositionType::None => false,
+                });
             let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
             let exec_sl = match self.position_type {
                 PositionType::Long => if candle.open < sl { candle.open } else { sl },
