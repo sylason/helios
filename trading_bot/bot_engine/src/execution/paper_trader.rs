@@ -401,12 +401,7 @@ impl PaperTrader {
             let dist_sl = (candle.open - sl).abs();
             let dist_tp = (candle.open - tp).abs();
             if dist_sl <= dist_tp {
-                let is_tsl = self.initial_sl_price.is_some() 
-                    && (self.current_sl_price != self.initial_sl_price || match self.position_type {
-                        PositionType::Long => sl > self.entry_price,
-                        PositionType::Short => sl < self.entry_price,
-                        PositionType::None => false,
-                    });
+                let is_tsl = self.check_is_tsl(sl);
                 let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
                 let exec_sl = match self.position_type {
                     PositionType::Long => if candle.open < sl { candle.open } else { sl },
@@ -425,12 +420,7 @@ impl PaperTrader {
             return true;
         } else if is_sl_hit {
             let sl = sl_opt.unwrap();
-            let is_tsl = self.initial_sl_price.is_some() 
-                && (self.current_sl_price != self.initial_sl_price || match self.position_type {
-                    PositionType::Long => sl > self.entry_price,
-                    PositionType::Short => sl < self.entry_price,
-                    PositionType::None => false,
-                });
+            let is_tsl = self.check_is_tsl(sl);
             let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
             let exec_sl = match self.position_type {
                 PositionType::Long => if candle.open < sl { candle.open } else { sl },
@@ -494,7 +484,7 @@ impl PaperTrader {
                 }
             }
             Action::ClosePosition { .. } => {
-                self.close_position(current_price, ExitReason::StrategySignalClose, timestamp, bar_index, account_tx);
+                self.close_position(current_price, ExitReason::StagnantDecay, timestamp, bar_index, account_tx);
             }
             Action::UpdateTradeSlTp { new_sl_price, new_tp_price, .. } => {
                 if new_sl_price.is_some() || new_tp_price.is_some() || self.current_sl_price.is_some() || self.current_tp_price.is_some() {
@@ -506,6 +496,27 @@ impl PaperTrader {
                     self.broadcast_account_events(account_tx);
                 }
             }
+        }
+    }
+
+    /// Kiểm tra xem Stop Loss hiện tại có phải là Trailing Stop Loss (đã dời có lợi / giảm rủi ro / có lãi) không
+    pub fn check_is_tsl(&self, sl: f64) -> bool {
+        match self.position_type {
+            PositionType::Long => {
+                if let Some(init_sl) = self.initial_sl_price {
+                    sl > init_sl + 1e-6 || sl > self.entry_price
+                } else {
+                    sl > self.entry_price
+                }
+            }
+            PositionType::Short => {
+                if let Some(init_sl) = self.initial_sl_price {
+                    sl < init_sl - 1e-6 || sl < self.entry_price
+                } else {
+                    sl < self.entry_price
+                }
+            }
+            PositionType::None => false,
         }
     }
 }
@@ -535,37 +546,44 @@ mod tests {
 
     #[test]
     fn test_paper_trader_trailing_sl() {
+        use ferro_trade::broker::policies::RiskPolicy;
         let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
 
-        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy: None, tag: None }, 2000.0, 1600000000, 0, None);
-        assert_eq!(trader.position_type, PositionType::Long);
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1900.0), tp_price: None });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, 1600000000, 0, None);
+        assert_eq!(trader.current_sl_price, Some(1900.0));
 
-        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(1950.0), new_tp_price: None }, 2000.0, 1600000060, 1, None);
-        assert_eq!(trader.current_sl_price, Some(1950.0));
+        // Nến 1: Giá lên 2100, Trailing SL dời lên 2050
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(2050.0), new_tp_price: None }, 2100.0, 1600000060, 1, None);
+        assert_eq!(trader.current_sl_price, Some(2050.0));
 
+        // Nến 2: Giá rớt về 2040 -> chạm Trailing SL 2050
         let candle = crate::models::models::Candle {
             symbol: "ETHUSDT".to_string(),
             timestamp: 1600000120,
-            open: 1990.0,
-            high: 2010.0,
-            low: 1940.0,
-            close: 1960.0,
+            open: 2060.0,
+            high: 2070.0,
+            low: 2040.0, // Chạm SL
+            close: 2045.0,
             volume: 10.0,
         };
 
         let sl_hit = trader.on_candle(&candle, 2, None);
         assert!(sl_hit);
         assert_eq!(trader.position_type, PositionType::None);
-        assert_eq!(trader.equity, 975.0);
+        assert_eq!(trader.equity, 1025.0); // (2050 - 2000) * 0.5 coin = +25$
+        assert_eq!(trader.closed_trades.len(), 1);
+        assert_eq!(trader.closed_trades[0].exit_reason, ExitReason::TrailingStopLoss);
         assert_eq!(trader.closed_trades[0].bars_held, 2);
     }
 
     #[test]
     fn test_paper_trader_cancel_sl() {
+        use ferro_trade::broker::policies::RiskPolicy;
         let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
 
-        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy: None, tag: None }, 2000.0, 1600000000, 0, None);
-        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(1950.0), new_tp_price: None }, 2000.0, 1600000060, 1, None);
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1950.0), tp_price: None });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, 1600000000, 0, None);
         assert_eq!(trader.current_sl_price, Some(1950.0));
 
         // Hủy SL bằng cách truyền None
@@ -613,6 +631,55 @@ mod tests {
         assert_eq!(trader.position_type, PositionType::None);
         assert_eq!(trader.equity, 1050.0); // (2100 - 2000) * 0.5 coin = +50$
         assert_eq!(trader.closed_trades[0].bars_held, 4);
+    }
+
+    #[test]
+    fn test_exit_reason_hard_sl() {
+        use ferro_trade::broker::policies::RiskPolicy;
+        let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
+
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1900.0), tp_price: None });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, 1600000000, 0, None);
+
+        // SL chưa từng được dời (vẫn là 1900.0) -> chạm 1890.0
+        let candle = crate::models::models::Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1600000060,
+            open: 1950.0,
+            high: 1960.0,
+            low: 1890.0,
+            close: 1910.0,
+            volume: 10.0,
+        };
+        let hit = trader.on_candle(&candle, 1, None);
+        assert!(hit);
+        assert_eq!(trader.closed_trades[0].exit_reason, ExitReason::HardStopLoss);
+    }
+
+    #[test]
+    fn test_exit_reason_tsl_reduced_risk() {
+        use ferro_trade::broker::policies::RiskPolicy;
+        let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
+
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1900.0), tp_price: None });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, 1600000000, 0, None);
+
+        // Dời SL lên 1950.0 để giảm rủi ro (vẫn dưới entry 2000.0)
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(1950.0), new_tp_price: None }, 2020.0, 1600000060, 1, None);
+
+        // Giá quay đầu dính SL tại 1950.0
+        let candle = crate::models::models::Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1600000120,
+            open: 1970.0,
+            high: 1980.0,
+            low: 1940.0,
+            close: 1945.0,
+            volume: 10.0,
+        };
+        let hit = trader.on_candle(&candle, 2, None);
+        assert!(hit);
+        assert_eq!(trader.closed_trades[0].exit_reason, ExitReason::TrailingStopLoss);
     }
 }
 

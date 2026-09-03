@@ -15,8 +15,8 @@
   - **Mô tả:** Đảm bảo Strategy có thể đánh giá và dời Trailing Stop Loss trên nến hiện tại trước khi lệnh bị quét oan theo mức SL cũ.
   - **File liên quan:** [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs)
 
-- [ ] **Nhiệm vụ 3: Sửa Lỗi Phân Loại `ExitReason` trong `PaperTrader`**
-  - **Mô tả:** So sánh mức SL kích hoạt với `initial_sl_price` thay vì `entry_price` để ghi nhận đúng các lần dời Trailing SL giảm thiểu rủi ro.
+- [x] **Nhiệm vụ 3: Sửa Lỗi Phân Loại `ExitReason` trong `PaperTrader`**
+  - **Mô tả:** So sánh mức SL kích hoạt với `initial_sl_price` thay vì `entry_price` để ghi nhận đúng các lần dời Trailing SL giảm thiểu rủi ro. (Đã bổ sung hàm `check_is_tsl` và 100% unit tests PASS).
   - **File liên quan:** [`trading_bot/bot_engine/src/execution/paper_trader.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/paper_trader.rs)
 
 - [ ] **Nhiệm vụ 4: Bảo Lưu Tham Số Rủi Ro Khi DNA Hot-Swapping**
