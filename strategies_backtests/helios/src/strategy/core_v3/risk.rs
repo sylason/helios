@@ -140,12 +140,20 @@ impl RiskManager {
             // STAGNANT CAPITAL RELEASE MỞ RỘNG:
             // 1. Lệnh lỗ ngâm quá 1 chu kỳ decay -> Đóng ngay cắt lỗ nhỏ
             if decay_cycles > 0 && current_pnl <= 0.0 {
+                tracing::info!(
+                    "⌛ [STAGNANT DECAY CLOSE] Trade #{} | Stagnant: {} bars (Countdown: {} bars, Cycle: {}) | PnL: {:.2} <= 0 -> Closing trade",
+                    trade.id, effective_stagnant_bars, time_countdown_bars, decay_cycles, current_pnl
+                );
                 tick.close(None);
                 continue;
             }
 
             // 2. Lệnh ngâm quá 4 chu kỳ decay (Zombie Trade) -> Đóng chủ động giải phóng vốn ký quỹ
             if decay_cycles >= 4 {
+                tracing::info!(
+                    "🧟 [ZOMBIE TIMEOUT CLOSE] Trade #{} | Stagnant: {} bars (Countdown: {} bars, Cycle: {}) -> Closing trade to release margin",
+                    trade.id, effective_stagnant_bars, time_countdown_bars, decay_cycles
+                );
                 tick.close(None);
                 continue;
             }

@@ -7,11 +7,11 @@
   },
   "prospector": {
     "worker_config": {
-      "population_size": 200,
-      "n_generations": 7,
-      "cxpb": 0.7,
-      "mutpb": 0.3,
-      "tournament_size": 5,
+      "population_size": 60,
+      "n_generations": 12,
+      "cxpb": 0.75,
+      "mutpb": 0.35,
+      "tournament_size": 4,
       "min_trades": 7,
       "n_top_candidates": 5,
       "max_stale_generations": 2,
@@ -19,16 +19,16 @@
       "mutation_strategy": {
         "type": "AdaptiveDynamic",
         "base_mutpb": 0.20,
-        "hyper_mutpb": 0.40,
+        "hyper_mutpb": 0.50,
         "stale_generations": 2,
         "mut_gene_rate": 0.35
       }
     },
     "scout_config": {
-      "population_size": 40,
-      "n_generations": 3,
+      "population_size": 30,
+      "n_generations": 4,
       "cxpb": 0.7,
-      "mutpb": 0.2,
+      "mutpb": 0.25,
       "tournament_size": 3,
       "min_trades": 3,
       "n_top_candidates": 3,
@@ -36,8 +36,8 @@
       "min_significant_fitness_delta": 0.001,
       "mutation_strategy": {
         "type": "MultiGene",
-        "mutpb": 0.25,
-        "mut_gene_rate": 0.35
+        "mutpb": 0.30,
+        "mut_gene_rate": 0.40
       }
     },
     "max_depth": 2,
@@ -64,8 +64,8 @@
     ],
     "scout_method": "maximin_lhs",
     "exploration_strategy": "random_restart",
-    "max_threads": 3,
-    "max_random_restarts": 5
+    "max_threads": 6,
+    "max_random_restarts": 4
   },
   "cache_config": {
     "enable_fitness_cache": true,
