@@ -1,5 +1,4 @@
-// strategies_backtests/helios/src/strategy/core_v3/risk.rs
-
+use tracing::info;
 use ferro_trade::strategy::TickContext;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
@@ -140,12 +139,20 @@ impl RiskManager {
             // STAGNANT CAPITAL RELEASE MỞ RỘNG:
             // 1. Lệnh lỗ ngâm quá 1 chu kỳ decay -> Đóng ngay cắt lỗ nhỏ
             if decay_cycles > 0 && current_pnl <= 0.0 {
+                info!(
+                    "🚨 [STAGNANT TELEMETRY] Cut Stagnant! Bar: {} | EntryBar: {} | PeakBar: {} | StagnantBars: {} | Countdown: {} | DecayCycles: {} | PnL: ${:.2}",
+                    i, entry_bar, peak_bar, effective_stagnant_bars, time_countdown_bars, decay_cycles, current_pnl
+                );
                 tick.close(None);
                 continue;
             }
 
             // 2. Lệnh ngâm quá 4 chu kỳ decay (Zombie Trade) -> Đóng chủ động giải phóng vốn ký quỹ
             if decay_cycles >= 4 {
+                info!(
+                    "🧟 [STAGNANT TELEMETRY] Cut Zombie! Bar: {} | EntryBar: {} | PeakBar: {} | StagnantBars: {} | Countdown: {} | DecayCycles: {} | PnL: ${:.2}",
+                    i, entry_bar, peak_bar, effective_stagnant_bars, time_countdown_bars, decay_cycles, current_pnl
+                );
                 tick.close(None);
                 continue;
             }
