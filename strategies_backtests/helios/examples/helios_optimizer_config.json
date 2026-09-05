@@ -5,16 +5,21 @@
     "margin_rate": 0.05,
     "fractional_unit": 0.0001
   },
+  "early_termination": {
+    "max_drawdown_pct": 35.0,
+    "warmup_bars": 5760,
+    "min_trades": 2
+  },
   "prospector": {
     "worker_config": {
-      "population_size": 60,
-      "n_generations": 12,
+      "population_size": 40,
+      "n_generations": 8,
       "cxpb": 0.75,
       "mutpb": 0.35,
       "tournament_size": 4,
       "min_trades": 7,
       "n_top_candidates": 5,
-      "max_stale_generations": 2,
+      "max_stale_generations": 4,
       "min_significant_fitness_delta": 0.001,
       "mutation_strategy": {
         "type": "AdaptiveDynamic",
@@ -40,8 +45,8 @@
         "mut_gene_rate": 0.40
       }
     },
-    "max_depth": 2,
-    "max_backlog_depth": 2,
+    "max_depth": 1,
+    "max_backlog_depth": 1,
     "zoom_factor": 0.5,
     "db_path": "helios_prospector_v3.db",
     "pruning_strategy": {

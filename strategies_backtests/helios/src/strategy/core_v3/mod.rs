@@ -8,7 +8,6 @@ pub mod config;
 
 use std::collections::HashMap;
 
-use tracing::info;
 use ferro_trade::optimizer::params::ParamValue;
 use ferro_trade::optimizer::DnaMappable;
 use ferro_trade::strategy::{InitContext, Strategy, TickContext};
@@ -56,15 +55,6 @@ impl Strategy for HeliosStrategyV3 {
     fn update_from_dna(&mut self, dna: &[f64]) {
         self.config.update_from_dna(dna);
         self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
-        let risk = &self.config.risk_management;
-        info!(
-            "🧬 [DNA HOT-SWAP] Countdown: {} | TSL_Loose: {:.2} | TSL_Tight: {:.2} | Base_SL_ATR: {:.2} | Lev: {:.1}x",
-            risk.stop_management.time_countdown_bars,
-            risk.stop_management.tsl_atr_loose,
-            risk.stop_management.tsl_atr_tight,
-            risk.stop_management.base_sl_atr,
-            risk.risk_base.leverage
-        );
     }
 
     fn init(&mut self, ctx: &mut InitContext) {
@@ -201,10 +191,6 @@ impl Strategy for HeliosStrategyV3 {
                         self.cooldown_tracker.locked_until_bar = i + stop_cfg.re_entry_cooldown_bars;
                         self.cooldown_tracker.locked_side = if is_long { Some(SignalType::Long) } else { Some(SignalType::Short) };
                         self.cooldown_tracker.last_exit_price = current_close;
-                        info!(
-                            "🔒 [COOLDOWN SET] Bar: {} | LockedUntil: {} (+{} bars) | Side: {:?} | ExitPrice: {:.2} | PnL: {:.4}",
-                            i, self.cooldown_tracker.locked_until_bar, stop_cfg.re_entry_cooldown_bars, self.cooldown_tracker.locked_side, current_close, trade_pnl
-                        );
                     }
                 }
                 self.prev_open_trade = None;
@@ -242,17 +228,8 @@ impl Strategy for HeliosStrategyV3 {
 
                         // Kiểm tra Volatility Breakout Override: nếu giá đã bứt phá >= 1.5 * ATR thì cho phép mở khóa sớm
                         if price_diff < 1.5 * current_atr {
-                            info!(
-                                "⛔ [COOLDOWN BLOCKED] Bar: {} < LockedUntil: {} | Side: {:?} | PriceDiff: {:.2} < ReqBreakout: {:.2}",
-                                i, self.cooldown_tracker.locked_until_bar, signal, price_diff, 1.5 * current_atr
-                            );
                             // Chưa đủ bứt phá biến động -> CHẶN CÀO LỆNH RÁC!
                             return;
-                        } else {
-                            info!(
-                                "🔓 [COOLDOWN BREAKOUT] Bar: {} | Side: {:?} | PriceDiff: {:.2} >= ReqBreakout: {:.2} -> Re-entry Allowed!",
-                                i, signal, price_diff, 1.5 * current_atr
-                            );
                         }
                     }
                 }
