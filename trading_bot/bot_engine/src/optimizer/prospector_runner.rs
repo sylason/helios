@@ -46,12 +46,38 @@ impl Default for AccountOptimizerConfig {
     }
 }
 
+fn default_max_drawdown() -> f64 { 35.0 }
+fn default_warmup_bars() -> usize { 5760 }
+fn default_min_trades() -> usize { 2 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EarlyTerminationConfig {
+    #[serde(default = "default_max_drawdown")]
+    pub max_drawdown_pct: f64,
+    #[serde(default = "default_warmup_bars")]
+    pub warmup_bars: usize,
+    #[serde(default = "default_min_trades")]
+    pub min_trades: usize,
+}
+
+impl Default for EarlyTerminationConfig {
+    fn default() -> Self {
+        Self {
+            max_drawdown_pct: default_max_drawdown(),
+            warmup_bars: default_warmup_bars(),
+            min_trades: default_min_trades(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct FullOptimizerConfig {
     pub prospector: ProspectorConfig,
     #[serde(default)]
     pub account: Option<AccountOptimizerConfig>,
     pub cache_config: Option<ferro_trade::data::global_cache::CacheConfig>,
+    #[serde(default)]
+    pub early_termination: Option<EarlyTerminationConfig>,
 }
 
 pub struct ProspectorRunner;
@@ -174,6 +200,7 @@ impl ProspectorRunner {
             let mut prospector_config = full_config.prospector;
             prospector_config.db_path = prospector_db_path_owned.clone();
 
+            let early_term = full_config.early_termination.unwrap_or_default();
             let account = full_config.account.unwrap_or_default();
             let backtest = BacktestBuilder::new()
                 .data(df)
@@ -201,8 +228,11 @@ impl ProspectorRunner {
                     StatItem::Expectancy,
                 ])
                 .early_termination(EarlyTermination::Any(vec![
-                    EarlyTermination::MaxDrawdown(40.0),
-                    EarlyTermination::WarmupMinTrades { after_bars: 14400, min_trades: 5 },
+                    EarlyTermination::MaxDrawdown(early_term.max_drawdown_pct),
+                    EarlyTermination::WarmupMinTrades { 
+                        after_bars: early_term.warmup_bars, 
+                        min_trades: early_term.min_trades 
+                    },
                 ]))
                 .early_termination_penalty(|term_info| {
                     match &term_info.reason {
@@ -462,5 +492,37 @@ mod tests {
         let fit_fragile = ProspectorRunner::calculate_enhanced_fitness(&stats_fragile);
 
         assert!(fit_solid > fit_fragile * 2.0, "Hệ thống có PF dày và SQN cao phải có điểm số vượt trội");
+    }
+
+    #[test]
+    fn test_early_termination_config_deserialization() {
+        let json_with_early_term = r#"{
+            "max_drawdown_pct": 25.0,
+            "warmup_bars": 2880,
+            "min_trades": 3
+        }"#;
+
+        let early_term: EarlyTerminationConfig = serde_json::from_str(json_with_early_term).expect("Phải parse thành công JSON early_termination");
+        assert_eq!(early_term.max_drawdown_pct, 25.0);
+        assert_eq!(early_term.warmup_bars, 2880);
+        assert_eq!(early_term.min_trades, 3);
+
+        let default_term = EarlyTerminationConfig::default();
+        assert_eq!(default_term.max_drawdown_pct, 35.0);
+        assert_eq!(default_term.warmup_bars, 5760);
+        assert_eq!(default_term.min_trades, 2);
+
+        // Kiểm tra parse trực tiếp từ file cấu hình thực tế helios_optimizer_config.json
+        let config_path = "../../strategies_backtests/helios/examples/helios_optimizer_config.json";
+        if std::path::Path::new(config_path).exists() {
+            let file = std::fs::File::open(config_path).expect("Mở file helios_optimizer_config.json");
+            let reader = std::io::BufReader::new(file);
+            let full: FullOptimizerConfig = serde_json::from_reader(reader).expect("Parse helios_optimizer_config.json");
+            let et = full.early_termination.expect("helios_optimizer_config.json phải chứa early_termination");
+            assert_eq!(et.max_drawdown_pct, 35.0);
+            assert_eq!(et.warmup_bars, 5760);
+            assert_eq!(et.min_trades, 2);
+            assert_eq!(full.prospector.max_depth, 1);
+        }
     }
 }

@@ -1,20 +1,351 @@
 [
   {
-    "params": {},
-    "fitness": 0.0,
+    "params": {
+      "tactical_sniper.range.min_activation_score": {
+        "Float": 0.8313644024621892
+      },
+      "indicators.rsi_trend.timeframe": {
+        "String": "15m"
+      },
+      "tactical_sniper.momentum.rsi_threshold": {
+        "Float": 23.118430539390097
+      },
+      "indicators.stoch_range.k_ma_type": {
+        "String": "WMA"
+      },
+      "tactical_sniper.anomaly.max_initial_sl_pct": {
+        "Float": 0.06299981551620128
+      },
+      "indicators.adx.timeframe": {
+        "String": "15m"
+      },
+      "indicators.natr.timeframe": {
+        "String": "5m"
+      },
+      "arbiter.min_confidence_trending": {
+        "Float": 0.1863639741810987
+      },
+      "tactical_sniper.range.stoch_overbought": {
+        "Float": 97.42479615362726
+      },
+      "tactical_sniper.range.volume_max_threshold": {
+        "Float": 0.9648026718077074
+      },
+      "indicators.keltner.ma_type": {
+        "String": "LinReg"
+      },
+      "indicators.bbands.timeframe": {
+        "String": "5m"
+      },
+      "tactical_sniper.absorption.min_activation_score": {
+        "Float": 0.09245916432948607
+      },
+      "risk_management.risk_base.sl_min_dist_pct": {
+        "Float": 0.01968206160688648
+      },
+      "tactical_sniper.reversal.z_score_threshold": {
+        "Float": 3.9661343997834417
+      },
+      "indicators.stoch_range.d_ma_type": {
+        "String": "TEMA"
+      },
+      "arbiter.min_confidence_volatile": {
+        "Float": 0.07161977000675354
+      },
+      "indicators.bbands.nbdev": {
+        "Float": 1.877302393041915
+      },
+      "indicators.stoch_trend.period": {
+        "Float": 43.36750321663075
+      },
+      "indicators.keltner.multiplier": {
+        "Float": 4.605260688265781
+      },
+      "indicators.stoch_trend.d_period": {
+        "Float": 2.97808198147841
+      },
+      "indicators.rsi_anomaly.period": {
+        "Float": 76.0513382467221
+      },
+      "indicators.atr.timeframe": {
+        "String": "15m"
+      },
+      "tactical_sniper.anomaly.min_activation_score": {
+        "Float": 0.25195099992081427
+      },
+      "tactical_sniper.absorption.squeeze_threshold": {
+        "Float": 0.9357377669477727
+      },
+      "tactical_sniper.pullback.min_activation_score": {
+        "Float": 0.9190846598183084
+      },
+      "matrix.momentum_lookback": {
+        "Float": 650.5142350535815
+      },
+      "indicators.stoch_trend.zone": {
+        "Float": 0.06903375336406797
+      },
+      "tactical_sniper.reversal.max_initial_sl_pct": {
+        "Float": 0.03247403262597289
+      },
+      "risk_management.stop_management.base_be_roe_trigger": {
+        "Float": 0.08908861033943583
+      },
+      "indicators.macd.signal": {
+        "Float": 2.6247033355804117
+      },
+      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
+        "Float": 1.9637984769605494
+      },
+      "indicators.vwma.period": {
+        "Float": 42.993669705092564
+      },
+      "indicators.rsi_reversal.period": {
+        "Float": 20.829253194365428
+      },
+      "indicators.stoch_range.period": {
+        "Float": 63.39200193096982
+      },
+      "indicators.stoch_range.timeframe": {
+        "String": "1h"
+      },
+      "indicators.rsi_trend.period": {
+        "Float": 51.29830532649246
+      },
+      "indicators.rsi_reversal.timeframe": {
+        "String": "15m"
+      },
+      "indicators.stoch_trend.k_ma_type": {
+        "String": "DMA"
+      },
+      "indicators.vwma.timeframe": {
+        "String": "1h"
+      },
+      "indicators.natr.period": {
+        "Float": 31.11807273663613
+      },
+      "tactical_sniper.reversal.wick_sl_buffer_atr": {
+        "Float": 2.2155586638351195
+      },
+      "tactical_sniper.reversal.min_activation_score": {
+        "Float": 0.9595508662144289
+      },
+      "indicators.rsi_momentum.period": {
+        "Float": 34.92697191386131
+      },
+      "tactical_sniper.anomaly.wick_atr_threshold": {
+        "Float": 4.719712565362614
+      },
+      "risk_management.stop_management.base_sl_atr": {
+        "Float": 4.025433884802942
+      },
+      "matrix.volume_lookback": {
+        "Float": 209.5664854723277
+      },
+      "indicators.keltner.period": {
+        "Float": 22.64025896525993
+      },
+      "tactical_sniper.absorption.vol_z_threshold": {
+        "Float": 1.2369661115778154
+      },
+      "indicators.stoch_trend.k_period": {
+        "Float": 17.23414292685785
+      },
+      "indicators.kama.short_period": {
+        "Float": 7.710921856887702
+      },
+      "indicators.mfi.period": {
+        "Float": 49.323393485573035
+      },
+      "indicators.vol_ma.period": {
+        "Float": 56.39255648871991
+      },
+      "tactical_sniper.pullback.stoch_pullback_thresh": {
+        "Float": 25.136279989105873
+      },
+      "tactical_sniper.pullback.max_initial_sl_pct": {
+        "Float": 0.09606268784614828
+      },
+      "tactical_sniper.momentum.vol_z_threshold": {
+        "Float": 2.98261820456203
+      },
+      "indicators.stoch_range.k_period": {
+        "Float": 19.62099772637206
+      },
+      "tactical_sniper.range.max_initial_sl_pct": {
+        "Float": 0.09074573014963055
+      },
+      "indicators.z_score_lookback": {
+        "Float": 123.46627251080719
+      },
+      "tactical_sniper.range.stoch_oversold": {
+        "Float": 26.996699959957645
+      },
+      "indicators.adx.period": {
+        "Float": 54.27696859611855
+      },
+      "indicators.macd.fast": {
+        "Float": 9.249590583682776
+      },
+      "tactical_sniper.anomaly.z_score_threshold": {
+        "Float": 1.2822118405070575
+      },
+      "tactical_sniper.absorption.max_initial_sl_pct": {
+        "Float": 0.08294993927968144
+      },
+      "matrix.squeeze_lookback": {
+        "Float": 494.0672385517821
+      },
+      "risk_management.stop_management.mega_trend_lock_ratio": {
+        "Float": 0.351262950462898
+      },
+      "indicators.macd.timeframe": {
+        "String": "1h"
+      },
+      "indicators.stoch_trend.timeframe": {
+        "String": "15m"
+      },
+      "risk_management.stop_management.enable_re_entry_cooldown": {
+        "Float": 0.4153319552736089
+      },
+      "risk_management.stop_management.max_stagnant_hold_bars": {
+        "Float": 656.4654096643658
+      },
+      "risk_management.stop_management.mega_trend_max_cycles": {
+        "Float": 19.64751674835024
+      },
+      "indicators.vol_ma.timeframe": {
+        "String": "4h"
+      },
+      "tactical_sniper.momentum.max_initial_sl_pct": {
+        "Float": 0.02295178430217006
+      },
+      "indicators.stoch_range.d_period": {
+        "Float": 9.166314444659344
+      },
+      "arbiter.min_confidence_ranging": {
+        "Float": 0.5576458244946978
+      },
+      "risk_management.risk_base.percent_per_trade": {
+        "Float": 0.1453691075371465
+      },
+      "risk_management.risk_base.base_lot_size": {
+        "Float": 1.3719599421611106
+      },
+      "indicators.bbands.period": {
+        "Float": 61.056042560747166
+      },
+      "risk_management.risk_base.leverage": {
+        "Float": 47.47589369410519
+      },
+      "risk_management.stop_management.re_entry_cooldown_bars": {
+        "Float": 5.526489209136153
+      },
+      "risk_management.stop_management.time_countdown_bars": {
+        "Float": 250.41658139751303
+      },
+      "indicators.stoch_range.zone": {
+        "Float": 0.10637724315722423
+      },
+      "indicators.mfi.timeframe": {
+        "String": "15m"
+      },
+      "indicators.macd.slow": {
+        "Float": 68.12048038932153
+      },
+      "risk_management.stop_management.tsl_atr_tight": {
+        "Float": 0.734315500023809
+      },
+      "matrix.z_score_sensitivity": {
+        "Float": 8.985979240043577
+      },
+      "tactical_sniper.reversal.exhaustion_vol_drop": {
+        "Float": 0.6057854225735048
+      },
+      "arbiter.scanner_weight": {
+        "Float": 0.25867494140446684
+      },
+      "indicators.atr.period": {
+        "Float": 53.30179560577865
+      },
+      "risk_management.stop_management.tsl_atr_normal": {
+        "Float": 7.306407939757343
+      },
+      "matrix.trend_lookback": {
+        "Float": 833.2417685535058
+      },
+      "tactical_sniper.momentum.min_activation_score": {
+        "Float": 0.9694431020662188
+      },
+      "indicators.keltner.timeframe": {
+        "String": "1h"
+      },
+      "risk_management.stop_management.tighten_step_multiplier": {
+        "Float": 0.8098972619550469
+      },
+      "indicators.kama.timeframe": {
+        "String": "4h"
+      },
+      "indicators.stoch_trend.d_ma_type": {
+        "String": "EMA"
+      },
+      "tactical_sniper.pullback.kama_slope_threshold": {
+        "Float": 0.14648594708525364
+      },
+      "tactical_sniper.pullback.rsi_buy_thresh": {
+        "Float": 50.914569805441374
+      },
+      "indicators.kama.long_period": {
+        "Float": 55.76205943024366
+      },
+      "tactical_sniper.range.min_width_pct": {
+        "Float": 0.019746977246695184
+      },
+      "tactical_sniper.reversal.min_reversal_displacement": {
+        "Float": 1.0241516088304738
+      },
+      "indicators.rsi_momentum.timeframe": {
+        "String": "15m"
+      },
+      "risk_management.stop_management.min_initial_sl_pct": {
+        "Float": 0.0017659796940676085
+      },
+      "risk_management.stop_management.tsl_atr_loose": {
+        "Float": 13.939194508203904
+      },
+      "arbiter.min_multiplier_veto": {
+        "Float": 0.5556507146175768
+      },
+      "risk_management.stop_management.mega_trend_pnl_trigger": {
+        "Float": 0.07265091537418873
+      },
+      "risk_management.stop_management.mega_trend_min_lock_roe": {
+        "Float": 0.22467138888580362
+      },
+      "tactical_sniper.range.bb_proximity_pct": {
+        "Float": 0.01283585673877741
+      },
+      "risk_management.stop_management.stagnant_min_profit_pct": {
+        "Float": 0.01087722122932476
+      },
+      "indicators.rsi_anomaly.timeframe": {
+        "String": "1h"
+      }
+    },
+    "fitness": -100.0,
     "stats": {
       "return_pct": 0.0,
-      "return_ann_pct": null,
+      "return_ann_pct": 0.0,
       "buy_and_hold_return_pct": 0.0,
-      "volatility_ann_pct": null,
+      "volatility_ann_pct": 0.0,
       "sharpe_ratio": null,
       "sortino_ratio": null,
       "calmar_ratio": null,
-      "max_drawdown_pct": 0.0,
+      "max_drawdown_pct": -0.0,
       "avg_drawdown_pct": 0.0,
       "exposure_time_pct": 0.0,
-      "equity_final": 0.0,
-      "equity_peak": 0.0,
+      "equity_final": 60.0,
+      "equity_peak": 60.0,
       "win_rate_pct": 0.0,
       "best_trade_pct": 0.0,
       "worst_trade_pct": 0.0,
@@ -29,9 +360,9 @@
       "beta": null,
       "custom_1": null,
       "custom_2": null,
-      "start_timestamp_secs": 0,
-      "end_timestamp_secs": 0,
-      "duration_secs": 0,
+      "start_timestamp_secs": 1787031540,
+      "end_timestamp_secs": 1788241140,
+      "duration_secs": 1209600,
       "total_trades": 0,
       "max_drawdown_duration_secs": 0,
       "avg_drawdown_duration_secs": 0,
@@ -40,2892 +371,472 @@
       "_reserved_u32": 0
     },
     "dna": [
-      2.07511325792137,
-      30.964979849629223,
-      1.5886002842363618,
-      38.71494322772482,
-      1.0,
-      63.40468470417016,
-      0.7520181383490474,
-      56.637798000752994,
-      0.9233524075588704,
-      12.454229100853876,
-      0.5070379647231235,
-      12.578608224392362,
-      0.978490485149074,
-      31.399302054225128,
-      4.03496554647619,
-      1.0,
-      52.33203699023069,
-      4.341294597595927,
-      1.183047203711736,
-      13.711718379644148,
-      6.0,
-      63.68649289114598,
-      17.367515342128215,
-      0.7713067640817566,
-      64.9786820205656,
-      9.11338415097677,
-      11.641619008171618,
-      9.105740375934811,
-      12.617250729377472,
-      0.3805358124703913,
-      2.9849276344023914,
-      52.32068639049233,
-      2.834879850206784,
-      8.523072808332468,
-      4.827211081926617,
-      4.785534186249894,
-      0.3764099253015188,
-      2.679810357119169,
-      44.40359726760017,
-      1.7278570663166322,
-      32.240358190608426,
-      1.0,
-      44.0,
-      1.8743356944154264,
-      59.64165876745122,
-      1.1919161489032304,
-      45.0640537878257,
-      2.328609536472697,
-      20.0,
-      984.0567989376524,
-      710.5908557472848,
-      184.73236511257687,
-      449.04178339928706,
-      2.312946887202546,
-      0.5856228405592697,
-      0.4667680744286392,
-      0.5451074283753804,
-      0.06999999999999999,
-      0.09298470124747506,
-      0.05759723737686465,
-      84.30955705846516,
-      69.42000358117613,
-      0.06534949191660555,
-      0.5833721954276969,
-      0.01914335954704397,
-      48.36919115644454,
-      3.0040890852089697,
-      0.832845921242305,
-      0.09340048126042576,
-      0.01288618418272781,
-      34.78569893997945,
-      61.99974291078009,
-      0.016773474298295125,
-      0.3452960405678968,
-      0.4765001897849976,
-      0.03470151295902953,
-      4.859764938006419,
-      1.128648722451686,
-      0.1926247042368685,
-      5.743262227415973,
-      0.9286980658302476,
-      0.03522779434570954,
-      0.6945712283071032,
-      2.7,
-      2.530229019404567,
-      0.2410090234059663,
-      0.08460096877348816,
-      0.5787111214404969,
-      2.158532030433528,
-      0.5228413755963821,
-      0.4804957815334937,
-      0.006138528095437286,
-      1.7615861885096322,
-      35.11830420875677,
-      0.003722506090827543,
-      330.2333032035309,
-      0.5971974028746654,
-      0.20645961843939628,
-      2.7586235460543356,
-      4.912001241848053,
-      9.54930688227576,
-      0.1289387720389982,
-      3.2677865493734206,
-      0.3073638550167873,
-      0.47183551214990194,
-      1264.062599034897,
-      0.006385301688197871,
-      3.815496113382184,
-      0.7734202782877249,
-      54.42088707229679
+      7.710921856887702,
+      55.76205943024366,
+      2.84628439401749,
+      54.27696859611855,
+      0.8085195995984407,
+      51.29830532649246,
+      0.5834986215719755,
+      20.829253194365428,
+      1.0362419747528542,
+      34.92697191386131,
+      0.6525849119233849,
+      76.0513382467221,
+      2.2728400736771883,
+      61.056042560747166,
+      1.877302393041915,
+      0.32936890295531385,
+      22.64025896525993,
+      4.605260688265781,
+      1.9640962847425265,
+      13.322836843444783,
+      9.249590583682776,
+      68.12048038932153,
+      2.6247033355804117,
+      1.9881017113567452,
+      43.36750321663075,
+      17.23414292685785,
+      2.97808198147841,
+      4.827836052160597,
+      0.6744643201774279,
+      0.06903375336406797,
+      1.4272842499303806,
+      63.39200193096982,
+      19.62099772637206,
+      9.166314444659344,
+      1.7181992608888503,
+      7.614059230847,
+      0.10637724315722423,
+      2.0414980284999995,
+      53.30179560577865,
+      1.1128690106796084,
+      31.11807273663613,
+      0.3882453924476633,
+      49.323393485573035,
+      1.3829658605593655,
+      56.39255648871991,
+      2.5065886781185873,
+      42.993669705092564,
+      2.354031012168311,
+      123.46627251080719,
+      833.2417685535058,
+      494.0672385517821,
+      650.5142350535815,
+      209.5664854723277,
+      8.985979240043577,
+      0.5556507146175768,
+      0.25867494140446684,
+      0.1863639741810987,
+      0.5576458244946978,
+      0.07161977000675354,
+      0.09606268784614828,
+      50.914569805441374,
+      25.136279989105873,
+      0.14648594708525364,
+      0.9190846598183084,
+      0.02295178430217006,
+      23.118430539390097,
+      2.98261820456203,
+      0.9694431020662188,
+      0.09074573014963055,
+      0.01283585673877741,
+      26.996699959957645,
+      97.42479615362726,
+      0.019746977246695184,
+      0.9648026718077074,
+      0.8313644024621892,
+      0.03247403262597289,
+      3.9661343997834417,
+      1.0241516088304738,
+      0.6057854225735048,
+      2.2155586638351195,
+      0.9595508662144289,
+      0.06299981551620128,
+      4.719712565362614,
+      1.2822118405070575,
+      1.9637984769605494,
+      0.25195099992081427,
+      0.08294993927968144,
+      0.9357377669477727,
+      1.2369661115778154,
+      0.09245916432948607,
+      0.1453691075371465,
+      0.01968206160688648,
+      1.3719599421611106,
+      47.47589369410519,
+      0.0017659796940676085,
+      250.41658139751303,
+      0.8098972619550469,
+      0.08908861033943583,
+      0.734315500023809,
+      7.306407939757343,
+      13.939194508203904,
+      0.07265091537418873,
+      19.64751674835024,
+      0.351262950462898,
+      0.22467138888580362,
+      656.4654096643658,
+      0.01087722122932476,
+      4.025433884802942,
+      0.4153319552736089,
+      5.526489209136153
     ]
   },
   {
     "params": {
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.5787111214404969
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 2.312946887202546
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "4h"
-      },
-      "indicators.vol_ma.timeframe": {
-        "String": "15m"
-      },
-      "indicators.rsi_trend.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 2.834879850206784
-      },
-      "indicators.macd.fast": {
-        "Float": 6.0
-      },
-      "matrix.trend_lookback": {
-        "Float": 984.0567989376524
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.09340048126042576
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.4765001897849976
-      },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 1.128648722451686
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.03522779434570954
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 2.7
-      },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 2.158532030433528
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "DMA"
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 330.2333032035309
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.5971974028746654
-      },
-      "indicators.stoch_range.d_ma_type": {
-        "String": "DMA"
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.5856228405592697
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.4667680744286392
-      },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 3.815496113382184
-      },
-      "indicators.adx.timeframe": {
-        "String": "15m"
+      "indicators.natr.period": {
+        "Float": 41.47480604866459
       },
       "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.01288618418272781
-      },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 54.42088707229679
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 0.6945712283071032
-      },
-      "indicators.rsi_reversal.period": {
-        "Float": 56.637798000752994
-      },
-      "matrix.momentum_lookback": {
-        "Float": 184.73236511257687
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.09298470124747506
-      },
-      "indicators.mfi.period": {
-        "Float": 44.0
-      },
-      "indicators.macd.signal": {
-        "Float": 17.367515342128215
-      },
-      "matrix.volume_lookback": {
-        "Float": 449.04178339928706
-      },
-      "indicators.atr.period": {
-        "Float": 44.40359726760017
-      },
-      "indicators.rsi_anomaly.period": {
-        "Float": 12.578608224392362
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.3805358124703913
-      },
-      "indicators.kama.short_period": {
-        "Float": 2.07511325792137
-      },
-      "indicators.z_score_lookback": {
-        "Float": 20.0
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "LinReg"
-      },
-      "indicators.macd.slow": {
-        "Float": 63.68649289114598
-      },
-      "indicators.bbands.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "WSMA"
-      },
-      "indicators.stoch_trend.period": {
-        "Float": 64.9786820205656
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "indicators.mfi.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.05759723737686465
-      },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 48.36919115644454
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 2.530229019404567
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.03470151295902953
-      },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.08460096877348816
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.341294597595927
-      },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.5228413755963821
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 11.641619008171618
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "4h"
-      },
-      "matrix.squeeze_lookback": {
-        "Float": 710.5908557472848
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.4804957815334937
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 35.11830420875677
-      },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 4.912001241848053
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.47183551214990194
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.1926247042368685
-      },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.7734202782877249
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 63.40468470417016
-      },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.3073638550167873
-      },
-      "indicators.rsi_momentum.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 84.30955705846516
-      },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 61.99974291078009
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.2410090234059663
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 1.7615861885096322
-      },
-      "indicators.natr.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.003722506090827543
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.9286980658302476
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 9.11338415097677
-      },
-      "indicators.atr.timeframe": {
-        "String": "1h"
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.06999999999999999
-      },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 9.54930688227576
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.06534949191660555
-      },
-      "indicators.keltner.period": {
-        "Float": 52.33203699023069
-      },
-      "indicators.vwma.period": {
-        "Float": 45.0640537878257
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.5833721954276969
-      },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.3452960405678968
-      },
-      "indicators.adx.period": {
-        "Float": 38.71494322772482
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.832845921242305
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 5.743262227415973
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 12.454229100853876
-      },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.1289387720389982
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.5451074283753804
-      },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 3.2677865493734206
-      },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 4.859764938006419
-      },
-      "indicators.kama.long_period": {
-        "Float": 30.964979849629223
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 4.03496554647619
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 69.42000358117613
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.20645961843939628
-      },
-      "indicators.natr.period": {
-        "Float": 32.240358190608426
+        "Float": 0.01283585673877741
       },
       "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.7586235460543356
+        "Float": 0.734315500023809
       },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_range.period": {
-        "Float": 52.32068639049233
-      },
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 1264.062599034897
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.006385301688197871
-      },
-      "indicators.vol_ma.period": {
-        "Float": 59.64165876745122
-      },
-      "indicators.keltner.ma_type": {
-        "String": "Vidya"
-      },
-      "indicators.keltner.timeframe": {
-        "String": "15m"
-      },
-      "indicators.bbands.period": {
-        "Float": 31.399302054225128
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.016773474298295125
-      },
-      "indicators.rsi_anomaly.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 34.78569893997945
+      "risk_management.stop_management.mega_trend_max_cycles": {
+        "Float": 19.64751674835024
       },
       "indicators.stoch_range.d_period": {
-        "Float": 8.523072808332468
+        "Float": 7.95153229992008
       },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.006138528095437286
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.3764099253015188
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 3.0040890852089697
-      },
-      "indicators.vwma.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.01914335954704397
-      }
-    },
-    "fitness": 65.444,
-    "stats": {
-      "return_pct": 471.5221066020293,
-      "return_ann_pct": 81931981891.88333,
-      "buy_and_hold_return_pct": 21.748060246462796,
-      "volatility_ann_pct": 191924310126.32266,
-      "sharpe_ratio": 0.4268973630175173,
-      "sortino_ratio": 2035528516.181592,
-      "calmar_ratio": null,
-      "max_drawdown_pct": -16.528892106298187,
-      "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 71.37726493350016,
-      "equity_final": 342.9132639612176,
-      "equity_peak": 376.6171228110318,
-      "win_rate_pct": 67.21311475409836,
-      "best_trade_pct": 4.916274843838737,
-      "worst_trade_pct": -1.2006390291644122,
-      "avg_trade_pct": 0.0,
-      "profit_factor": 6.59529194147375,
-      "expectancy": 0.7453258265672897,
-      "sqn": 4.235785285581626,
-      "kelly_criterion": null,
-      "commissions": 0.0,
-      "cagr": null,
-      "alpha": null,
-      "beta": null,
-      "custom_1": null,
-      "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 61,
-      "max_drawdown_duration_secs": 0,
-      "avg_drawdown_duration_secs": 0,
-      "max_trade_duration_secs": 0,
-      "avg_trade_duration_secs": 0,
-      "_reserved_u32": 0
-    },
-    "dna": [
-      2.07511325792137,
-      30.964979849629223,
-      1.5886002842363618,
-      38.71494322772482,
-      1.0,
-      63.40468470417016,
-      0.7520181383490474,
-      56.637798000752994,
-      0.9233524075588704,
-      12.454229100853876,
-      0.5070379647231235,
-      12.578608224392362,
-      0.978490485149074,
-      31.399302054225128,
-      4.03496554647619,
-      1.0,
-      52.33203699023069,
-      4.341294597595927,
-      1.183047203711736,
-      13.711718379644148,
-      6.0,
-      63.68649289114598,
-      17.367515342128215,
-      0.7713067640817566,
-      64.9786820205656,
-      9.11338415097677,
-      11.641619008171618,
-      9.105740375934811,
-      12.617250729377472,
-      0.3805358124703913,
-      2.9849276344023914,
-      52.32068639049233,
-      2.834879850206784,
-      8.523072808332468,
-      4.827211081926617,
-      4.785534186249894,
-      0.3764099253015188,
-      2.679810357119169,
-      44.40359726760017,
-      1.7278570663166322,
-      32.240358190608426,
-      1.0,
-      44.0,
-      1.8743356944154264,
-      59.64165876745122,
-      1.1919161489032304,
-      45.0640537878257,
-      2.328609536472697,
-      20.0,
-      984.0567989376524,
-      710.5908557472848,
-      184.73236511257687,
-      449.04178339928706,
-      2.312946887202546,
-      0.5856228405592697,
-      0.4667680744286392,
-      0.5451074283753804,
-      0.06999999999999999,
-      0.09298470124747506,
-      0.05759723737686465,
-      84.30955705846516,
-      69.42000358117613,
-      0.06534949191660555,
-      0.5833721954276969,
-      0.01914335954704397,
-      48.36919115644454,
-      3.0040890852089697,
-      0.832845921242305,
-      0.09340048126042576,
-      0.01288618418272781,
-      34.78569893997945,
-      61.99974291078009,
-      0.016773474298295125,
-      0.3452960405678968,
-      0.4765001897849976,
-      0.03470151295902953,
-      4.859764938006419,
-      1.128648722451686,
-      0.1926247042368685,
-      5.743262227415973,
-      0.9286980658302476,
-      0.03522779434570954,
-      0.6945712283071032,
-      2.7,
-      2.530229019404567,
-      0.2410090234059663,
-      0.08460096877348816,
-      0.5787111214404969,
-      2.158532030433528,
-      0.5228413755963821,
-      0.4804957815334937,
-      0.006138528095437286,
-      1.7615861885096322,
-      35.11830420875677,
-      0.003722506090827543,
-      330.2333032035309,
-      0.5971974028746654,
-      0.20645961843939628,
-      2.7586235460543356,
-      4.912001241848053,
-      9.54930688227576,
-      0.1289387720389982,
-      3.2677865493734206,
-      0.3073638550167873,
-      0.47183551214990194,
-      1264.062599034897,
-      0.006385301688197871,
-      3.815496113382184,
-      0.7734202782877249,
-      54.42088707229679
-    ]
-  },
-  {
-    "params": {
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.3452960405678968
-      },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "WSMA"
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 19.23435721050822
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.9286980658302476
-      },
-      "indicators.rsi_anomaly.period": {
-        "Float": 12.578608224392362
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.09298470124747506
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.2410090234059663
-      },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 4.859764938006419
+      "indicators.atr.period": {
+        "Float": 58.79958085217646
       },
       "indicators.macd.fast": {
-        "Float": 6.0
-      },
-      "indicators.keltner.ma_type": {
-        "String": "Vidya"
-      },
-      "indicators.adx.period": {
-        "Float": 38.71494322772482
-      },
-      "matrix.momentum_lookback": {
-        "Float": 184.73236511257687
-      },
-      "indicators.adx.timeframe": {
-        "String": "15m"
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.5856228405592697
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.4765001897849976
-      },
-      "matrix.squeeze_lookback": {
-        "Float": 710.5908557472848
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.016773474298295125
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 3.0040890852089697
-      },
-      "matrix.volume_lookback": {
-        "Float": 449.04178339928706
-      },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.08460096877348816
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 12.454229100853876
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "LinReg"
-      },
-      "indicators.z_score_lookback": {
-        "Float": 20.0
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.06999999999999999
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "DMA"
-      },
-      "indicators.macd.slow": {
-        "Float": 63.68649289114598
-      },
-      "indicators.vol_ma.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 2.158532030433528
-      },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.5228413755963821
-      },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.5833721954276969
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.006385301688197871
+        "Float": 9.249590583682776
       },
       "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 54.42088707229679
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "indicators.kama.short_period": {
-        "Float": 2.07511325792137
+        "Float": 5.526489209136153
       },
       "indicators.atr.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 5.743262227415973
-      },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 4.912001241848053
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "4h"
-      },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.1289387720389982
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 8.523072808332468
-      },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 3.2677865493734206
-      },
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 1264.062599034897
-      },
-      "indicators.rsi_anomaly.timeframe": {
         "String": "15m"
       },
-      "indicators.stoch_range.period": {
-        "Float": 52.32068639049233
+      "tactical_sniper.range.min_width_pct": {
+        "Float": 0.019746977246695184
+      },
+      "indicators.kama.timeframe": {
+        "String": "4h"
       },
       "tactical_sniper.range.stoch_overbought": {
-        "Float": 61.99974291078009
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 4.03496554647619
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.05759723737686465
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.06534949191660555
-      },
-      "indicators.macd.signal": {
-        "Float": 17.367515342128215
-      },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 1.128648722451686
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 0.6945712283071032
-      },
-      "indicators.mfi.period": {
-        "Float": 44.0
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 63.40468470417016
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 9.11338415097677
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "4h"
-      },
-      "indicators.vwma.period": {
-        "Float": 45.0640537878257
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.03522779434570954
-      },
-      "indicators.rsi_momentum.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 35.11830420875677
-      },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 3.815496113382184
-      },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.7734202782877249
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 69.42000358117613
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.03470151295902953
-      },
-      "matrix.trend_lookback": {
-        "Float": 984.0567989376524
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 2.312946887202546
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 1.7615861885096322
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 330.2333032035309
-      },
-      "indicators.keltner.period": {
-        "Float": 52.33203699023069
-      },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 48.36919115644454
-      },
-      "indicators.rsi_reversal.period": {
-        "Float": 56.637798000752994
-      },
-      "indicators.keltner.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_range.d_ma_type": {
-        "String": "DMA"
-      },
-      "indicators.natr.period": {
-        "Float": 32.240358190608426
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 2.7
-      },
-      "indicators.atr.period": {
-        "Float": 44.40359726760017
-      },
-      "indicators.bbands.period": {
-        "Float": 31.399302054225128
-      },
-      "indicators.natr.timeframe": {
-        "String": "15m"
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.4667680744286392
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.3764099253015188
+        "Float": 97.42479615362726
       },
       "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.01914335954704397
+        "Float": 0.009659429522921363
       },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 2.530229019404567
+      "indicators.macd.signal": {
+        "Float": 2.6247033355804117
       },
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.5787111214404969
-      },
-      "indicators.kama.long_period": {
-        "Float": 30.964979849629223
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.01288618418272781
-      },
-      "indicators.mfi.timeframe": {
-        "String": "1h"
-      },
-      "indicators.rsi_trend.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.1926247042368685
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.5971974028746654
-      },
-      "indicators.bbands.timeframe": {
-        "String": "15m"
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.341294597595927
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.4804957815334937
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.20645961843939628
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.3805358124703913
-      },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 9.54930688227576
-      },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.3073638550167873
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 11.641619008171618
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.47183551214990194
-      },
-      "indicators.vwma.timeframe": {
-        "String": "1h"
-      },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.006138528095437286
-      },
-      "indicators.stoch_trend.period": {
-        "Float": 64.9786820205656
-      },
-      "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.7586235460543356
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.003722506090827543
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "15m"
-      },
-      "indicators.vol_ma.period": {
-        "Float": 59.64165876745122
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 84.30955705846516
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.5451074283753804
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.09340048126042576
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.832845921242305
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 2.834879850206784
-      }
-    },
-    "fitness": 66.696,
-    "stats": {
-      "return_pct": 475.9486481136192,
-      "return_ann_pct": 89723374439.47708,
-      "buy_and_hold_return_pct": 21.748060246462796,
-      "volatility_ann_pct": 194763029148.79202,
-      "sharpe_ratio": 0.4606797030812846,
-      "sortino_ratio": 2257394704.47518,
-      "calmar_ratio": null,
-      "max_drawdown_pct": -16.529145846877626,
-      "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 71.12933870892998,
-      "equity_final": 345.5691888681715,
-      "equity_peak": 379.53532085416487,
-      "win_rate_pct": 68.33333333333333,
-      "best_trade_pct": 4.916274843838737,
-      "worst_trade_pct": -1.2006390291644122,
-      "avg_trade_pct": 0.0,
-      "profit_factor": 6.721404407249712,
-      "expectancy": 0.7631301196192797,
-      "sqn": 4.253455105299955,
-      "kelly_criterion": null,
-      "commissions": 0.0,
-      "cagr": null,
-      "alpha": null,
-      "beta": null,
-      "custom_1": null,
-      "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 60,
-      "max_drawdown_duration_secs": 0,
-      "avg_drawdown_duration_secs": 0,
-      "max_trade_duration_secs": 0,
-      "avg_trade_duration_secs": 0,
-      "_reserved_u32": 0
-    },
-    "dna": [
-      2.07511325792137,
-      30.964979849629223,
-      1.5886002842363618,
-      38.71494322772482,
-      1.0,
-      63.40468470417016,
-      0.7520181383490474,
-      56.637798000752994,
-      0.9233524075588704,
-      12.454229100853876,
-      0.5070379647231235,
-      12.578608224392362,
-      0.978490485149074,
-      31.399302054225128,
-      4.03496554647619,
-      1.0,
-      52.33203699023069,
-      4.341294597595927,
-      1.183047203711736,
-      13.711718379644148,
-      6.0,
-      63.68649289114598,
-      17.367515342128215,
-      0.7713067640817566,
-      64.9786820205656,
-      9.11338415097677,
-      11.641619008171618,
-      9.105740375934811,
-      12.617250729377472,
-      0.3805358124703913,
-      2.9849276344023914,
-      52.32068639049233,
-      2.834879850206784,
-      8.523072808332468,
-      4.827211081926617,
-      4.785534186249894,
-      0.3764099253015188,
-      2.679810357119169,
-      44.40359726760017,
-      1.7278570663166322,
-      32.240358190608426,
-      1.0,
-      44.0,
-      1.8743356944154264,
-      59.64165876745122,
-      1.1919161489032304,
-      45.0640537878257,
-      2.328609536472697,
-      20.0,
-      984.0567989376524,
-      710.5908557472848,
-      184.73236511257687,
-      449.04178339928706,
-      2.312946887202546,
-      0.5856228405592697,
-      0.4667680744286392,
-      0.5451074283753804,
-      0.06999999999999999,
-      0.09298470124747506,
-      0.05759723737686465,
-      84.30955705846516,
-      69.42000358117613,
-      0.06534949191660555,
-      0.5833721954276969,
-      0.01914335954704397,
-      48.36919115644454,
-      3.0040890852089697,
-      0.832845921242305,
-      0.09340048126042576,
-      0.01288618418272781,
-      19.23435721050822,
-      61.99974291078009,
-      0.016773474298295125,
-      0.3452960405678968,
-      0.4765001897849976,
-      0.03470151295902953,
-      4.859764938006419,
-      1.128648722451686,
-      0.1926247042368685,
-      5.743262227415973,
-      0.9286980658302476,
-      0.03522779434570954,
-      0.6945712283071032,
-      2.7,
-      2.530229019404567,
-      0.2410090234059663,
-      0.08460096877348816,
-      0.5787111214404969,
-      2.158532030433528,
-      0.5228413755963821,
-      0.4804957815334937,
-      0.006138528095437286,
-      1.7615861885096322,
-      35.11830420875677,
-      0.003722506090827543,
-      330.2333032035309,
-      0.5971974028746654,
-      0.20645961843939628,
-      2.7586235460543356,
-      4.912001241848053,
-      9.54930688227576,
-      0.1289387720389982,
-      3.2677865493734206,
-      0.3073638550167873,
-      0.47183551214990194,
-      1264.062599034897,
-      0.006385301688197871,
-      3.815496113382184,
-      0.7734202782877249,
-      54.42088707229679
-    ]
-  },
-  {
-    "params": {
-      "indicators.macd.slow": {
-        "Float": 24.0
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 14.0
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.49
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.30000000000000004
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.22
-      },
-      "indicators.kama.short_period": {
-        "Float": 2.0
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "15m"
-      },
-      "indicators.atr.period": {
-        "Float": 68.0
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.029
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.01
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 2.3
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.37
-      },
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.61
-      },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 8.25
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.15000000000000002
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.032
-      },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.0
-      },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 25.0
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 44.5
+      "tactical_sniper.anomaly.max_initial_sl_pct": {
+        "Float": 0.06299981551620128
       },
       "indicators.keltner.ma_type": {
-        "String": "DEMA"
+        "String": "LinReg"
       },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.45999999999999996
+      "indicators.vol_ma.period": {
+        "Float": 56.39255648871991
       },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 3.3000000000000003
+      "indicators.rsi_anomaly.period": {
+        "Float": 76.0513382467221
       },
-      "indicators.rsi_momentum.period": {
-        "Float": 53.0
+      "tactical_sniper.pullback.rsi_buy_thresh": {
+        "Float": 68.8644476247244
       },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 1.5
+      "risk_management.risk_base.base_lot_size": {
+        "Float": 1.3719599421611106
       },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 55.0
+      "risk_management.stop_management.mega_trend_min_lock_roe": {
+        "Float": 0.22467138888580362
       },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.003
+      "risk_management.risk_base.percent_per_trade": {
+        "Float": 0.1453691075371465
       },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.08
+      "matrix.squeeze_lookback": {
+        "Float": 439.2123854266142
       },
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 900.0
+      "tactical_sniper.pullback.max_initial_sl_pct": {
+        "Float": 0.09606268784614828
       },
-      "indicators.rsi_reversal.period": {
-        "Float": 32.0
+      "arbiter.min_confidence_ranging": {
+        "Float": 0.5576458244946978
       },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 4.2
+      "indicators.kama.short_period": {
+        "Float": 7.710921856887702
       },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.6699999999999999
-      },
-      "indicators.rsi_trend.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "TRIMA"
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.54
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 2.6000000000000005
-      },
-      "indicators.adx.period": {
-        "Float": 41.0
+      "tactical_sniper.anomaly.min_activation_score": {
+        "Float": 0.25195099992081427
       },
       "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 2.4000000000000004
+        "Float": 1.2369661115778154
       },
-      "indicators.vol_ma.timeframe": {
-        "String": "5m"
+      "arbiter.min_confidence_trending": {
+        "Float": 0.1863639741810987
       },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 27.0
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 14.0
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.15000000000000002
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 14.0
-      },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 90.5
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.043000000000000003
-      },
-      "indicators.macd.timeframe": {
-        "String": "5m"
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.01
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "5m"
-      },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 3.0000000000000004
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.61
-      },
-      "indicators.bbands.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_range.period": {
-        "Float": 77.0
-      },
-      "indicators.kama.timeframe": {
+      "indicators.mfi.timeframe": {
         "String": "15m"
       },
       "matrix.momentum_lookback": {
-        "Float": 250.0
+        "Float": 650.5142350535815
       },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.55
+      "tactical_sniper.range.min_activation_score": {
+        "Float": 0.8313644024621892
       },
-      "indicators.keltner.multiplier": {
-        "Float": 5.0
+      "tactical_sniper.reversal.min_reversal_displacement": {
+        "Float": 1.0241516088304738
       },
-      "indicators.atr.timeframe": {
-        "String": "15m"
+      "indicators.macd.timeframe": {
+        "String": "4h"
       },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 2.3
+      "indicators.stoch_trend.zone": {
+        "Float": 0.13940947602293724
+      },
+      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
+        "Float": 1.9637984769605494
+      },
+      "risk_management.stop_management.tighten_step_multiplier": {
+        "Float": 0.8098972619550469
+      },
+      "risk_management.stop_management.tsl_atr_normal": {
+        "Float": 7.306407939757343
+      },
+      "risk_management.stop_management.mega_trend_lock_ratio": {
+        "Float": 0.351262950462898
+      },
+      "tactical_sniper.reversal.max_initial_sl_pct": {
+        "Float": 0.03247403262597289
+      },
+      "risk_management.stop_management.base_sl_atr": {
+        "Float": 4.025433884802942
+      },
+      "indicators.stoch_trend.k_period": {
+        "Float": 17.834610025914554
+      },
+      "indicators.rsi_reversal.period": {
+        "Float": 20.829253194365428
       },
       "indicators.rsi_anomaly.timeframe": {
         "String": "1h"
       },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.047
+      "indicators.keltner.period": {
+        "Float": 22.64025896525993
       },
-      "indicators.macd.signal": {
-        "Float": 10.0
+      "tactical_sniper.reversal.z_score_threshold": {
+        "Float": 3.9661343997834417
       },
       "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.098
+        "Float": 0.08294993927968144
       },
-      "indicators.stoch_trend.period": {
-        "Float": 11.0
+      "risk_management.risk_base.sl_min_dist_pct": {
+        "Float": 0.01968206160688648
       },
-      "indicators.rsi_anomaly.period": {
-        "Float": 77.0
+      "risk_management.stop_management.min_initial_sl_pct": {
+        "Float": 0.0017659796940676085
       },
-      "matrix.trend_lookback": {
-        "Float": 160.0
+      "risk_management.stop_management.tsl_atr_loose": {
+        "Float": 13.939194508203904
       },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "EMA"
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 50.0
-      },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "WSMA"
-      },
-      "indicators.rsi_momentum.timeframe": {
-        "String": "15m"
-      },
-      "indicators.mfi.timeframe": {
-        "String": "15m"
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.82
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 64.0
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 0.8
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 28.0
-      },
-      "indicators.adx.timeframe": {
-        "String": "1h"
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 6.7
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 210.0
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.25
+      "indicators.stoch_range.zone": {
+        "Float": 0.10637724315722423
       },
       "indicators.stoch_range.d_ma_type": {
         "String": "TEMA"
       },
-      "indicators.vwma.timeframe": {
-        "String": "1h"
-      },
-      "indicators.vol_ma.period": {
-        "Float": 53.0
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 2.0
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.047
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 1.5
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.01
-      },
-      "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 1.6
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 18.0
-      },
-      "indicators.natr.timeframe": {
-        "String": "4h"
-      },
-      "indicators.bbands.period": {
-        "Float": 50.0
-      },
-      "indicators.vwma.period": {
-        "Float": 74.0
-      },
-      "indicators.keltner.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.30000000000000004
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.018000000000000002
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "4h"
-      },
-      "indicators.kama.long_period": {
-        "Float": 56.0
-      },
-      "indicators.macd.fast": {
-        "Float": 6.0
-      },
-      "indicators.mfi.period": {
-        "Float": 44.0
-      },
-      "indicators.natr.period": {
-        "Float": 23.0
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 64.0
-      },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.22
-      },
-      "indicators.keltner.period": {
-        "Float": 77.0
-      },
-      "matrix.volume_lookback": {
-        "Float": 370.0
-      },
-      "matrix.squeeze_lookback": {
-        "Float": 460.0
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.4
-      },
-      "indicators.z_score_lookback": {
-        "Float": 580.0
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.01
-      },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.017
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.43
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.06999999999999999
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 5.000000000000001
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.012
-      }
-    },
-    "fitness": 2.425,
-    "stats": {
-      "return_pct": 19.705714637414644,
-      "return_ann_pct": 731.265506574208,
-      "buy_and_hold_return_pct": 7.608092738162604,
-      "volatility_ann_pct": 498.27441613760055,
-      "sharpe_ratio": 1.4675959328649657,
-      "sortino_ratio": 75.95925724296723,
-      "calmar_ratio": null,
-      "max_drawdown_pct": -11.474379410310897,
-      "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 8.510588998563417,
-      "equity_final": 71.82342878244879,
-      "equity_peak": 73.80845817794409,
-      "win_rate_pct": 70.0,
-      "best_trade_pct": 1.4374737195058587,
-      "worst_trade_pct": -1.2057798817148884,
-      "avg_trade_pct": 0.0,
-      "profit_factor": 2.85918553412401,
-      "expectancy": 0.47128032499069394,
-      "sqn": 1.540782335467451,
-      "kelly_criterion": null,
-      "commissions": 0.0,
-      "cagr": null,
-      "alpha": null,
-      "beta": null,
-      "custom_1": null,
-      "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 10,
-      "max_drawdown_duration_secs": 0,
-      "avg_drawdown_duration_secs": 0,
-      "max_trade_duration_secs": 0,
-      "avg_trade_duration_secs": 0,
-      "_reserved_u32": 0
-    },
-    "dna": [
-      2.0,
-      56.0,
-      1.0,
-      41.0,
-      2.0,
-      50.0,
-      1.0,
-      32.0,
-      3.0,
-      53.0,
-      1.0,
-      77.0,
-      2.0,
-      50.0,
-      2.0,
-      1.0,
-      77.0,
-      5.0,
-      1.0,
-      6.0,
-      6.0,
-      24.0,
-      10.0,
-      0.0,
-      11.0,
-      14.0,
-      18.0,
-      9.0,
-      12.0,
-      0.25,
-      0.0,
-      77.0,
-      14.0,
-      14.0,
-      1.0,
-      8.0,
-      0.15000000000000002,
-      1.0,
-      68.0,
-      1.0,
-      23.0,
-      3.0,
-      44.0,
-      1.0,
-      53.0,
-      0.0,
-      74.0,
-      2.0,
-      580.0,
-      160.0,
-      460.0,
-      250.0,
-      370.0,
-      6.7,
-      0.82,
-      0.01,
-      0.45999999999999996,
-      0.01,
-      0.4,
-      0.029,
-      64.0,
-      64.0,
-      0.37,
-      0.01,
-      0.017,
-      55.0,
-      2.6000000000000005,
-      0.43,
-      0.047,
-      0.043000000000000003,
-      44.5,
-      90.5,
-      0.01,
-      0.22,
-      0.49,
-      0.032,
-      2.3,
-      1.5,
-      0.06999999999999999,
-      5.000000000000001,
-      0.61,
-      0.047,
-      2.3,
-      1.5,
-      3.0000000000000004,
-      0.55,
-      0.098,
-      0.61,
-      2.4000000000000004,
-      0.6699999999999999,
-      0.30000000000000004,
-      0.003,
-      0.8,
-      28.0,
-      0.018000000000000002,
-      210.0,
-      0.54,
-      0.22,
-      1.6,
-      4.2,
-      8.25,
-      0.08,
-      27.0,
-      0.30000000000000004,
-      0.15000000000000002,
-      900.0,
-      0.012,
-      3.3000000000000003,
-      0.0,
-      25.0
-    ]
-  },
-  {
-    "params": {
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 3.815496113382184
-      },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 2.530229019404567
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 1.7615861885096322
-      },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 4.912001241848053
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "indicators.vol_ma.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 5.743262227415973
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.832845921242305
-      },
-      "indicators.stoch_range.d_ma_type": {
-        "String": "DMA"
-      },
-      "indicators.atr.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 2.7
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 35.11830420875677
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 63.40468470417016
-      },
-      "indicators.mfi.timeframe": {
-        "String": "1h"
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 330.2333032035309
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.006385301688197871
-      },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.7734202782877249
-      },
-      "indicators.stoch_trend.period": {
-        "Float": 64.9786820205656
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "LinReg"
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "DMA"
-      },
-      "indicators.atr.period": {
-        "Float": 44.40359726760017
-      },
-      "indicators.vol_ma.period": {
-        "Float": 59.64165876745122
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "4h"
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.4765001897849976
-      },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 2.158532030433528
-      },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.5228413755963821
-      },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 3.0040890852089697
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.03470151295902953
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.9286980658302476
-      },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.006138528095437286
-      },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "WSMA"
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.5451074283753804
-      },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.3452960405678968
-      },
-      "indicators.vwma.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.09340048126042576
-      },
-      "indicators.natr.period": {
-        "Float": 32.240358190608426
-      },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.3073638550167873
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.47183551214990194
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.4804957815334937
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.05759723737686465
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 11.641619008171618
-      },
-      "indicators.rsi_reversal.period": {
-        "Float": 56.637798000752994
-      },
-      "matrix.volume_lookback": {
-        "Float": 449.04178339928706
-      },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 3.2677865493734206
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.341294597595927
-      },
-      "indicators.keltner.ma_type": {
-        "String": "Vidya"
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 19.23435721050822
-      },
-      "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.7586235460543356
-      },
-      "indicators.z_score_lookback": {
-        "Float": 20.0
-      },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.01914335954704397
-      },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.08460096877348816
-      },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 1.128648722451686
-      },
-      "indicators.keltner.period": {
-        "Float": 52.33203699023069
-      },
-      "indicators.natr.timeframe": {
-        "String": "15m"
-      },
-      "indicators.macd.fast": {
-        "Float": 6.0
-      },
-      "indicators.stoch_range.period": {
-        "Float": 52.32068639049233
-      },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 9.54930688227576
-      },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.1289387720389982
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 2.312946887202546
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.5971974028746654
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 84.30955705846516
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.01288618418272781
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 12.454229100853876
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.06999999999999999
-      },
-      "indicators.rsi_trend.timeframe": {
-        "String": "15m"
-      },
-      "indicators.mfi.period": {
-        "Float": 44.0
-      },
-      "matrix.momentum_lookback": {
-        "Float": 184.73236511257687
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.5856228405592697
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.016773474298295125
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.03522779434570954
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 4.03496554647619
-      },
-      "indicators.macd.slow": {
-        "Float": 63.68649289114598
-      },
-      "indicators.vwma.period": {
-        "Float": 45.0640537878257
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.4667680744286392
-      },
-      "indicators.kama.long_period": {
-        "Float": 30.964979849629223
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 2.834879850206784
-      },
-      "indicators.rsi_anomaly.timeframe": {
-        "String": "15m"
-      },
-      "indicators.bbands.timeframe": {
-        "String": "15m"
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.09298470124747506
-      },
-      "indicators.bbands.period": {
-        "Float": 31.399302054225128
-      },
-      "indicators.rsi_anomaly.period": {
-        "Float": 12.578608224392362
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 8.523072808332468
-      },
-      "indicators.macd.signal": {
-        "Float": 17.367515342128215
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.5833721954276969
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.2410090234059663
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 9.11338415097677
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.1926247042368685
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 0.6945712283071032
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.20645961843939628
-      },
       "indicators.adx.timeframe": {
         "String": "15m"
       },
-      "indicators.keltner.timeframe": {
-        "String": "15m"
+      "matrix.volume_lookback": {
+        "Float": 209.5664854723277
       },
-      "indicators.stoch_range.zone": {
-        "Float": 0.3764099253015188
+      "tactical_sniper.range.max_initial_sl_pct": {
+        "Float": 0.09074573014963055
       },
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 1264.062599034897
+      "tactical_sniper.anomaly.z_score_threshold": {
+        "Float": 1.2822118405070575
       },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 54.42088707229679
+      "indicators.stoch_trend.d_period": {
+        "Float": 2.97808198147841
       },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "15m"
+      "tactical_sniper.pullback.kama_slope_threshold": {
+        "Float": 0.14648594708525364
       },
-      "indicators.kama.short_period": {
-        "Float": 2.07511325792137
+      "tactical_sniper.pullback.stoch_pullback_thresh": {
+        "Float": 23.661292404772226
+      },
+      "indicators.kama.long_period": {
+        "Float": 55.76205943024366
+      },
+      "indicators.macd.slow": {
+        "Float": 68.12048038932153
+      },
+      "arbiter.min_multiplier_veto": {
+        "Float": 0.5556507146175768
+      },
+      "tactical_sniper.reversal.min_activation_score": {
+        "Float": 0.9595508662144289
+      },
+      "tactical_sniper.reversal.exhaustion_vol_drop": {
+        "Float": 0.6057854225735048
       },
       "indicators.rsi_momentum.timeframe": {
         "String": "15m"
       },
-      "indicators.adx.period": {
-        "Float": 38.71494322772482
+      "indicators.rsi_reversal.timeframe": {
+        "String": "15m"
       },
-      "indicators.stoch_range.timeframe": {
-        "String": "4h"
-      },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 4.859764938006419
-      },
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.5787111214404969
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.3805358124703913
-      },
-      "matrix.trend_lookback": {
-        "Float": 984.0567989376524
-      },
-      "matrix.squeeze_lookback": {
-        "Float": 710.5908557472848
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 69.42000358117613
-      },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 48.36919115644454
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.06534949191660555
-      },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 61.99974291078009
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.003722506090827543
-      }
-    },
-    "fitness": 66.696,
-    "stats": {
-      "return_pct": 475.9486481136192,
-      "return_ann_pct": 89723374439.47708,
-      "buy_and_hold_return_pct": 21.748060246462796,
-      "volatility_ann_pct": 194763029148.79202,
-      "sharpe_ratio": 0.4606797030812846,
-      "sortino_ratio": 2257394704.47518,
-      "calmar_ratio": null,
-      "max_drawdown_pct": -16.529145846877626,
-      "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 71.12933870892998,
-      "equity_final": 345.5691888681715,
-      "equity_peak": 379.53532085416487,
-      "win_rate_pct": 68.33333333333333,
-      "best_trade_pct": 4.916274843838737,
-      "worst_trade_pct": -1.2006390291644122,
-      "avg_trade_pct": 0.0,
-      "profit_factor": 6.721404407249712,
-      "expectancy": 0.7631301196192797,
-      "sqn": 4.253455105299955,
-      "kelly_criterion": null,
-      "commissions": 0.0,
-      "cagr": null,
-      "alpha": null,
-      "beta": null,
-      "custom_1": null,
-      "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 60,
-      "max_drawdown_duration_secs": 0,
-      "avg_drawdown_duration_secs": 0,
-      "max_trade_duration_secs": 0,
-      "avg_trade_duration_secs": 0,
-      "_reserved_u32": 0
-    },
-    "dna": [
-      2.07511325792137,
-      30.964979849629223,
-      1.5886002842363618,
-      38.71494322772482,
-      1.0,
-      63.40468470417016,
-      0.7520181383490474,
-      56.637798000752994,
-      0.9233524075588704,
-      12.454229100853876,
-      0.5070379647231235,
-      12.578608224392362,
-      0.978490485149074,
-      31.399302054225128,
-      4.03496554647619,
-      1.0,
-      52.33203699023069,
-      4.341294597595927,
-      1.183047203711736,
-      13.711718379644148,
-      6.0,
-      63.68649289114598,
-      17.367515342128215,
-      0.7713067640817566,
-      64.9786820205656,
-      9.11338415097677,
-      11.641619008171618,
-      9.105740375934811,
-      12.617250729377472,
-      0.3805358124703913,
-      2.9849276344023914,
-      52.32068639049233,
-      2.834879850206784,
-      8.523072808332468,
-      4.827211081926617,
-      4.785534186249894,
-      0.3764099253015188,
-      2.679810357119169,
-      44.40359726760017,
-      1.7278570663166322,
-      32.240358190608426,
-      1.0,
-      44.0,
-      1.8743356944154264,
-      59.64165876745122,
-      1.1919161489032304,
-      45.0640537878257,
-      2.328609536472697,
-      20.0,
-      984.0567989376524,
-      710.5908557472848,
-      184.73236511257687,
-      449.04178339928706,
-      2.312946887202546,
-      0.5856228405592697,
-      0.4667680744286392,
-      0.5451074283753804,
-      0.06999999999999999,
-      0.09298470124747506,
-      0.05759723737686465,
-      84.30955705846516,
-      69.42000358117613,
-      0.06534949191660555,
-      0.5833721954276969,
-      0.01914335954704397,
-      48.36919115644454,
-      3.0040890852089697,
-      0.832845921242305,
-      0.09340048126042576,
-      0.01288618418272781,
-      19.23435721050822,
-      61.99974291078009,
-      0.016773474298295125,
-      0.3452960405678968,
-      0.4765001897849976,
-      0.03470151295902953,
-      4.859764938006419,
-      1.128648722451686,
-      0.1926247042368685,
-      5.743262227415973,
-      0.9286980658302476,
-      0.03522779434570954,
-      0.6945712283071032,
-      2.7,
-      2.530229019404567,
-      0.2410090234059663,
-      0.08460096877348816,
-      0.5787111214404969,
-      2.158532030433528,
-      0.5228413755963821,
-      0.4804957815334937,
-      0.006138528095437286,
-      1.7615861885096322,
-      35.11830420875677,
-      0.003722506090827543,
-      330.2333032035309,
-      0.5971974028746654,
-      0.20645961843939628,
-      2.7586235460543356,
-      4.912001241848053,
-      9.54930688227576,
-      0.1289387720389982,
-      3.2677865493734206,
-      0.3073638550167873,
-      0.47183551214990194,
-      1264.062599034897,
-      0.006385301688197871,
-      3.815496113382184,
-      0.7734202782877249,
-      54.42088707229679
-    ]
-  },
-  {
-    "params": {
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 4.912001241848053
-      },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.7734202782877249
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.06999999999999999
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 69.42000358117613
+      "tactical_sniper.momentum.vol_z_threshold": {
+        "Float": 2.98261820456203
       },
       "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.1289387720389982
-      },
-      "indicators.atr.timeframe": {
-        "String": "1h"
-      },
-      "indicators.kama.long_period": {
-        "Float": 30.964979849629223
-      },
-      "indicators.vol_ma.period": {
-        "Float": 59.64165876745122
-      },
-      "indicators.vwma.period": {
-        "Float": 45.0640537878257
-      },
-      "indicators.macd.fast": {
-        "Float": 6.0
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 84.30955705846516
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.2410090234059663
-      },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 54.42088707229679
-      },
-      "indicators.mfi.period": {
-        "Float": 44.0
-      },
-      "indicators.kama.short_period": {
-        "Float": 2.07511325792137
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 19.23435721050822
-      },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 3.815496113382184
-      },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 48.36919115644454
-      },
-      "indicators.bbands.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 3.2677865493734206
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "LinReg"
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "4h"
-      },
-      "matrix.momentum_lookback": {
-        "Float": 184.73236511257687
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.4667680744286392
-      },
-      "indicators.bbands.period": {
-        "Float": 31.399302054225128
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 12.454229100853876
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 11.641619008171618
-      },
-      "matrix.trend_lookback": {
-        "Float": 984.0567989376524
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.5856228405592697
-      },
-      "indicators.rsi_trend.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.01914335954704397
-      },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 4.859764938006419
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 63.40468470417016
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.47183551214990194
-      },
-      "indicators.vwma.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.016773474298295125
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.003722506090827543
-      },
-      "indicators.rsi_anomaly.timeframe": {
-        "String": "15m"
-      },
-      "indicators.macd.slow": {
-        "Float": 63.68649289114598
-      },
-      "indicators.adx.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 1264.062599034897
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "4h"
-      },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.3073638550167873
-      },
-      "indicators.stoch_range.d_ma_type": {
-        "String": "DMA"
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 0.6945712283071032
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.09340048126042576
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 2.312946887202546
-      },
-      "indicators.mfi.timeframe": {
-        "String": "1h"
-      },
-      "indicators.rsi_reversal.period": {
-        "Float": 56.637798000752994
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 1.7615861885096322
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.5833721954276969
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 5.743262227415973
-      },
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.5787111214404969
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "DMA"
-      },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "WSMA"
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 8.523072808332468
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.1926247042368685
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.4804957815334937
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 9.11338415097677
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_range.period": {
-        "Float": 52.32068639049233
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.3764099253015188
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 4.03496554647619
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.06534949191660555
-      },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 61.99974291078009
-      },
-      "indicators.keltner.ma_type": {
-        "String": "Vidya"
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.5451074283753804
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.3805358124703913
-      },
-      "indicators.vol_ma.timeframe": {
-        "String": "15m"
-      },
-      "indicators.keltner.timeframe": {
-        "String": "15m"
-      },
-      "indicators.atr.period": {
-        "Float": 44.40359726760017
-      },
-      "matrix.squeeze_lookback": {
-        "Float": 710.5908557472848
-      },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.3452960405678968
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.03470151295902953
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.03522779434570954
-      },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 2.530229019404567
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.341294597595927
-      },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 1.128648722451686
-      },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 2.158532030433528
-      },
-      "indicators.adx.period": {
-        "Float": 38.71494322772482
-      },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.9286980658302476
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.05759723737686465
-      },
-      "matrix.volume_lookback": {
-        "Float": 449.04178339928706
-      },
-      "indicators.natr.period": {
-        "Float": 32.240358190608426
-      },
-      "indicators.z_score_lookback": {
-        "Float": 20.0
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.09298470124747506
-      },
-      "indicators.rsi_momentum.timeframe": {
-        "String": "15m"
-      },
-      "indicators.rsi_anomaly.period": {
-        "Float": 12.578608224392362
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 2.834879850206784
-      },
-      "indicators.keltner.period": {
-        "Float": 52.33203699023069
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.832845921242305
-      },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.08460096877348816
-      },
-      "indicators.natr.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.5228413755963821
-      },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.006138528095437286
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 35.11830420875677
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 3.0040890852089697
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 330.2333032035309
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.20645961843939628
-      },
-      "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.7586235460543356
-      },
-      "indicators.stoch_trend.period": {
-        "Float": 64.9786820205656
-      },
-      "indicators.macd.signal": {
-        "Float": 17.367515342128215
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.4765001897849976
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.006385301688197871
-      },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 9.54930688227576
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.5971974028746654
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 2.7
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.01288618418272781
-      }
-    },
-    "fitness": 66.696,
-    "stats": {
-      "return_pct": 475.9486481136192,
-      "return_ann_pct": 89723374439.47708,
-      "buy_and_hold_return_pct": 21.748060246462796,
-      "volatility_ann_pct": 194763029148.79202,
-      "sharpe_ratio": 0.4606797030812846,
-      "sortino_ratio": 2257394704.47518,
-      "calmar_ratio": null,
-      "max_drawdown_pct": -16.529145846877626,
-      "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 71.12933870892998,
-      "equity_final": 345.5691888681715,
-      "equity_peak": 379.53532085416487,
-      "win_rate_pct": 68.33333333333333,
-      "best_trade_pct": 4.916274843838737,
-      "worst_trade_pct": -1.2006390291644122,
-      "avg_trade_pct": 0.0,
-      "profit_factor": 6.721404407249712,
-      "expectancy": 0.7631301196192797,
-      "sqn": 4.253455105299955,
-      "kelly_criterion": null,
-      "commissions": 0.0,
-      "cagr": null,
-      "alpha": null,
-      "beta": null,
-      "custom_1": null,
-      "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 60,
-      "max_drawdown_duration_secs": 0,
-      "avg_drawdown_duration_secs": 0,
-      "max_trade_duration_secs": 0,
-      "avg_trade_duration_secs": 0,
-      "_reserved_u32": 0
-    },
-    "dna": [
-      2.07511325792137,
-      30.964979849629223,
-      1.5886002842363618,
-      38.71494322772482,
-      1.0,
-      63.40468470417016,
-      0.7520181383490474,
-      56.637798000752994,
-      0.9233524075588704,
-      12.454229100853876,
-      0.5070379647231235,
-      12.578608224392362,
-      0.978490485149074,
-      31.399302054225128,
-      4.03496554647619,
-      1.0,
-      52.33203699023069,
-      4.341294597595927,
-      1.183047203711736,
-      13.711718379644148,
-      6.0,
-      63.68649289114598,
-      17.367515342128215,
-      0.7713067640817566,
-      64.9786820205656,
-      9.11338415097677,
-      11.641619008171618,
-      9.105740375934811,
-      12.617250729377472,
-      0.3805358124703913,
-      2.9849276344023914,
-      52.32068639049233,
-      2.834879850206784,
-      8.523072808332468,
-      4.827211081926617,
-      4.785534186249894,
-      0.3764099253015188,
-      2.679810357119169,
-      44.40359726760017,
-      1.7278570663166322,
-      32.240358190608426,
-      1.0,
-      44.0,
-      1.8743356944154264,
-      59.64165876745122,
-      1.1919161489032304,
-      45.0640537878257,
-      2.328609536472697,
-      20.0,
-      984.0567989376524,
-      710.5908557472848,
-      184.73236511257687,
-      449.04178339928706,
-      2.312946887202546,
-      0.5856228405592697,
-      0.4667680744286392,
-      0.5451074283753804,
-      0.06999999999999999,
-      0.09298470124747506,
-      0.05759723737686465,
-      84.30955705846516,
-      69.42000358117613,
-      0.06534949191660555,
-      0.5833721954276969,
-      0.01914335954704397,
-      48.36919115644454,
-      3.0040890852089697,
-      0.832845921242305,
-      0.09340048126042576,
-      0.01288618418272781,
-      19.23435721050822,
-      61.99974291078009,
-      0.016773474298295125,
-      0.3452960405678968,
-      0.4765001897849976,
-      0.03470151295902953,
-      4.859764938006419,
-      1.128648722451686,
-      0.1926247042368685,
-      5.743262227415973,
-      0.9286980658302476,
-      0.03522779434570954,
-      0.6945712283071032,
-      2.7,
-      2.530229019404567,
-      0.2410090234059663,
-      0.08460096877348816,
-      0.5787111214404969,
-      2.158532030433528,
-      0.5228413755963821,
-      0.4804957815334937,
-      0.006138528095437286,
-      1.7615861885096322,
-      35.11830420875677,
-      0.003722506090827543,
-      330.2333032035309,
-      0.5971974028746654,
-      0.20645961843939628,
-      2.7586235460543356,
-      4.912001241848053,
-      9.54930688227576,
-      0.1289387720389982,
-      3.2677865493734206,
-      0.3073638550167873,
-      0.47183551214990194,
-      1264.062599034897,
-      0.006385301688197871,
-      3.815496113382184,
-      0.7734202782877249,
-      54.42088707229679
-    ]
-  },
-  {
-    "params": {
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 13.0
-      },
-      "indicators.bbands.period": {
-        "Float": 74.0
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.029
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 3.0
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 61.0
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.85
-      },
-      "indicators.rsi_anomaly.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.028753690898077056
-      },
-      "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.238179448131784
-      },
-      "indicators.bbands.timeframe": {
-        "String": "1h"
-      },
-      "indicators.stoch_range.period": {
-        "Float": 38.0
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 10.0
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.083
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.806534746242934
-      },
-      "matrix.volume_lookback": {
-        "Float": 850.0
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.07
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 7.742214387252917
-      },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.25
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 3.3000000000000003
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 8.168015822765614
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.08600000000000001
-      },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 3.3000000000000003
-      },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 4.0
-      },
-      "indicators.stoch_trend.period": {
-        "Float": 71.0
-      },
-      "indicators.kama.short_period": {
-        "Float": 6.0
-      },
-      "indicators.macd.signal": {
-        "Float": 2.0
-      },
-      "indicators.atr.timeframe": {
-        "String": "15m"
-      },
-      "indicators.natr.timeframe": {
-        "String": "1h"
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.37
-      },
-      "indicators.vwma.period": {
-        "Float": 71.0
-      },
-      "indicators.macd.fast": {
-        "Float": 11.218954894481138
-      },
-      "indicators.keltner.period": {
-        "Float": 53.04331472658972
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 2.0
-      },
-      "indicators.mfi.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.029
-      },
-      "indicators.adx.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "15m"
-      },
-      "indicators.mfi.period": {
-        "Float": 17.0
-      },
-      "indicators.vol_ma.period": {
-        "Float": 56.0
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 5.300000000000001
-      },
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.94
-      },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 0.4
-      },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.025
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "HMA"
-      },
-      "indicators.natr.period": {
-        "Float": 26.0
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 0.30321618750650964
-      },
-      "indicators.z_score_lookback": {
-        "Float": 140.0
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.16
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.06999999999999999
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 50.464551832620984
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 1.8
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.46
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.025
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.15000000000000002
-      },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 5.9
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "SWMA"
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 71.0
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.7284642220398614
-      },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 13.0
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.79
-      },
-      "indicators.kama.long_period": {
-        "Float": 72.0
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.4237840864593239
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.06
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.37
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.014000000000000002
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.046
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 6.0
+        "Float": 0.07265091537418873
       },
       "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.0
+        "Float": 0.4153319552736089
       },
-      "indicators.rsi_trend.timeframe": {
-        "String": "4h"
+      "indicators.rsi_trend.period": {
+        "Float": 51.29830532649246
       },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 5.4
+      "arbiter.min_confidence_volatile": {
+        "Float": 0.07161977000675354
       },
-      "matrix.trend_lookback": {
-        "Float": 760.0
+      "indicators.rsi_momentum.period": {
+        "Float": 34.92697191386131
       },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 67.0
+      "indicators.bbands.nbdev": {
+        "Float": 1.877302393041915
       },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.85
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.05
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "4h"
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 10.0
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 28.0
-      },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 5.699999999999999
-      },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 25.0
-      },
-      "matrix.momentum_lookback": {
-        "Float": 700.0
-      },
-      "indicators.vol_ma.timeframe": {
+      "indicators.stoch_trend.timeframe": {
         "String": "15m"
       },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.64
+      "indicators.keltner.multiplier": {
+        "Float": 4.605260688265781
       },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.016474606808593723
+      "tactical_sniper.momentum.rsi_threshold": {
+        "Float": 36.13537670847337
       },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.43890097312633153
+      "indicators.stoch_trend.k_ma_type": {
+        "String": "DMA"
       },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.09999999999999999
+      "tactical_sniper.reversal.wick_sl_buffer_atr": {
+        "Float": 2.2155586638351195
+      },
+      "indicators.stoch_trend.d_ma_type": {
+        "String": "EMA"
+      },
+      "indicators.natr.timeframe": {
+        "String": "1h"
       },
       "indicators.vwma.timeframe": {
         "String": "1h"
       },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 14.5
+      "indicators.z_score_lookback": {
+        "Float": 265.04572587598096
       },
-      "indicators.macd.slow": {
-        "Float": 72.0
+      "arbiter.scanner_weight": {
+        "Float": 0.25867494140446684
       },
-      "indicators.rsi_trend.period": {
-        "Float": 56.0
+      "tactical_sniper.anomaly.wick_atr_threshold": {
+        "Float": 4.719712565362614
       },
-      "matrix.squeeze_lookback": {
-        "Float": 430.0
+      "tactical_sniper.absorption.min_activation_score": {
+        "Float": 0.09245916432948607
       },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "LinReg"
+      "indicators.stoch_range.timeframe": {
+        "String": "1h"
+      },
+      "matrix.z_score_sensitivity": {
+        "Float": 8.985979240043577
+      },
+      "tactical_sniper.pullback.min_activation_score": {
+        "Float": 0.9190846598183084
+      },
+      "indicators.rsi_trend.timeframe": {
+        "String": "15m"
+      },
+      "tactical_sniper.range.stoch_oversold": {
+        "Float": 26.996699959957645
+      },
+      "risk_management.stop_management.time_countdown_bars": {
+        "Float": 250.41658139751303
+      },
+      "tactical_sniper.momentum.min_activation_score": {
+        "Float": 0.9694431020662188
+      },
+      "risk_management.stop_management.stagnant_min_profit_pct": {
+        "Float": 0.01087722122932476
+      },
+      "indicators.bbands.period": {
+        "Float": 61.056042560747166
+      },
+      "indicators.stoch_range.k_period": {
+        "Float": 18.510920602894362
+      },
+      "indicators.vwma.period": {
+        "Float": 42.993669705092564
       },
       "risk_management.risk_base.leverage": {
-        "Float": 30.0
+        "Float": 47.47589369410519
       },
-      "indicators.rsi_reversal.period": {
-        "Float": 20.0
+      "indicators.vol_ma.timeframe": {
+        "String": "4h"
       },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.7
+      "risk_management.stop_management.base_be_roe_trigger": {
+        "Float": 0.08908861033943583
       },
-      "indicators.rsi_anomaly.period": {
-        "Float": 60.9950638652608
-      },
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 240.0
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.04
-      },
-      "indicators.keltner.timeframe": {
+      "indicators.bbands.timeframe": {
         "String": "5m"
       },
-      "indicators.adx.period": {
-        "Float": 71.0
+      "indicators.stoch_range.period": {
+        "Float": 63.39200193096982
       },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.54
+      "tactical_sniper.range.volume_max_threshold": {
+        "Float": 0.9648026718077074
       },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.09607846542023975
+      "indicators.stoch_trend.period": {
+        "Float": 43.36750321663075
       },
-      "indicators.rsi_momentum.timeframe": {
-        "String": "15m"
+      "risk_management.stop_management.max_stagnant_hold_bars": {
+        "Float": 656.4654096643658
       },
-      "indicators.keltner.ma_type": {
-        "String": "TMA"
+      "indicators.keltner.timeframe": {
+        "String": "1h"
       },
-      "indicators.stoch_range.d_ma_type": {
+      "indicators.stoch_range.k_ma_type": {
         "String": "HMA"
       },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 71.0
+      "indicators.adx.period": {
+        "Float": 54.27696859611855
       },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.08
+      "matrix.trend_lookback": {
+        "Float": 935.6298845836368
       },
-      "indicators.atr.period": {
-        "Float": 77.0
+      "tactical_sniper.absorption.squeeze_threshold": {
+        "Float": 0.9357377669477727
+      },
+      "indicators.mfi.period": {
+        "Float": 49.323393485573035
       }
     },
-    "fitness": 1.676,
+    "fitness": -100.0,
     "stats": {
-      "return_pct": 8.516115255515283,
-      "return_ann_pct": 161.76768358867827,
-      "buy_and_hold_return_pct": 9.412207043489147,
-      "volatility_ann_pct": 52.55198383856451,
-      "sharpe_ratio": 3.0782412341580794,
-      "sortino_ratio": 18.732934899646565,
+      "return_pct": 0.0,
+      "return_ann_pct": 0.0,
+      "buy_and_hold_return_pct": 0.0,
+      "volatility_ann_pct": 0.0,
+      "sharpe_ratio": null,
+      "sortino_ratio": null,
       "calmar_ratio": null,
-      "max_drawdown_pct": -6.638289380274262,
+      "max_drawdown_pct": -0.0,
       "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 2.9519440196487325,
-      "equity_final": 65.10966915330917,
-      "equity_peak": 66.80481000198884,
-      "win_rate_pct": 50.0,
-      "best_trade_pct": 0.9036749745708738,
-      "worst_trade_pct": -0.659426502580512,
+      "exposure_time_pct": 0.0,
+      "equity_final": 60.0,
+      "equity_peak": 60.0,
+      "win_rate_pct": 0.0,
+      "best_trade_pct": 0.0,
+      "worst_trade_pct": 0.0,
       "avg_trade_pct": 0.0,
-      "profit_factor": 3.153804627407079,
-      "expectancy": 0.1494094960186922,
-      "sqn": 1.4131552242710792,
+      "profit_factor": null,
+      "expectancy": 0.0,
+      "sqn": null,
       "kelly_criterion": null,
       "commissions": 0.0,
       "cagr": null,
@@ -2933,10 +844,10 @@
       "beta": null,
       "custom_1": null,
       "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 14,
+      "start_timestamp_secs": 1787031540,
+      "end_timestamp_secs": 1788241140,
+      "duration_secs": 1209600,
+      "total_trades": 0,
       "max_drawdown_duration_secs": 0,
       "avg_drawdown_duration_secs": 0,
       "max_trade_duration_secs": 0,
@@ -2944,1440 +855,472 @@
       "_reserved_u32": 0
     },
     "dna": [
-      6.0,
-      72.0,
-      2.0,
-      71.0,
-      1.0,
-      56.0,
-      3.0,
-      20.0,
-      3.0,
-      71.0,
-      1.0,
-      60.9950638652608,
-      1.8211217699697186,
-      74.0,
-      3.0,
-      2.0,
-      53.04331472658972,
-      4.806534746242934,
-      0.0,
-      7.0,
-      11.218954894481138,
-      72.0,
-      2.0,
-      1.0,
-      71.0,
-      10.0,
-      2.0,
-      13.0,
-      11.0,
-      0.25,
-      1.0,
-      38.0,
-      8.168015822765614,
-      10.0,
-      3.0,
-      3.0,
-      0.05,
-      1.0,
-      77.0,
-      1.0,
-      26.0,
-      2.0,
-      17.0,
-      2.0,
-      56.0,
-      1.0,
-      71.0,
-      1.5318526871925864,
-      140.0,
-      760.0,
-      430.0,
-      700.0,
-      850.0,
-      7.742214387252917,
-      0.64,
-      0.16,
-      0.7284642220398614,
-      0.79,
-      0.37,
-      0.09607846542023975,
-      67.0,
-      61.0,
-      0.43890097312633153,
-      0.37,
-      0.029,
-      13.0,
-      1.8,
-      0.4237840864593239,
-      0.083,
-      0.029,
-      28.0,
-      71.0,
-      0.06,
-      0.85,
-      0.85,
-      0.08600000000000001,
-      3.3000000000000003,
-      4.0,
-      0.016474606808593723,
-      6.0,
-      0.06999999999999999,
-      0.014000000000000002,
-      5.300000000000001,
-      3.3000000000000003,
-      5.4,
-      0.04,
-      0.028753690898077056,
-      0.94,
-      0.4,
-      0.09999999999999999,
-      0.46,
-      0.025,
-      0.30321618750650964,
-      30.0,
-      0.025,
-      50.464551832620984,
-      0.54,
-      0.07,
-      2.238179448131784,
-      5.699999999999999,
-      14.5,
-      0.08,
-      13.0,
-      0.7,
-      0.15000000000000002,
-      240.0,
-      0.046,
-      5.9,
-      0.0,
-      25.0
+      7.710921856887702,
+      55.76205943024366,
+      2.84628439401749,
+      54.27696859611855,
+      1.2566637550882047,
+      51.29830532649246,
+      0.5834986215719755,
+      20.829253194365428,
+      1.0362419747528542,
+      34.92697191386131,
+      0.6525849119233849,
+      76.0513382467221,
+      2.2728400736771883,
+      61.056042560747166,
+      1.877302393041915,
+      0.32936890295531385,
+      22.64025896525993,
+      4.605260688265781,
+      1.9640962847425265,
+      13.322836843444783,
+      9.249590583682776,
+      68.12048038932153,
+      2.6247033355804117,
+      2.679456372824015,
+      43.36750321663075,
+      17.834610025914554,
+      2.97808198147841,
+      4.827836052160597,
+      0.6744643201774279,
+      0.13940947602293724,
+      1.4272842499303806,
+      63.39200193096982,
+      18.510920602894362,
+      7.95153229992008,
+      3.091474023319668,
+      7.614059230847,
+      0.10637724315722423,
+      2.34923328775494,
+      58.79958085217646,
+      0.6499982471273675,
+      41.47480604866459,
+      1.7888659103187714,
+      49.323393485573035,
+      1.3829658605593655,
+      56.39255648871991,
+      2.5065886781185873,
+      42.993669705092564,
+      2.354031012168311,
+      265.04572587598096,
+      935.6298845836368,
+      439.2123854266142,
+      650.5142350535815,
+      209.5664854723277,
+      8.985979240043577,
+      0.5556507146175768,
+      0.25867494140446684,
+      0.1863639741810987,
+      0.5576458244946978,
+      0.07161977000675354,
+      0.09606268784614828,
+      68.8644476247244,
+      23.661292404772226,
+      0.14648594708525364,
+      0.9190846598183084,
+      0.009659429522921363,
+      36.13537670847337,
+      2.98261820456203,
+      0.9694431020662188,
+      0.09074573014963055,
+      0.01283585673877741,
+      26.996699959957645,
+      97.42479615362726,
+      0.019746977246695184,
+      0.9648026718077074,
+      0.8313644024621892,
+      0.03247403262597289,
+      3.9661343997834417,
+      1.0241516088304738,
+      0.6057854225735048,
+      2.2155586638351195,
+      0.9595508662144289,
+      0.06299981551620128,
+      4.719712565362614,
+      1.2822118405070575,
+      1.9637984769605494,
+      0.25195099992081427,
+      0.08294993927968144,
+      0.9357377669477727,
+      1.2369661115778154,
+      0.09245916432948607,
+      0.1453691075371465,
+      0.01968206160688648,
+      1.3719599421611106,
+      47.47589369410519,
+      0.0017659796940676085,
+      250.41658139751303,
+      0.8098972619550469,
+      0.08908861033943583,
+      0.734315500023809,
+      7.306407939757343,
+      13.939194508203904,
+      0.07265091537418873,
+      19.64751674835024,
+      0.351262950462898,
+      0.22467138888580362,
+      656.4654096643658,
+      0.01087722122932476,
+      4.025433884802942,
+      0.4153319552736089,
+      5.526489209136153
     ]
   },
   {
     "params": {
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 240.0
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.025
-      },
-      "indicators.rsi_momentum.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.85
-      },
-      "indicators.mfi.period": {
-        "Float": 17.0
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 8.168015822765614
-      },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 3.3000000000000003
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.016474606808593723
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.083
-      },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.025
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.046
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 10.0
-      },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 13.0
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 3.0
-      },
-      "indicators.vwma.period": {
-        "Float": 71.0
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.79
-      },
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.94
-      },
-      "indicators.vwma.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 13.0
-      },
-      "indicators.atr.period": {
-        "Float": 77.0
-      },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 0.4
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.08600000000000001
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 58.300565420059804
-      },
-      "indicators.macd.slow": {
-        "Float": 72.0
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 10.0
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 2.0
-      },
-      "matrix.volume_lookback": {
-        "Float": 850.0
-      },
-      "indicators.rsi_anomaly.period": {
-        "Float": 60.9950638652608
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.25
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.06999999999999999
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.014000000000000002
-      },
-      "indicators.rsi_anomaly.timeframe": {
-        "String": "1h"
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 30.0
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 0.30321618750650964
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 50.464551832620984
-      },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "indicators.atr.timeframe": {
-        "String": "15m"
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "4h"
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.54
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.806534746242934
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 71.0
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.09607846542023975
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.04
-      },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.028753690898077056
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.43890097312633153
-      },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.85
-      },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.08
-      },
-      "matrix.trend_lookback": {
-        "Float": 760.0
-      },
-      "indicators.macd.fast": {
-        "Float": 11.218954894481138
-      },
-      "indicators.bbands.period": {
-        "Float": 74.0
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 6.0
-      },
-      "indicators.adx.period": {
-        "Float": 71.0
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.16
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 5.300000000000001
-      },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 5.4
-      },
-      "indicators.keltner.period": {
-        "Float": 53.04331472658972
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "SWMA"
-      },
-      "indicators.natr.timeframe": {
-        "String": "1h"
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.46
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.7284642220398614
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.07
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.029
-      },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 5.699999999999999
-      },
-      "matrix.momentum_lookback": {
-        "Float": 700.0
-      },
-      "indicators.adx.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.06
-      },
       "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 4.0
-      },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 25.0
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 56.0
-      },
-      "indicators.macd.signal": {
-        "Float": 2.0
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.7
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 3.3000000000000003
-      },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 5.9
-      },
-      "indicators.stoch_range.d_ma_type": {
-        "String": "HMA"
-      },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "LinReg"
-      },
-      "indicators.mfi.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.09999999999999999
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "SWMA"
-      },
-      "indicators.vol_ma.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.37
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "15m"
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 7.742214387252917
-      },
-      "indicators.vol_ma.period": {
-        "Float": 56.0
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.15000000000000002
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.64
-      },
-      "indicators.kama.long_period": {
-        "Float": 72.0
-      },
-      "indicators.bbands.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 28.0
-      },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 71.0
-      },
-      "indicators.natr.period": {
-        "Float": 26.0
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.37
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.4237840864593239
-      },
-      "indicators.stoch_range.period": {
-        "Float": 38.0
-      },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.0
-      },
-      "matrix.squeeze_lookback": {
-        "Float": 430.0
-      },
-      "indicators.z_score_lookback": {
-        "Float": 140.0
-      },
-      "indicators.kama.short_period": {
-        "Float": 6.0
-      },
-      "indicators.keltner.ma_type": {
-        "String": "TMA"
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 67.0
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.05
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 1.8
+        "Float": 5.99773978743937
       },
       "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 14.5
+        "Float": 7.757952100664125
       },
-      "indicators.rsi_reversal.period": {
-        "Float": 20.0
+      "risk_management.stop_management.enable_re_entry_cooldown": {
+        "Float": 0.22813307564154145
       },
-      "indicators.rsi_trend.timeframe": {
-        "String": "4h"
+      "indicators.atr.timeframe": {
+        "String": "1h"
       },
-      "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.238179448131784
+      "tactical_sniper.anomaly.z_score_threshold": {
+        "Float": 4.0252686115550524
       },
-      "indicators.stoch_trend.period": {
-        "Float": 71.0
+      "tactical_sniper.reversal.exhaustion_vol_drop": {
+        "Float": 0.5486214364665606
       },
-      "indicators.keltner.timeframe": {
+      "tactical_sniper.momentum.max_initial_sl_pct": {
+        "Float": 0.056307295098256716
+      },
+      "indicators.stoch_range.d_ma_type": {
+        "String": "TMA"
+      },
+      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
+        "Float": 3.8586186595040863
+      },
+      "indicators.rsi_momentum.period": {
+        "Float": 70.00290657761823
+      },
+      "arbiter.min_confidence_volatile": {
+        "Float": 0.16789040770617342
+      },
+      "matrix.momentum_lookback": {
+        "Float": 210.4575531925642
+      },
+      "risk_management.risk_base.leverage": {
+        "Float": 10.387256116451224
+      },
+      "matrix.volume_lookback": {
+        "Float": 400.050340068378
+      },
+      "indicators.kama.short_period": {
+        "Float": 15.021378279333767
+      },
+      "tactical_sniper.pullback.rsi_buy_thresh": {
+        "Float": 63.1508846724223
+      },
+      "tactical_sniper.anomaly.min_activation_score": {
+        "Float": 0.07488639635232554
+      },
+      "indicators.stoch_range.timeframe": {
         "String": "5m"
       },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.029
-      }
-    },
-    "fitness": 1.993,
-    "stats": {
-      "return_pct": 9.53693535287845,
-      "return_ann_pct": 192.27656608105428,
-      "buy_and_hold_return_pct": 9.412207043489147,
-      "volatility_ann_pct": 65.33822291851538,
-      "sharpe_ratio": 2.9427884244854083,
-      "sortino_ratio": 22.265908216170157,
-      "calmar_ratio": null,
-      "max_drawdown_pct": -6.638289380274262,
-      "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 2.891700264145697,
-      "equity_final": 65.72216121172707,
-      "equity_peak": 67.36022741318885,
-      "win_rate_pct": 50.0,
-      "best_trade_pct": 1.1468462284563115,
-      "worst_trade_pct": -0.659426502580512,
-      "avg_trade_pct": 0.0,
-      "profit_factor": 3.404191931057689,
-      "expectancy": 0.16677887129622349,
-      "sqn": 1.4322927930666092,
-      "kelly_criterion": null,
-      "commissions": 0.0,
-      "cagr": null,
-      "alpha": null,
-      "beta": null,
-      "custom_1": null,
-      "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 14,
-      "max_drawdown_duration_secs": 0,
-      "avg_drawdown_duration_secs": 0,
-      "max_trade_duration_secs": 0,
-      "avg_trade_duration_secs": 0,
-      "_reserved_u32": 0
-    },
-    "dna": [
-      6.0,
-      72.0,
-      2.0,
-      71.0,
-      1.0,
-      56.0,
-      3.0,
-      20.0,
-      3.0,
-      71.0,
-      1.0,
-      60.9950638652608,
-      1.8211217699697186,
-      74.0,
-      3.0,
-      2.0,
-      53.04331472658972,
-      4.806534746242934,
-      0.0,
-      7.0,
-      11.218954894481138,
-      72.0,
-      2.0,
-      1.0,
-      71.0,
-      10.0,
-      2.0,
-      13.0,
-      11.0,
-      0.25,
-      1.0,
-      38.0,
-      8.168015822765614,
-      10.0,
-      11.227986585734964,
-      3.0,
-      0.05,
-      1.0,
-      77.0,
-      1.0,
-      26.0,
-      2.0,
-      17.0,
-      2.0,
-      56.0,
-      1.0,
-      71.0,
-      1.5318526871925864,
-      140.0,
-      760.0,
-      430.0,
-      700.0,
-      850.0,
-      7.742214387252917,
-      0.64,
-      0.16,
-      0.7284642220398614,
-      0.79,
-      0.37,
-      0.09607846542023975,
-      67.0,
-      58.300565420059804,
-      0.43890097312633153,
-      0.37,
-      0.029,
-      13.0,
-      1.8,
-      0.4237840864593239,
-      0.083,
-      0.029,
-      28.0,
-      71.0,
-      0.06,
-      0.85,
-      0.85,
-      0.08600000000000001,
-      3.3000000000000003,
-      4.0,
-      0.016474606808593723,
-      6.0,
-      0.06999999999999999,
-      0.014000000000000002,
-      5.300000000000001,
-      3.3000000000000003,
-      5.4,
-      0.04,
-      0.028753690898077056,
-      0.94,
-      0.4,
-      0.09999999999999999,
-      0.46,
-      0.025,
-      0.30321618750650964,
-      30.0,
-      0.025,
-      50.464551832620984,
-      0.54,
-      0.07,
-      2.238179448131784,
-      5.699999999999999,
-      14.5,
-      0.08,
-      13.0,
-      0.7,
-      0.15000000000000002,
-      240.0,
-      0.046,
-      5.9,
-      0.0,
-      25.0
-    ]
-  },
-  {
-    "params": {
-      "indicators.macd.signal": {
-        "Float": 17.367515342128215
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.5451074283753804
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.05759723737686465
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.1926247042368685
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 35.11830420875677
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 330.2333032035309
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.2410090234059663
-      },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 9.54930688227576
-      },
-      "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 1264.062599034897
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 8.523072808332468
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.20645961843939628
-      },
-      "indicators.mfi.timeframe": {
-        "String": "1h"
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.47183551214990194
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.09298470124747506
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.03522779434570954
-      },
-      "indicators.stoch_range.d_ma_type": {
-        "String": "DMA"
-      },
-      "indicators.rsi_anomaly.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 2.530229019404567
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.08983736383011974
-      },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.4804957815334937
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 2.7
-      },
-      "indicators.kama.short_period": {
-        "Float": 2.07511325792137
-      },
-      "indicators.keltner.timeframe": {
-        "String": "15m"
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 4.03496554647619
-      },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.3805358124703913
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 63.40468470417016
-      },
-      "indicators.vwma.period": {
-        "Float": 45.0640537878257
-      },
-      "arbiter.scanner_weight": {
-        "Float": 0.4667680744286392
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 69.42000358117613
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.5833721954276969
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.341294597595927
-      },
-      "indicators.kama.long_period": {
-        "Float": 30.964979849629223
-      },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.01914335954704397
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.01288618418272781
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.016773474298295125
-      },
-      "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.7586235460543356
-      },
-      "indicators.keltner.period": {
-        "Float": 52.33203699023069
-      },
-      "indicators.stoch_trend.k_period": {
-        "Float": 9.11338415097677
-      },
-      "indicators.macd.slow": {
-        "Float": 63.68649289114598
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 0.6945712283071032
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 84.30955705846516
-      },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 3.815496113382184
-      },
-      "indicators.stoch_range.k_period": {
-        "Float": 2.834879850206784
-      },
-      "indicators.natr.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.006385301688197871
-      },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "matrix.trend_lookback": {
-        "Float": 984.0567989376524
-      },
-      "indicators.bbands.period": {
-        "Float": 31.399302054225128
-      },
-      "indicators.adx.timeframe": {
-        "String": "15m"
-      },
-      "indicators.z_score_lookback": {
-        "Float": 20.0
-      },
-      "matrix.volume_lookback": {
-        "Float": 449.04178339928706
-      },
-      "indicators.mfi.period": {
-        "Float": 44.0
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "indicators.natr.period": {
-        "Float": 32.240358190608426
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 12.454229100853876
-      },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 1.128648722451686
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 5.743262227415973
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.003722506090827543
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.5971974028746654
-      },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 54.42088707229679
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.06999999999999999
+      "tactical_sniper.absorption.max_initial_sl_pct": {
+        "Float": 0.09387922926152009
       },
       "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.5787111214404969
-      },
-      "indicators.adx.period": {
-        "Float": 38.71494322772482
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 11.641619008171618
-      },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.08460096877348816
-      },
-      "indicators.rsi_trend.timeframe": {
-        "String": "15m"
+        "Float": 0.6532179294273958
       },
       "indicators.rsi_anomaly.period": {
-        "Float": 12.578608224392362
+        "Float": 37.06666744846136
       },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 34.78569893997945
+      "indicators.rsi_anomaly.timeframe": {
+        "String": "5m"
       },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.5228413755963821
+      "tactical_sniper.momentum.vol_z_threshold": {
+        "Float": 2.0749764858944597
       },
-      "indicators.vwma.timeframe": {
-        "String": "1h"
+      "tactical_sniper.range.volume_max_threshold": {
+        "Float": 0.9765146211766133
       },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.7734202782877249
+      "risk_management.risk_base.base_lot_size": {
+        "Float": 0.8006472117400985
       },
       "indicators.vol_ma.period": {
-        "Float": 59.64165876745122
+        "Float": 9.855625045946683
       },
-      "indicators.stoch_trend.timeframe": {
-        "String": "4h"
+      "tactical_sniper.range.bb_proximity_pct": {
+        "Float": 0.002821045284778204
       },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.09340048126042576
+      "risk_management.risk_base.percent_per_trade": {
+        "Float": 0.42513164197825665
       },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "WSMA"
+      "indicators.stoch_range.zone": {
+        "Float": 0.16312964582465084
+      },
+      "indicators.natr.period": {
+        "Float": 60.416054764267976
       },
       "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 48.36919115644454
+        "Float": 4.925309603753343
+      },
+      "indicators.z_score_lookback": {
+        "Float": 191.96101356161066
+      },
+      "indicators.stoch_trend.k_period": {
+        "Float": 4.505898050685001
+      },
+      "matrix.z_score_sensitivity": {
+        "Float": 2.4347566459249235
+      },
+      "tactical_sniper.pullback.max_initial_sl_pct": {
+        "Float": 0.03328573849704023
+      },
+      "indicators.natr.timeframe": {
+        "String": "5m"
+      },
+      "indicators.stoch_trend.period": {
+        "Float": 14.068854205223204
       },
       "indicators.rsi_momentum.timeframe": {
         "String": "15m"
       },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.9286980658302476
+      "indicators.stoch_range.d_period": {
+        "Float": 8.641916250746597
       },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 2.158532030433528
+      "indicators.stoch_trend.timeframe": {
+        "String": "5m"
       },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.006138528095437286
+      "tactical_sniper.pullback.min_activation_score": {
+        "Float": 0.22924743553712976
       },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 4.859764938006419
-      },
-      "indicators.keltner.ma_type": {
-        "String": "Vidya"
-      },
-      "matrix.momentum_lookback": {
-        "Float": 184.73236511257687
-      },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 1.7615861885096322
-      },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 4.912001241848053
-      },
-      "indicators.stoch_trend.period": {
-        "Float": 64.9786820205656
-      },
-      "indicators.atr.timeframe": {
-        "String": "1h"
-      },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 3.0040890852089697
-      },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 61.99974291078009
-      },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 3.2677865493734206
-      },
-      "indicators.bbands.timeframe": {
-        "String": "15m"
-      },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.1289387720389982
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "DMA"
-      },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.3073638550167873
-      },
-      "indicators.atr.period": {
-        "Float": 44.40359726760017
+      "tactical_sniper.range.stoch_oversold": {
+        "Float": 4.803685688580747
       },
       "indicators.vol_ma.timeframe": {
-        "String": "15m"
+        "String": "5m"
+      },
+      "tactical_sniper.range.min_activation_score": {
+        "Float": 0.07256074489460324
+      },
+      "indicators.keltner.period": {
+        "Float": 53.81893914064434
+      },
+      "tactical_sniper.absorption.vol_z_threshold": {
+        "Float": 2.7924170466081444
+      },
+      "indicators.macd.slow": {
+        "Float": 38.826027815084316
+      },
+      "indicators.vwma.period": {
+        "Float": 51.19268973905292
+      },
+      "risk_management.stop_management.base_be_roe_trigger": {
+        "Float": 0.2336421064111388
+      },
+      "indicators.macd.fast": {
+        "Float": 13.040651589858877
+      },
+      "indicators.adx.timeframe": {
+        "String": "1h"
+      },
+      "tactical_sniper.reversal.max_initial_sl_pct": {
+        "Float": 0.04916010507712506
+      },
+      "indicators.stoch_trend.k_ma_type": {
+        "String": "DEMA"
+      },
+      "risk_management.stop_management.min_initial_sl_pct": {
+        "Float": 0.02774343258890108
+      },
+      "tactical_sniper.range.min_width_pct": {
+        "Float": 0.020358233732269942
+      },
+      "indicators.kama.long_period": {
+        "Float": 21.780942441217363
+      },
+      "indicators.rsi_reversal.period": {
+        "Float": 67.7952334363733
+      },
+      "indicators.mfi.period": {
+        "Float": 38.144240527626664
+      },
+      "indicators.keltner.ma_type": {
+        "String": "LinReg"
+      },
+      "tactical_sniper.range.max_initial_sl_pct": {
+        "Float": 0.040840012871127554
+      },
+      "tactical_sniper.reversal.z_score_threshold": {
+        "Float": 3.4082371244759124
+      },
+      "indicators.macd.timeframe": {
+        "String": "5m"
+      },
+      "indicators.macd.signal": {
+        "Float": 2.569787464058391
+      },
+      "tactical_sniper.reversal.min_activation_score": {
+        "Float": 0.9300917855400106
       },
       "indicators.stoch_trend.d_ma_type": {
         "String": "LinReg"
       },
-      "matrix.squeeze_lookback": {
-        "Float": 710.5908557472848
-      },
-      "indicators.rsi_reversal.period": {
-        "Float": 56.637798000752994
-      },
-      "indicators.stoch_range.period": {
-        "Float": 52.32068639049233
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.3764099253015188
-      },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.3452960405678968
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.4765001897849976
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 2.312946887202546
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.03470151295902953
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.5856228405592697
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "4h"
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.832845921242305
-      },
-      "indicators.macd.fast": {
-        "Float": 6.0
-      }
-    },
-    "fitness": 65.491,
-    "stats": {
-      "return_pct": 471.80728419462207,
-      "return_ann_pct": 82414634580.39433,
-      "buy_and_hold_return_pct": 21.748060246462796,
-      "volatility_ann_pct": 192988075140.90982,
-      "sharpe_ratio": 0.42704521779503457,
-      "sortino_ratio": 2047557124.9023948,
-      "calmar_ratio": null,
-      "max_drawdown_pct": -16.527995990648087,
-      "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 70.80263218870198,
-      "equity_final": 343.0843705167732,
-      "equity_peak": 376.803355154482,
-      "win_rate_pct": 67.21311475409836,
-      "best_trade_pct": 4.916274843838737,
-      "worst_trade_pct": -1.2006390291644122,
-      "avg_trade_pct": 0.0,
-      "profit_factor": 6.350579346336135,
-      "expectancy": 0.7401928841161183,
-      "sqn": 4.23669273307522,
-      "kelly_criterion": null,
-      "commissions": 0.0,
-      "cagr": null,
-      "alpha": null,
-      "beta": null,
-      "custom_1": null,
-      "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 61,
-      "max_drawdown_duration_secs": 0,
-      "avg_drawdown_duration_secs": 0,
-      "max_trade_duration_secs": 0,
-      "avg_trade_duration_secs": 0,
-      "_reserved_u32": 0
-    },
-    "dna": [
-      2.07511325792137,
-      30.964979849629223,
-      1.5886002842363618,
-      38.71494322772482,
-      1.0,
-      63.40468470417016,
-      0.7520181383490474,
-      56.637798000752994,
-      0.9233524075588704,
-      12.454229100853876,
-      0.5070379647231235,
-      12.578608224392362,
-      0.978490485149074,
-      31.399302054225128,
-      4.03496554647619,
-      1.0,
-      52.33203699023069,
-      4.341294597595927,
-      1.183047203711736,
-      13.711718379644148,
-      6.0,
-      63.68649289114598,
-      17.367515342128215,
-      0.7713067640817566,
-      64.9786820205656,
-      9.11338415097677,
-      11.641619008171618,
-      9.105740375934811,
-      12.617250729377472,
-      0.3805358124703913,
-      2.9849276344023914,
-      52.32068639049233,
-      2.834879850206784,
-      8.523072808332468,
-      4.827211081926617,
-      4.785534186249894,
-      0.3764099253015188,
-      2.679810357119169,
-      44.40359726760017,
-      1.7278570663166322,
-      32.240358190608426,
-      1.0,
-      44.0,
-      1.8743356944154264,
-      59.64165876745122,
-      1.1919161489032304,
-      45.0640537878257,
-      2.328609536472697,
-      20.0,
-      984.0567989376524,
-      710.5908557472848,
-      184.73236511257687,
-      449.04178339928706,
-      2.312946887202546,
-      0.5856228405592697,
-      0.4667680744286392,
-      0.5451074283753804,
-      0.06999999999999999,
-      0.09298470124747506,
-      0.05759723737686465,
-      84.30955705846516,
-      69.42000358117613,
-      0.08983736383011974,
-      0.5833721954276969,
-      0.01914335954704397,
-      48.36919115644454,
-      3.0040890852089697,
-      0.832845921242305,
-      0.09340048126042576,
-      0.01288618418272781,
-      34.78569893997945,
-      61.99974291078009,
-      0.016773474298295125,
-      0.3452960405678968,
-      0.4765001897849976,
-      0.03470151295902953,
-      4.859764938006419,
-      1.128648722451686,
-      0.1926247042368685,
-      5.743262227415973,
-      0.9286980658302476,
-      0.03522779434570954,
-      0.6945712283071032,
-      2.7,
-      2.530229019404567,
-      0.2410090234059663,
-      0.08460096877348816,
-      0.5787111214404969,
-      2.158532030433528,
-      0.5228413755963821,
-      0.4804957815334937,
-      0.006138528095437286,
-      1.7615861885096322,
-      35.11830420875677,
-      0.003722506090827543,
-      330.2333032035309,
-      0.5971974028746654,
-      0.20645961843939628,
-      2.7586235460543356,
-      4.912001241848053,
-      9.54930688227576,
-      0.1289387720389982,
-      3.2677865493734206,
-      0.3073638550167873,
-      0.47183551214990194,
-      1264.062599034897,
-      0.006385301688197871,
-      3.815496113382184,
-      0.7734202782877249,
-      54.42088707229679
-    ]
-  },
-  {
-    "params": {
-      "indicators.rsi_anomaly.period": {
-        "Float": 12.578608224392362
-      },
-      "tactical_sniper.absorption.min_activation_score": {
-        "Float": 0.5228413755963821
-      },
-      "tactical_sniper.range.stoch_overbought": {
-        "Float": 61.99974291078009
-      },
-      "arbiter.min_multiplier_veto": {
-        "Float": 0.5856228405592697
-      },
-      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
-        "Float": 2.530229019404567
-      },
-      "indicators.bbands.period": {
-        "Float": 31.399302054225128
-      },
-      "indicators.stoch_range.zone": {
-        "Float": 0.3764099253015188
-      },
-      "indicators.bbands.nbdev": {
-        "Float": 4.03496554647619
-      },
-      "risk_management.stop_management.tsl_atr_loose": {
-        "Float": 9.54930688227576
-      },
-      "indicators.keltner.multiplier": {
-        "Float": 4.341294597595927
-      },
-      "indicators.vwma.period": {
-        "Float": 45.0640537878257
-      },
-      "tactical_sniper.pullback.max_initial_sl_pct": {
-        "Float": 0.05759723737686465
-      },
-      "risk_management.risk_base.leverage": {
-        "Float": 35.11830420875677
-      },
-      "risk_management.stop_management.base_sl_atr": {
-        "Float": 3.815496113382184
-      },
-      "indicators.stoch_trend.d_period": {
-        "Float": 11.641619008171618
-      },
-      "risk_management.stop_management.mega_trend_min_lock_roe": {
-        "Float": 0.47183551214990194
-      },
-      "tactical_sniper.reversal.exhaustion_vol_drop": {
-        "Float": 0.1926247042368685
-      },
-      "indicators.macd.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.range.volume_max_threshold": {
-        "Float": 0.3452960405678968
-      },
-      "risk_management.stop_management.re_entry_cooldown_bars": {
-        "Float": 54.42088707229679
+      "risk_management.stop_management.mega_trend_lock_ratio": {
+        "Float": 0.7676566303843264
       },
       "matrix.squeeze_lookback": {
-        "Float": 710.5908557472848
-      },
-      "tactical_sniper.anomaly.min_activation_score": {
-        "Float": 0.2410090234059663
-      },
-      "indicators.natr.timeframe": {
-        "String": "15m"
-      },
-      "tactical_sniper.reversal.wick_sl_buffer_atr": {
-        "Float": 5.743262227415973
-      },
-      "tactical_sniper.absorption.vol_z_threshold": {
-        "Float": 2.158532030433528
-      },
-      "indicators.atr.period": {
-        "Float": 44.40359726760017
-      },
-      "risk_management.stop_management.tighten_step_multiplier": {
-        "Float": 0.5971974028746654
-      },
-      "arbiter.min_confidence_ranging": {
-        "Float": 0.06999999999999999
-      },
-      "indicators.adx.timeframe": {
-        "String": "15m"
-      },
-      "indicators.stoch_trend.period": {
-        "Float": 64.9786820205656
-      },
-      "indicators.stoch_trend.k_ma_type": {
-        "String": "WSMA"
-      },
-      "risk_management.stop_management.min_initial_sl_pct": {
-        "Float": 0.003722506090827543
-      },
-      "risk_management.stop_management.tsl_atr_normal": {
-        "Float": 4.912001241848053
-      },
-      "indicators.keltner.timeframe": {
-        "String": "15m"
+        "Float": 327.11927880841654
       },
       "indicators.mfi.timeframe": {
+        "String": "5m"
+      },
+      "tactical_sniper.reversal.wick_sl_buffer_atr": {
+        "Float": 0.8205586157924589
+      },
+      "indicators.keltner.timeframe": {
         "String": "1h"
       },
-      "risk_management.risk_base.base_lot_size": {
-        "Float": 1.7615861885096322
+      "indicators.keltner.multiplier": {
+        "Float": 3.940485244149212
       },
-      "indicators.kama.long_period": {
-        "Float": 30.964979849629223
-      },
-      "tactical_sniper.momentum.rsi_threshold": {
-        "Float": 48.36919115644454
-      },
-      "tactical_sniper.range.max_initial_sl_pct": {
-        "Float": 0.09340048126042576
-      },
-      "tactical_sniper.range.min_activation_score": {
-        "Float": 0.4765001897849976
-      },
-      "indicators.keltner.period": {
-        "Float": 52.33203699023069
-      },
-      "matrix.momentum_lookback": {
-        "Float": 184.73236511257687
-      },
-      "indicators.rsi_trend.period": {
-        "Float": 63.40468470417016
-      },
-      "indicators.natr.period": {
-        "Float": 32.240358190608426
-      },
-      "indicators.vol_ma.timeframe": {
-        "String": "15m"
-      },
-      "arbiter.min_confidence_volatile": {
-        "Float": 0.09298470124747506
-      },
-      "matrix.volume_lookback": {
-        "Float": 449.04178339928706
-      },
-      "indicators.adx.period": {
-        "Float": 38.71494322772482
-      },
-      "matrix.z_score_sensitivity": {
-        "Float": 2.312946887202546
-      },
-      "indicators.rsi_momentum.timeframe": {
-        "String": "15m"
-      },
-      "indicators.rsi_reversal.period": {
-        "Float": 56.637798000752994
-      },
-      "tactical_sniper.range.stoch_oversold": {
-        "Float": 34.78569893997945
-      },
-      "tactical_sniper.reversal.min_activation_score": {
-        "Float": 0.9286980658302476
-      },
-      "tactical_sniper.anomaly.max_initial_sl_pct": {
-        "Float": 0.03522779434570954
-      },
-      "indicators.vol_ma.period": {
-        "Float": 59.64165876745122
-      },
-      "tactical_sniper.absorption.squeeze_threshold": {
-        "Float": 0.5787111214404969
-      },
-      "indicators.rsi_momentum.period": {
-        "Float": 12.454229100853876
-      },
-      "indicators.mfi.period": {
-        "Float": 35.80438562823685
-      },
-      "tactical_sniper.pullback.stoch_pullback_thresh": {
-        "Float": 69.42000358117613
-      },
-      "indicators.macd.slow": {
-        "Float": 63.68649289114598
-      },
-      "tactical_sniper.pullback.rsi_buy_thresh": {
-        "Float": 84.30955705846516
-      },
-      "tactical_sniper.pullback.min_activation_score": {
-        "Float": 0.5833721954276969
-      },
-      "tactical_sniper.momentum.max_initial_sl_pct": {
-        "Float": 0.01914335954704397
-      },
-      "tactical_sniper.momentum.min_activation_score": {
-        "Float": 0.832845921242305
-      },
-      "tactical_sniper.anomaly.wick_atr_threshold": {
-        "Float": 0.6945712283071032
-      },
-      "tactical_sniper.anomaly.z_score_threshold": {
-        "Float": 2.7
-      },
-      "tactical_sniper.range.min_width_pct": {
-        "Float": 0.016773474298295125
-      },
-      "risk_management.stop_management.time_countdown_bars": {
-        "Float": 330.2333032035309
-      },
-      "risk_management.stop_management.base_be_roe_trigger": {
-        "Float": 0.20645961843939628
+      "tactical_sniper.absorption.min_activation_score": {
+        "Float": 0.02153243212020916
       },
       "risk_management.stop_management.tsl_atr_tight": {
-        "Float": 2.7586235460543356
+        "Float": 0.9360251905481767
       },
-      "indicators.z_score_lookback": {
-        "Float": 20.0
+      "risk_management.stop_management.mega_trend_pnl_trigger": {
+        "Float": 0.054250984639972744
       },
-      "indicators.keltner.ma_type": {
-        "String": "Vidya"
+      "indicators.atr.period": {
+        "Float": 78.45414632950884
+      },
+      "risk_management.stop_management.stagnant_min_profit_pct": {
+        "Float": 0.041947824673815734
+      },
+      "indicators.kama.timeframe": {
+        "String": "4h"
+      },
+      "arbiter.scanner_weight": {
+        "Float": 0.13879135530333858
       },
       "indicators.bbands.timeframe": {
         "String": "15m"
       },
-      "indicators.rsi_anomaly.timeframe": {
-        "String": "15m"
+      "indicators.rsi_reversal.timeframe": {
+        "String": "1h"
       },
-      "risk_management.risk_base.percent_per_trade": {
-        "Float": 0.4804957815334937
+      "arbiter.min_confidence_trending": {
+        "Float": 0.6009344019201369
       },
-      "indicators.macd.signal": {
-        "Float": 17.367515342128215
-      },
-      "risk_management.stop_management.mega_trend_pnl_trigger": {
-        "Float": 0.1289387720389982
+      "risk_management.stop_management.mega_trend_min_lock_roe": {
+        "Float": 0.33971418335577963
       },
       "indicators.rsi_trend.timeframe": {
         "String": "15m"
       },
-      "risk_management.stop_management.mega_trend_lock_ratio": {
-        "Float": 0.3073638550167873
+      "indicators.stoch_trend.d_period": {
+        "Float": 17.274008517212188
       },
-      "indicators.stoch_trend.zone": {
-        "Float": 0.3805358124703913
+      "tactical_sniper.anomaly.wick_atr_threshold": {
+        "Float": 5.780459339910588
       },
-      "indicators.macd.fast": {
-        "Float": 6.0
+      "risk_management.stop_management.time_countdown_bars": {
+        "Float": 191.2592225898547
       },
-      "tactical_sniper.absorption.max_initial_sl_pct": {
-        "Float": 0.08460096877348816
-      },
-      "tactical_sniper.range.bb_proximity_pct": {
-        "Float": 0.01288618418272781
+      "risk_management.stop_management.tsl_atr_normal": {
+        "Float": 5.071336664557174
       },
       "risk_management.stop_management.max_stagnant_hold_bars": {
-        "Float": 1264.062599034897
+        "Float": 706.8328547680029
       },
-      "risk_management.stop_management.enable_re_entry_cooldown": {
-        "Float": 0.7734202782877249
+      "arbiter.min_confidence_ranging": {
+        "Float": 0.5561254413790337
       },
-      "arbiter.scanner_weight": {
-        "Float": 0.4667680744286392
+      "tactical_sniper.pullback.kama_slope_threshold": {
+        "Float": 0.17319999504361916
+      },
+      "matrix.trend_lookback": {
+        "Float": 347.38779732128904
+      },
+      "risk_management.stop_management.mega_trend_max_cycles": {
+        "Float": 17.36829058297007
+      },
+      "indicators.bbands.nbdev": {
+        "Float": 2.705271874593308
+      },
+      "arbiter.min_multiplier_veto": {
+        "Float": 0.6346463792807087
+      },
+      "tactical_sniper.range.stoch_overbought": {
+        "Float": 60.08602916956203
+      },
+      "risk_management.risk_base.sl_min_dist_pct": {
+        "Float": 0.022351537722880288
+      },
+      "risk_management.stop_management.base_sl_atr": {
+        "Float": 0.9175214758832877
+      },
+      "indicators.stoch_range.period": {
+        "Float": 45.18399206045214
+      },
+      "risk_management.stop_management.tighten_step_multiplier": {
+        "Float": 0.9698481927727561
+      },
+      "indicators.stoch_range.k_ma_type": {
+        "String": "TRIMA"
+      },
+      "indicators.bbands.period": {
+        "Float": 74.40022023416184
+      },
+      "indicators.adx.period": {
+        "Float": 22.8601353398839
+      },
+      "tactical_sniper.pullback.stoch_pullback_thresh": {
+        "Float": 93.83221507357203
+      },
+      "risk_management.stop_management.re_entry_cooldown_bars": {
+        "Float": 25.062358982832876
       },
       "indicators.stoch_range.k_period": {
-        "Float": 2.834879850206784
+        "Float": 11.591605903075406
       },
-      "tactical_sniper.reversal.min_reversal_displacement": {
-        "Float": 1.128648722451686
+      "indicators.stoch_trend.zone": {
+        "Float": 0.1603586117117984
       },
-      "indicators.stoch_trend.k_period": {
-        "Float": 9.11338415097677
+      "tactical_sniper.anomaly.max_initial_sl_pct": {
+        "Float": 0.023178725789382165
       },
-      "tactical_sniper.momentum.vol_z_threshold": {
-        "Float": 3.0040890852089697
-      },
-      "indicators.stoch_trend.timeframe": {
-        "String": "4h"
-      },
-      "indicators.stoch_range.d_period": {
-        "Float": 8.523072808332468
+      "indicators.rsi_trend.period": {
+        "Float": 38.54938992834914
       },
       "indicators.vwma.timeframe": {
         "String": "1h"
       },
-      "matrix.trend_lookback": {
-        "Float": 984.0567989376524
-      },
-      "indicators.rsi_reversal.timeframe": {
-        "String": "15m"
-      },
-      "indicators.atr.timeframe": {
-        "String": "1h"
-      },
-      "indicators.stoch_range.k_ma_type": {
-        "String": "DMA"
-      },
-      "indicators.stoch_trend.d_ma_type": {
-        "String": "LinReg"
-      },
-      "indicators.kama.timeframe": {
-        "String": "1h"
-      },
-      "indicators.stoch_range.timeframe": {
-        "String": "4h"
-      },
-      "tactical_sniper.pullback.kama_slope_threshold": {
-        "Float": 0.08983736383011974
-      },
-      "indicators.kama.short_period": {
-        "Float": 2.07511325792137
-      },
-      "indicators.stoch_range.period": {
-        "Float": 52.32068639049233
-      },
-      "indicators.stoch_range.d_ma_type": {
-        "String": "DMA"
-      },
-      "tactical_sniper.reversal.max_initial_sl_pct": {
-        "Float": 0.03470151295902953
-      },
-      "tactical_sniper.reversal.z_score_threshold": {
-        "Float": 4.859764938006419
-      },
-      "risk_management.stop_management.mega_trend_max_cycles": {
-        "Float": 3.2677865493734206
-      },
-      "risk_management.risk_base.sl_min_dist_pct": {
-        "Float": 0.006138528095437286
-      },
-      "risk_management.stop_management.stagnant_min_profit_pct": {
-        "Float": 0.006385301688197871
-      },
-      "arbiter.min_confidence_trending": {
-        "Float": 0.5451074283753804
+      "tactical_sniper.momentum.min_activation_score": {
+        "Float": 0.17570928002312436
       }
     },
-    "fitness": 70.869,
+    "fitness": -100.0,
     "stats": {
-      "return_pct": 500.6592918864376,
-      "return_ann_pct": 147136061250.80356,
-      "buy_and_hold_return_pct": 21.748060246462796,
-      "volatility_ann_pct": 345217782781.67554,
-      "sharpe_ratio": 0.4262122885594689,
-      "sortino_ratio": 3655329658.009169,
+      "return_pct": 0.0,
+      "return_ann_pct": 0.0,
+      "buy_and_hold_return_pct": 0.0,
+      "volatility_ann_pct": 0.0,
+      "sharpe_ratio": null,
+      "sortino_ratio": null,
       "calmar_ratio": null,
-      "max_drawdown_pct": -16.528704968442085,
+      "max_drawdown_pct": -0.0,
       "avg_drawdown_pct": 0.0,
-      "exposure_time_pct": 72.1001899995366,
-      "equity_final": 360.3955751318626,
-      "equity_peak": 395.8195339801407,
-      "win_rate_pct": 67.21311475409836,
-      "best_trade_pct": 4.916274843838737,
-      "worst_trade_pct": -0.9435031578947493,
+      "exposure_time_pct": 0.0,
+      "equity_final": 60.0,
+      "equity_peak": 60.0,
+      "win_rate_pct": 0.0,
+      "best_trade_pct": 0.0,
+      "worst_trade_pct": 0.0,
       "avg_trade_pct": 0.0,
-      "profit_factor": 7.585595978219519,
-      "expectancy": 0.7627305727805616,
-      "sqn": 4.518501552130521,
+      "profit_factor": null,
+      "expectancy": 0.0,
+      "sqn": null,
       "kelly_criterion": null,
       "commissions": 0.0,
       "cagr": null,
@@ -4385,10 +1328,10 @@
       "beta": null,
       "custom_1": null,
       "custom_2": null,
-      "start_timestamp_secs": 1782682620,
-      "end_timestamp_secs": 1785274620,
-      "duration_secs": 2592000,
-      "total_trades": 61,
+      "start_timestamp_secs": 1787031540,
+      "end_timestamp_secs": 1788241140,
+      "duration_secs": 1209600,
+      "total_trades": 0,
       "max_drawdown_duration_secs": 0,
       "avg_drawdown_duration_secs": 0,
       "max_trade_duration_secs": 0,
@@ -4396,116 +1339,600 @@
       "_reserved_u32": 0
     },
     "dna": [
-      2.07511325792137,
-      30.964979849629223,
-      1.5886002842363618,
-      38.71494322772482,
-      1.0,
-      63.40468470417016,
-      0.7520181383490474,
-      56.637798000752994,
-      0.9233524075588704,
-      12.454229100853876,
-      0.5070379647231235,
-      12.578608224392362,
-      0.978490485149074,
-      31.399302054225128,
-      4.03496554647619,
-      1.0,
-      52.33203699023069,
-      4.341294597595927,
-      1.183047203711736,
-      13.711718379644148,
-      6.0,
-      63.68649289114598,
-      17.367515342128215,
-      0.7713067640817566,
-      64.9786820205656,
-      9.11338415097677,
-      11.641619008171618,
-      9.105740375934811,
-      12.617250729377472,
-      0.3805358124703913,
-      2.9849276344023914,
-      52.32068639049233,
-      2.834879850206784,
-      8.523072808332468,
-      4.827211081926617,
-      4.785534186249894,
-      0.3764099253015188,
-      2.679810357119169,
-      44.40359726760017,
-      1.7278570663166322,
-      32.240358190608426,
-      1.0,
-      35.80438562823685,
-      1.8743356944154264,
-      59.64165876745122,
-      1.1919161489032304,
-      45.0640537878257,
-      2.328609536472697,
-      20.0,
-      984.0567989376524,
-      710.5908557472848,
-      184.73236511257687,
-      449.04178339928706,
-      2.312946887202546,
-      0.5856228405592697,
-      0.4667680744286392,
-      0.5451074283753804,
-      0.06999999999999999,
-      0.09298470124747506,
-      0.05759723737686465,
-      84.30955705846516,
-      69.42000358117613,
-      0.08983736383011974,
-      0.5833721954276969,
-      0.01914335954704397,
-      48.36919115644454,
-      3.0040890852089697,
-      0.832845921242305,
-      0.09340048126042576,
-      0.01288618418272781,
-      34.78569893997945,
-      61.99974291078009,
-      0.016773474298295125,
-      0.3452960405678968,
-      0.4765001897849976,
-      0.03470151295902953,
-      4.859764938006419,
-      1.128648722451686,
-      0.1926247042368685,
-      5.743262227415973,
-      0.9286980658302476,
-      0.03522779434570954,
-      0.6945712283071032,
-      2.7,
-      2.530229019404567,
-      0.2410090234059663,
-      0.08460096877348816,
-      0.5787111214404969,
-      2.158532030433528,
-      0.5228413755963821,
-      0.4804957815334937,
-      0.006138528095437286,
-      1.7615861885096322,
-      35.11830420875677,
-      0.003722506090827543,
-      330.2333032035309,
-      0.5971974028746654,
-      0.20645961843939628,
-      2.7586235460543356,
-      4.912001241848053,
-      9.54930688227576,
-      0.1289387720389982,
-      3.2677865493734206,
-      0.3073638550167873,
-      0.47183551214990194,
-      1264.062599034897,
-      0.006385301688197871,
-      3.815496113382184,
-      0.7734202782877249,
-      54.42088707229679
+      15.021378279333767,
+      21.780942441217363,
+      2.596194712586792,
+      22.8601353398839,
+      1.5036128799134985,
+      38.54938992834914,
+      1.2276629385651134,
+      67.7952334363733,
+      2.4248232772314213,
+      70.00290657761823,
+      1.0377794469747628,
+      37.06666744846136,
+      0.4745998852266004,
+      74.40022023416184,
+      2.705271874593308,
+      0.8596430678820415,
+      53.81893914064434,
+      3.940485244149212,
+      1.9285619107307321,
+      12.842895187696856,
+      13.040651589858877,
+      38.826027815084316,
+      2.569787464058391,
+      0.46303673288985625,
+      14.068854205223204,
+      4.505898050685001,
+      17.274008517212188,
+      5.838887809400542,
+      12.923618521058374,
+      0.1603586117117984,
+      0.39196789541041344,
+      45.18399206045214,
+      11.591605903075406,
+      8.641916250746597,
+      12.185514341931441,
+      6.855467015810136,
+      0.16312964582465084,
+      0.3918933654218374,
+      78.45414632950884,
+      2.0277949968976507,
+      60.416054764267976,
+      0.014225909097887571,
+      38.144240527626664,
+      0.17088270079904816,
+      9.855625045946683,
+      0.3241472826614139,
+      51.19268973905292,
+      1.6437837411464544,
+      191.96101356161066,
+      347.38779732128904,
+      327.11927880841654,
+      210.4575531925642,
+      400.050340068378,
+      2.4347566459249235,
+      0.6346463792807087,
+      0.13879135530333858,
+      0.6009344019201369,
+      0.5561254413790337,
+      0.16789040770617342,
+      0.03328573849704023,
+      63.1508846724223,
+      93.83221507357203,
+      0.17319999504361916,
+      0.22924743553712976,
+      0.056307295098256716,
+      4.925309603753343,
+      2.0749764858944597,
+      0.17570928002312436,
+      0.040840012871127554,
+      0.002821045284778204,
+      4.803685688580747,
+      60.08602916956203,
+      0.020358233732269942,
+      0.9765146211766133,
+      0.07256074489460324,
+      0.04916010507712506,
+      3.4082371244759124,
+      5.99773978743937,
+      0.5486214364665606,
+      0.8205586157924589,
+      0.9300917855400106,
+      0.023178725789382165,
+      5.780459339910588,
+      4.0252686115550524,
+      3.8586186595040863,
+      0.07488639635232554,
+      0.09387922926152009,
+      0.6532179294273958,
+      2.7924170466081444,
+      0.02153243212020916,
+      0.42513164197825665,
+      0.022351537722880288,
+      0.8006472117400985,
+      10.387256116451224,
+      0.02774343258890108,
+      191.2592225898547,
+      0.9698481927727561,
+      0.2336421064111388,
+      0.9360251905481767,
+      5.071336664557174,
+      7.757952100664125,
+      0.054250984639972744,
+      17.36829058297007,
+      0.7676566303843264,
+      0.33971418335577963,
+      706.8328547680029,
+      0.041947824673815734,
+      0.9175214758832877,
+      0.22813307564154145,
+      25.062358982832876
+    ]
+  },
+  {
+    "params": {
+      "tactical_sniper.reversal.wick_sl_buffer_atr": {
+        "Float": 0.8205586157924589
+      },
+      "tactical_sniper.range.min_activation_score": {
+        "Float": 0.07256074489460324
+      },
+      "indicators.stoch_trend.k_ma_type": {
+        "String": "SMM"
+      },
+      "indicators.keltner.multiplier": {
+        "Float": 3.5577110339008784
+      },
+      "indicators.macd.fast": {
+        "Float": 16.830221869311053
+      },
+      "indicators.mfi.timeframe": {
+        "String": "5m"
+      },
+      "tactical_sniper.pullback.rsi_buy_thresh": {
+        "Float": 63.1508846724223
+      },
+      "indicators.stoch_trend.d_ma_type": {
+        "String": "LinReg"
+      },
+      "tactical_sniper.range.bb_proximity_pct": {
+        "Float": 0.009474816609748186
+      },
+      "risk_management.risk_base.base_lot_size": {
+        "Float": 0.8006472117400985
+      },
+      "risk_management.stop_management.tighten_step_multiplier": {
+        "Float": 0.8928943238104102
+      },
+      "risk_management.stop_management.base_be_roe_trigger": {
+        "Float": 0.2336421064111388
+      },
+      "risk_management.stop_management.time_countdown_bars": {
+        "Float": 214.72545685128546
+      },
+      "risk_management.stop_management.tsl_atr_normal": {
+        "Float": 4.8094736403292355
+      },
+      "indicators.natr.period": {
+        "Float": 60.416054764267976
+      },
+      "indicators.bbands.nbdev": {
+        "Float": 2.8968931849381923
+      },
+      "tactical_sniper.anomaly.max_initial_sl_pct": {
+        "Float": 0.023178725789382165
+      },
+      "risk_management.stop_management.tsl_atr_loose": {
+        "Float": 9.267376524632908
+      },
+      "risk_management.stop_management.mega_trend_pnl_trigger": {
+        "Float": 0.0810255071589029
+      },
+      "risk_management.stop_management.mega_trend_min_lock_roe": {
+        "Float": 0.33971418335577963
+      },
+      "indicators.rsi_anomaly.timeframe": {
+        "String": "5m"
+      },
+      "risk_management.stop_management.enable_re_entry_cooldown": {
+        "Float": 0.28302339133528304
+      },
+      "risk_management.stop_management.max_stagnant_hold_bars": {
+        "Float": 931.4249165897097
+      },
+      "risk_management.stop_management.stagnant_min_profit_pct": {
+        "Float": 0.03284135509596904
+      },
+      "risk_management.stop_management.mega_trend_max_cycles": {
+        "Float": 21.324268241652454
+      },
+      "tactical_sniper.pullback.kama_slope_threshold": {
+        "Float": 0.17319999504361916
+      },
+      "tactical_sniper.absorption.squeeze_threshold": {
+        "Float": 0.6532179294273958
+      },
+      "risk_management.stop_management.mega_trend_lock_ratio": {
+        "Float": 0.7180811292739169
+      },
+      "risk_management.stop_management.re_entry_cooldown_bars": {
+        "Float": 25.062358982832876
+      },
+      "indicators.rsi_momentum.timeframe": {
+        "String": "15m"
+      },
+      "indicators.stoch_range.k_ma_type": {
+        "String": "TRIMA"
+      },
+      "indicators.vwma.period": {
+        "Float": 62.12151416564036
+      },
+      "indicators.macd.slow": {
+        "Float": 38.826027815084316
+      },
+      "indicators.z_score_lookback": {
+        "Float": 132.05320288760234
+      },
+      "matrix.trend_lookback": {
+        "Float": 156.0742751213774
+      },
+      "tactical_sniper.momentum.rsi_threshold": {
+        "Float": 16.2021151726092
+      },
+      "risk_management.stop_management.tsl_atr_tight": {
+        "Float": 0.9360251905481767
+      },
+      "arbiter.min_confidence_trending": {
+        "Float": 0.6009344019201369
+      },
+      "tactical_sniper.reversal.z_score_threshold": {
+        "Float": 3.4095747822573
+      },
+      "matrix.z_score_sensitivity": {
+        "Float": 2.4347566459249235
+      },
+      "tactical_sniper.anomaly.wick_atr_threshold": {
+        "Float": 5.339949335405989
+      },
+      "matrix.volume_lookback": {
+        "Float": 314.061475613326
+      },
+      "indicators.stoch_range.zone": {
+        "Float": 0.16312964582465084
+      },
+      "indicators.kama.short_period": {
+        "Float": 14.900324097820949
+      },
+      "indicators.keltner.period": {
+        "Float": 36.51556896317478
+      },
+      "indicators.mfi.period": {
+        "Float": 53.468710029108045
+      },
+      "indicators.rsi_trend.timeframe": {
+        "String": "15m"
+      },
+      "indicators.stoch_trend.zone": {
+        "Float": 0.13460182184025737
+      },
+      "tactical_sniper.pullback.stoch_pullback_thresh": {
+        "Float": 93.83221507357203
+      },
+      "tactical_sniper.reversal.exhaustion_vol_drop": {
+        "Float": 0.7796675009550054
+      },
+      "tactical_sniper.absorption.min_activation_score": {
+        "Float": 0.02153243212020916
+      },
+      "tactical_sniper.anomaly.min_activation_score": {
+        "Float": 0.07488639635232554
+      },
+      "matrix.momentum_lookback": {
+        "Float": 191.61597579509865
+      },
+      "tactical_sniper.range.max_initial_sl_pct": {
+        "Float": 0.040840012871127554
+      },
+      "tactical_sniper.anomaly.wick_sl_buffer_atr": {
+        "Float": 2.5059974830472735
+      },
+      "indicators.stoch_trend.d_period": {
+        "Float": 17.274008517212188
+      },
+      "indicators.stoch_range.period": {
+        "Float": 28.74869404532995
+      },
+      "tactical_sniper.momentum.vol_z_threshold": {
+        "Float": 2.0749764858944597
+      },
+      "tactical_sniper.reversal.max_initial_sl_pct": {
+        "Float": 0.055098987038085724
+      },
+      "indicators.stoch_range.k_period": {
+        "Float": 7.722536107232956
+      },
+      "indicators.keltner.ma_type": {
+        "String": "WMA"
+      },
+      "tactical_sniper.reversal.min_activation_score": {
+        "Float": 0.9300917855400106
+      },
+      "indicators.vwma.timeframe": {
+        "String": "5m"
+      },
+      "arbiter.min_confidence_ranging": {
+        "Float": 0.6803795641413481
+      },
+      "risk_management.stop_management.base_sl_atr": {
+        "Float": 0.9175214758832877
+      },
+      "indicators.stoch_trend.k_period": {
+        "Float": 4.505898050685001
+      },
+      "indicators.bbands.period": {
+        "Float": 74.40022023416184
+      },
+      "indicators.adx.period": {
+        "Float": 36.61435481990851
+      },
+      "indicators.rsi_reversal.period": {
+        "Float": 65.46284489537624
+      },
+      "indicators.vol_ma.period": {
+        "Float": 26.744643731853593
+      },
+      "indicators.adx.timeframe": {
+        "String": "15m"
+      },
+      "indicators.bbands.timeframe": {
+        "String": "15m"
+      },
+      "tactical_sniper.pullback.min_activation_score": {
+        "Float": 0.22924743553712976
+      },
+      "tactical_sniper.momentum.max_initial_sl_pct": {
+        "Float": 0.0516239674811226
+      },
+      "tactical_sniper.momentum.min_activation_score": {
+        "Float": 0.2592123468643282
+      },
+      "tactical_sniper.pullback.max_initial_sl_pct": {
+        "Float": 0.02011384572593132
+      },
+      "indicators.macd.signal": {
+        "Float": 2.569787464058391
+      },
+      "tactical_sniper.anomaly.z_score_threshold": {
+        "Float": 3.2967257203254396
+      },
+      "indicators.rsi_anomaly.period": {
+        "Float": 37.02642695314623
+      },
+      "tactical_sniper.range.volume_max_threshold": {
+        "Float": 0.9043284177463624
+      },
+      "indicators.kama.timeframe": {
+        "String": "5m"
+      },
+      "indicators.stoch_range.d_ma_type": {
+        "String": "DMA"
+      },
+      "tactical_sniper.range.stoch_overbought": {
+        "Float": 58.33246237221117
+      },
+      "indicators.kama.long_period": {
+        "Float": 21.780942441217363
+      },
+      "arbiter.min_multiplier_veto": {
+        "Float": 0.6346463792807087
+      },
+      "tactical_sniper.reversal.min_reversal_displacement": {
+        "Float": 5.550265799634648
+      },
+      "indicators.keltner.timeframe": {
+        "String": "4h"
+      },
+      "risk_management.risk_base.leverage": {
+        "Float": 10.387256116451224
+      },
+      "indicators.atr.period": {
+        "Float": 78.45414632950884
+      },
+      "tactical_sniper.range.min_width_pct": {
+        "Float": 0.020358233732269942
+      },
+      "indicators.rsi_trend.period": {
+        "Float": 37.82610537261776
+      },
+      "risk_management.risk_base.percent_per_trade": {
+        "Float": 0.3650125477082811
+      },
+      "indicators.rsi_reversal.timeframe": {
+        "String": "1h"
+      },
+      "indicators.stoch_trend.period": {
+        "Float": 31.446363163719116
+      },
+      "indicators.natr.timeframe": {
+        "String": "5m"
+      },
+      "indicators.vol_ma.timeframe": {
+        "String": "5m"
+      },
+      "indicators.stoch_range.timeframe": {
+        "String": "5m"
+      },
+      "tactical_sniper.absorption.max_initial_sl_pct": {
+        "Float": 0.09387922926152009
+      },
+      "tactical_sniper.absorption.vol_z_threshold": {
+        "Float": 2.7924170466081444
+      },
+      "arbiter.scanner_weight": {
+        "Float": 0.041490000800925186
+      },
+      "indicators.macd.timeframe": {
+        "String": "5m"
+      },
+      "risk_management.risk_base.sl_min_dist_pct": {
+        "Float": 0.016570432667185046
+      },
+      "risk_management.stop_management.min_initial_sl_pct": {
+        "Float": 0.02774343258890108
+      },
+      "indicators.rsi_momentum.period": {
+        "Float": 56.71427587491145
+      },
+      "indicators.stoch_trend.timeframe": {
+        "String": "5m"
+      },
+      "indicators.stoch_range.d_period": {
+        "Float": 6.067449974594972
+      },
+      "indicators.atr.timeframe": {
+        "String": "1h"
+      },
+      "matrix.squeeze_lookback": {
+        "Float": 327.11927880841654
+      },
+      "arbiter.min_confidence_volatile": {
+        "Float": 0.07041964637972943
+      },
+      "tactical_sniper.range.stoch_oversold": {
+        "Float": 4.803685688580747
+      }
+    },
+    "fitness": 3.533,
+    "stats": {
+      "return_pct": 42.33289803662759,
+      "return_ann_pct": 537462.2642447139,
+      "buy_and_hold_return_pct": 3.5971944725424443,
+      "volatility_ann_pct": 987580.5261185836,
+      "sharpe_ratio": 0.5442212052895201,
+      "sortino_ratio": 12003.078720175718,
+      "calmar_ratio": null,
+      "max_drawdown_pct": -17.642412908579193,
+      "avg_drawdown_pct": 0.0,
+      "exposure_time_pct": 56.339986098699235,
+      "equity_final": 85.39973882197656,
+      "equity_peak": 87.38016716827855,
+      "win_rate_pct": 40.909090909090914,
+      "best_trade_pct": 4.274208537322135,
+      "worst_trade_pct": -0.883431184428489,
+      "avg_trade_pct": 0.0,
+      "profit_factor": 2.7985513987296544,
+      "expectancy": 0.44433586796093366,
+      "sqn": 1.3369553530100293,
+      "kelly_criterion": null,
+      "commissions": 0.0,
+      "cagr": null,
+      "alpha": null,
+      "beta": null,
+      "custom_1": null,
+      "custom_2": null,
+      "start_timestamp_secs": 1787031540,
+      "end_timestamp_secs": 1788241140,
+      "duration_secs": 1209600,
+      "total_trades": 22,
+      "max_drawdown_duration_secs": 0,
+      "avg_drawdown_duration_secs": 0,
+      "max_trade_duration_secs": 0,
+      "avg_trade_duration_secs": 0,
+      "_reserved_u32": 0
+    },
+    "dna": [
+      14.900324097820949,
+      21.780942441217363,
+      0.47981693432828226,
+      36.61435481990851,
+      0.5762926434735673,
+      37.82610537261776,
+      1.2276629385651134,
+      65.46284489537624,
+      2.4248232772314213,
+      56.71427587491145,
+      1.2536838259058383,
+      37.02642695314623,
+      0.4745998852266004,
+      74.40022023416184,
+      2.8968931849381923,
+      0.8596430678820415,
+      36.51556896317478,
+      3.5577110339008784,
+      2.9728865561322326,
+      1.7219989786871053,
+      16.830221869311053,
+      38.826027815084316,
+      2.569787464058391,
+      0.46303673288985625,
+      31.446363163719116,
+      4.505898050685001,
+      17.274008517212188,
+      9.623816046181943,
+      12.923618521058374,
+      0.13460182184025737,
+      0.39196789541041344,
+      28.74869404532995,
+      7.722536107232956,
+      6.067449974594972,
+      12.185514341931441,
+      4.866725219380461,
+      0.16312964582465084,
+      0.3918933654218374,
+      78.45414632950884,
+      1.8073713374749298,
+      60.416054764267976,
+      0.014225909097887571,
+      53.468710029108045,
+      0.17088270079904816,
+      26.744643731853593,
+      0.3241472826614139,
+      62.12151416564036,
+      0.36919433344712316,
+      132.05320288760234,
+      156.0742751213774,
+      327.11927880841654,
+      191.61597579509865,
+      314.061475613326,
+      2.4347566459249235,
+      0.6346463792807087,
+      0.041490000800925186,
+      0.6009344019201369,
+      0.6803795641413481,
+      0.07041964637972943,
+      0.02011384572593132,
+      63.1508846724223,
+      93.83221507357203,
+      0.17319999504361916,
+      0.22924743553712976,
+      0.0516239674811226,
+      16.2021151726092,
+      2.0749764858944597,
+      0.2592123468643282,
+      0.040840012871127554,
+      0.009474816609748186,
+      4.803685688580747,
+      58.33246237221117,
+      0.020358233732269942,
+      0.9043284177463624,
+      0.07256074489460324,
+      0.055098987038085724,
+      3.4095747822573,
+      5.550265799634648,
+      0.7796675009550054,
+      0.8205586157924589,
+      0.9300917855400106,
+      0.023178725789382165,
+      5.339949335405989,
+      3.2967257203254396,
+      2.5059974830472735,
+      0.07488639635232554,
+      0.09387922926152009,
+      0.6532179294273958,
+      2.7924170466081444,
+      0.02153243212020916,
+      0.3650125477082811,
+      0.016570432667185046,
+      0.8006472117400985,
+      10.387256116451224,
+      0.02774343258890108,
+      214.72545685128546,
+      0.8928943238104102,
+      0.2336421064111388,
+      0.9360251905481767,
+      4.8094736403292355,
+      9.267376524632908,
+      0.0810255071589029,
+      21.324268241652454,
+      0.7180811292739169,
+      0.33971418335577963,
+      931.4249165897097,
+      0.03284135509596904,
+      0.9175214758832877,
+      0.28302339133528304,
+      25.062358982832876
     ]
   }
 ]

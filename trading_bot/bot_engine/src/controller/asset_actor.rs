@@ -156,6 +156,10 @@ impl AssetActor {
                     if let Some(dna) = new_dna_opt {
                         if let Some(ref mut strategy) = self.strategy {
                             strategy.update_from_dna(&dna.dna);
+                            info!(
+                                "🧬 [DNA HOT-SWAP] Symbol: {} | New DNA Deployed (Fitness: {:.2}%, Dim: {})",
+                                self.symbol, dna.fitness, dna.dna.len()
+                            );
                         }
 
                         let candles_vec = self.asset.get_candles_vec();

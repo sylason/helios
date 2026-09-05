@@ -1,4 +1,4 @@
-use tracing::{debug, info};
+use tracing::info;
 use ferro_trade::broker::actions::Action;
 use crate::models::account_state::AccountEvent;
 use serde::{Serialize, Deserialize};
@@ -484,13 +484,31 @@ impl PaperTrader {
                 }
             }
             Action::ClosePosition { .. } => {
+                let pnl = self.get_unrealized_pnl(current_price);
+                let bar_diff = bar_index.saturating_sub(self.entry_bar_index);
+                let duration = timestamp.saturating_sub(self.entry_timestamp);
+                let bars_held = if bar_diff > 0 {
+                    bar_diff
+                } else if duration >= 60_000 {
+                    (duration / 60_000) as usize
+                } else {
+                    1
+                };
+                info!(
+                    "🚨 [STAGNANT TELEMETRY] Strategy signaled ClosePosition! Held: {} bars | Entry: {:.2} | Current: {:.2} | uPnL: ${:+.2}",
+                    bars_held, self.entry_price, current_price, pnl
+                );
                 self.close_position(current_price, ExitReason::StagnantDecay, timestamp, bar_index, account_tx);
             }
             Action::UpdateTradeSlTp { new_sl_price, new_tp_price, .. } => {
                 if new_sl_price.is_some() || new_tp_price.is_some() || self.current_sl_price.is_some() || self.current_tp_price.is_some() {
-                    let sl_str = new_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
-                    let tp_str = new_tp_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
-                    debug!("🔄 [TRAILING SL] Updated SL: {} | TP: {}", sl_str, tp_str);
+                    if let Some(new_sl) = new_sl_price {
+                        let should_log = self.current_sl_price.map_or(true, |old_sl| (new_sl - old_sl).abs() > 1e-4);
+                        if should_log {
+                            let old_sl_str = self.current_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+                            info!("🛡️ [TRAILING SL UPDATE] Symbol: {} | SL Ratchet: {} -> {:.2}", self.symbol, old_sl_str, new_sl);
+                        }
+                    }
                     self.current_sl_price = new_sl_price;
                     self.current_tp_price = new_tp_price;
                     self.broadcast_account_events(account_tx);

@@ -37,8 +37,8 @@ const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
 // 2. Dữ liệu & Cửa sổ thời gian
-const TOTAL_FETCH_DAYS: i64 = 34;        // Tổng số ngày dữ liệu tải về: 30 ngày Train + 4 ngày OOS Paper Trade test
-const TRAIN_WINDOW_DAYS: i64 = 30;       // Độ dài cửa sổ nến huấn luyện In-Sample (30 ngày)
+const TOTAL_FETCH_DAYS: i64 = 18;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
+const TRAIN_WINDOW_DAYS: i64 = 14;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
 
 // 3. Chu kỳ Vòng lặp Tịnh tiến
 const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Re-Optimizer (4h)
