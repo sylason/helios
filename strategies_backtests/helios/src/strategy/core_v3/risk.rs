@@ -135,15 +135,48 @@ impl RiskManager {
             
             let current_pnl = trade.pl(Some(tick.closes()[i]));
 
-            // STAGNANT CAPITAL RELEASE MỞ RỘNG:
-            // 1. Lệnh lỗ ngâm quá 1 chu kỳ decay -> Đóng ngay cắt lỗ nhỏ
-            if decay_cycles > 0 && current_pnl <= 0.0 {
-                tick.close(None);
-                continue;
+            // =========================================================================
+            // 🛑 TÁI THIẾT KẾ: GIẢI PHÓNG VỐN NGÂM (STAGNANT CAPITAL RELEASE ĐỘNG)
+            // =========================================================================
+            // Lệnh chỉ bị đóng do ngâm vốn khi thỏa mãn ĐỒNG THỜI 2 điều kiện:
+            // 1. Số nến nắm giữ (holding bars) >= max_stagnant_hold_bars (120 -> 2880 bars)
+            // 2. Tỷ lệ lãi trên giá vào lệnh KHÔNG đạt mức tối thiểu (trade_pnl_pct < stagnant_min_profit_pct)
+            let bars_held = i.saturating_sub(entry_bar);
+            let current_close = tick.closes()[i];
+            let trade_price_pnl_pct = if trade.entry_price > 0.0 {
+                if trade.is_long() {
+                    (current_close - trade.entry_price) / trade.entry_price
+                } else {
+                    (trade.entry_price - current_close) / trade.entry_price
+                }
+            } else {
+                0.0
+            };
+
+            let max_hold = risk_cfg.max_stagnant_hold_bars;
+            if max_hold > 0 && bars_held >= max_hold {
+                // Nếu sau thời gian ngâm tối đa mà tỷ lệ lãi chưa đạt ngưỡng tối thiểu
+                if trade_price_pnl_pct < risk_cfg.stagnant_min_profit_pct {
+                    if _debug_mode {
+                        tracing::info!(
+                            "⏳ [STAGNANT CAPITAL RELEASE] Bar: {} | Trade #{:?} | Held: {} bars >= max: {} | PnL: {:+.2}% < min: {:.2}% -> Closed to release capital",
+                            i, trade.id, bars_held, max_hold, trade_price_pnl_pct * 100.0, risk_cfg.stagnant_min_profit_pct * 100.0
+                        );
+                    }
+                    tick.close(None);
+                    continue;
+                }
             }
 
-            // 2. Lệnh ngâm quá 4 chu kỳ decay (Zombie Trade) -> Đóng chủ động giải phóng vốn ký quỹ
-            if decay_cycles >= 4 {
+            // Zombie Trade Purge: Lệnh ngâm quá 2x max_stagnant_hold_bars (tối thiểu 2880 nến = 48 tiếng) -> Cưỡng bức dọn dẹp
+            let zombie_limit = (max_hold * 2).max(2880);
+            if max_hold > 0 && bars_held >= zombie_limit {
+                if _debug_mode {
+                    tracing::warn!(
+                        "🧟 [ZOMBIE TRADE PURGE] Bar: {} | Trade #{:?} | Held: {} bars >= zombie limit: {} -> Force closed",
+                        i, trade.id, bars_held, zombie_limit
+                    );
+                }
                 tick.close(None);
                 continue;
             }

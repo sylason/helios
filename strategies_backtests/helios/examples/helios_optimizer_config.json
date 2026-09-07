@@ -12,8 +12,8 @@
   },
   "prospector": {
     "worker_config": {
-      "population_size": 40,
-      "n_generations": 8,
+      "population_size": 50,
+      "n_generations": 10,
       "cxpb": 0.75,
       "mutpb": 0.35,
       "tournament_size": 4,
@@ -31,7 +31,7 @@
     },
     "scout_config": {
       "population_size": 30,
-      "n_generations": 4,
+      "n_generations": 5,
       "cxpb": 0.7,
       "mutpb": 0.25,
       "tournament_size": 3,

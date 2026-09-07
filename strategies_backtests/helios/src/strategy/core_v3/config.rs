@@ -517,8 +517,8 @@ pub struct RiskStopParams {
     // =========================================================================
     // 7. THAM SỐ PHỤ TRỢ & TÍCH LŨY & COOLDOWN
     // =========================================================================
-    /// Thời Gian Ngâm Tối Đa Trước Khi Giải Phóng Vốn (60 nến -> 1440 nến / 24 tiếng, Step 60 nến -> 24 nấc)
-    #[dna(min = 60.0, max = 1440.0, step = 60.0)]
+    /// Thời Gian Ngâm Tối Đa Trước Khi Giải Phóng Vốn (120 nến -> 2880 nến / 48 tiếng, Step 60 nến -> 47 nấc)
+    #[dna(min = 120.0, max = 2880.0, step = 60.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub max_stagnant_hold_bars: usize,
 
@@ -530,8 +530,6 @@ pub struct RiskStopParams {
     #[dna(min = 0.5, max = 6.0, step = 0.2)]
     pub base_sl_atr: f64,
 
-    /// Ngưỡng Tạm Dừng Siết SL Khi Thị Trường Tích Lũy Squeeze (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
     /// Cờ Bật/Tắt Cơ Chế Giãn Cách Cooldown Sau Khi Hòa Vốn / Cắt Lỗ (true: BẬT, false: TẮT)
     #[serde(default = "default_true")]
     pub enable_re_entry_cooldown: bool,

@@ -20,6 +20,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{HeliosArbiter, SignalType, ScannerId};
 use crate::strategy::core_v3::risk::RiskManager;
+use tracing::warn;
 
 /// Trạng thái Cooldown chống cào lệnh sau khi cắt lỗ / hòa vốn
 #[derive(Clone, Debug, Default)]
@@ -191,6 +192,18 @@ impl Strategy for HeliosStrategyV3 {
                         self.cooldown_tracker.locked_until_bar = i + stop_cfg.re_entry_cooldown_bars;
                         self.cooldown_tracker.locked_side = if is_long { Some(SignalType::Long) } else { Some(SignalType::Short) };
                         self.cooldown_tracker.last_exit_price = current_close;
+
+                        if self.debug_mode {
+                            warn!(
+                                "🛑 [COOLDOWN TRIGGERED] Bar: {} | Side: {:?} | Entry: {:.2} | Close: {:.2} | PnL: {:.4} <= 0.001 | Locked until Bar: {} ({} bars)",
+                                i, self.cooldown_tracker.locked_side, last_trade.entry_price, current_close, trade_pnl, self.cooldown_tracker.locked_until_bar, stop_cfg.re_entry_cooldown_bars
+                            );
+                        }
+                    } else if self.debug_mode {
+                        warn!(
+                            "ℹ️ [COOLDOWN SKIPPED - FALSE WIN?] Bar: {} | Side: {:?} | Entry: {:.2} | Close: {:.2} | PnL: {:.4} > 0.001 -> Cooldown NOT triggered",
+                            i, if is_long { SignalType::Long } else { SignalType::Short }, last_trade.entry_price, current_close, trade_pnl
+                        );
                     }
                 }
                 self.prev_open_trade = None;
@@ -228,6 +241,13 @@ impl Strategy for HeliosStrategyV3 {
 
                         // Kiểm tra Volatility Breakout Override: nếu giá đã bứt phá >= 1.5 * ATR thì cho phép mở khóa sớm
                         if price_diff < 1.5 * current_atr {
+                            if self.debug_mode {
+                                warn!(
+                                    "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | Diff: {:.2} < 1.5*ATR ({:.2})",
+                                    i, signal, self.cooldown_tracker.locked_until_bar, self.cooldown_tracker.locked_until_bar.saturating_sub(i),
+                                    self.cooldown_tracker.last_exit_price, current_price, price_diff, 1.5 * current_atr
+                                );
+                            }
                             // Chưa đủ bứt phá biến động -> CHẶN CÀO LỆNH RÁC!
                             return;
                         }
@@ -285,6 +305,12 @@ impl Strategy for HeliosStrategyV3 {
                 }
             }
         }
+    }
+}
+
+impl Default for HeliosStrategyV3 {
+    fn default() -> Self {
+        Self::new(&std::collections::HashMap::new())
     }
 }
 
