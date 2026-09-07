@@ -1,4 +1,4 @@
-use tracing::info;
+use tracing::{info, warn, error};
 use ferro_trade::broker::actions::Action;
 use crate::models::account_state::AccountEvent;
 use serde::{Serialize, Deserialize};
@@ -395,19 +395,39 @@ impl PaperTrader {
 
         if is_sl_hit && is_tp_hit {
             // Nếu cả SL và TP cùng chạm trong 1 cây nến:
-            // Ưu tiên cái nào gần giá Open hơn (giống logic ferro_trade::Broker)
+            // Ưu tiên cái nào gần giá Open hơn (Heuristic của PaperTrader)
             let sl = sl_opt.unwrap();
             let tp = tp_opt.unwrap();
             let dist_sl = (candle.open - sl).abs();
             let dist_tp = (candle.open - tp).abs();
+
+            // 🚨 SENSOR PROBE: Bắt bất đồng bộ Dual-Hit giữa PaperTrader và Backtest Broker
+            let choice_str = if dist_sl <= dist_tp { "STOP LOSS" } else { "TAKE PROFIT (WIN)" };
+            warn!(
+                "🚨 [FLAW 3 CONFIRMED: DUAL-HIT DIVERGENCE] Symbol: {} | Candle: {} | O: {:.2}, H: {:.2}, L: {:.2}, C: {:.2} \
+                | Pos: {:?} @ {:.2} | SL: {:.2} (dist: {:.2}) vs TP: {:.2} (dist: {:.2}) \
+                | Choice: PaperTrader EXECUTED {} but Backtest Broker ALWAYS EXECUTES SL (push_front Pessimistic Model)! Result Divergence Confirmed!",
+                self.symbol, candle.timestamp, candle.open, candle.high, candle.low, candle.close,
+                self.position_type, self.entry_price, sl, dist_sl, tp, dist_tp, choice_str
+            );
+
             if dist_sl <= dist_tp {
                 let is_tsl = self.check_is_tsl(sl);
                 let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
-                let exec_sl = match self.position_type {
-                    PositionType::Long => if candle.open < sl { candle.open } else { sl },
-                    PositionType::Short => if candle.open > sl { candle.open } else { sl },
-                    PositionType::None => sl,
+                let (exec_sl, has_gap) = match self.position_type {
+                    PositionType::Long => if candle.open < sl { (candle.open, true) } else { (sl, false) },
+                    PositionType::Short => if candle.open > sl { (candle.open, true) } else { (sl, false) },
+                    PositionType::None => (sl, false),
                 };
+                if has_gap {
+                    let slip_diff = (candle.open - sl).abs();
+                    let slip_pct = (slip_diff / self.entry_price) * 100.0;
+                    warn!(
+                        "⚠️ [GAP SLIPPAGE HIT] Symbol: {} | Side: {:?} | Target SL: {:.2} | Candle Open: {:.2} \
+                        | Gap Slippage: {:.2} USDT ({:.2}%) | Executed at Open ({:.2}) instead of SL price!",
+                        self.symbol, self.position_type, sl, candle.open, slip_diff, slip_pct, exec_sl
+                    );
+                }
                 self.close_position(exec_sl, reason, candle.timestamp, bar_index, account_tx);
             } else {
                 let exec_tp = match self.position_type {
@@ -422,11 +442,20 @@ impl PaperTrader {
             let sl = sl_opt.unwrap();
             let is_tsl = self.check_is_tsl(sl);
             let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
-            let exec_sl = match self.position_type {
-                PositionType::Long => if candle.open < sl { candle.open } else { sl },
-                PositionType::Short => if candle.open > sl { candle.open } else { sl },
-                PositionType::None => sl,
+            let (exec_sl, has_gap) = match self.position_type {
+                PositionType::Long => if candle.open < sl { (candle.open, true) } else { (sl, false) },
+                PositionType::Short => if candle.open > sl { (candle.open, true) } else { (sl, false) },
+                PositionType::None => (sl, false),
             };
+            if has_gap {
+                let slip_diff = (candle.open - sl).abs();
+                let slip_pct = (slip_diff / self.entry_price) * 100.0;
+                warn!(
+                    "⚠️ [GAP SLIPPAGE HIT] Symbol: {} | Side: {:?} | Target SL: {:.2} | Candle Open: {:.2} \
+                    | Gap Slippage: {:.2} USDT ({:.2}%) | Executed at Open ({:.2}) instead of SL price!",
+                    self.symbol, self.position_type, sl, candle.open, slip_diff, slip_pct, exec_sl
+                );
+            }
             self.close_position(exec_sl, reason, candle.timestamp, bar_index, account_tx);
             return true;
         } else if is_tp_hit {
@@ -502,6 +531,27 @@ impl PaperTrader {
             }
             Action::UpdateTradeSlTp { new_sl_price, new_tp_price, .. } => {
                 if new_sl_price.is_some() || new_tp_price.is_some() || self.current_sl_price.is_some() || self.current_tp_price.is_some() {
+                    // 🚨 SENSOR PROBE: Bắt vi phạm Monotonic Ratchet (Lùi SL hoặc xóa sổ SL)
+                    if let (Some(old_sl), Some(new_sl)) = (self.current_sl_price, new_sl_price) {
+                        let is_loosened = match self.position_type {
+                            PositionType::Long => new_sl < old_sl - 1e-4,
+                            PositionType::Short => new_sl > old_sl + 1e-4,
+                            PositionType::None => false,
+                        };
+                        if is_loosened {
+                            error!(
+                                "🚨 [FLAW CONFIRMED: MONOTONIC RATCHET VIOLATION] Symbol: {} | Side: {:?} | Old SL: {:.2} -> New SL: {:.2} \
+                                | STOP LOSS RETRACTED / LOOSENED BY {:.2}! PaperTrader blind-overwriting protection!",
+                                self.symbol, self.position_type, old_sl, new_sl, (new_sl - old_sl).abs()
+                            );
+                        }
+                    } else if self.position_type != PositionType::None && self.current_sl_price.is_some() && new_sl_price.is_none() {
+                        error!(
+                            "🚨 [CRITICAL: NAKED POSITION DANGER] Symbol: {} | Side: {:?} | Current SL was {:.2} but new_sl_price is NONE! Protection wiped out!",
+                            self.symbol, self.position_type, self.current_sl_price.unwrap()
+                        );
+                    }
+
                     if let Some(new_sl) = new_sl_price {
                         let should_log = self.current_sl_price.map_or(true, |old_sl| (new_sl - old_sl).abs() > 1e-4);
                         if should_log {

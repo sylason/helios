@@ -6,6 +6,7 @@ use crate::models::models::{Candle, AssetState, EmergencyCmd, TradeSignal, Asset
 use crate::models::repository::{CandleRepository, StrategyRepository};
 use crate::optimizer::helios_bridge::HeliosBridge;
 use ferro_trade::strategy::Strategy;
+use ferro_trade::broker::actions::Action;
 use crate::models::account_state::AccountEvent;
 use crate::models::config::EngineConfig;
 use crate::execution::engine::ExecutionEngine;
@@ -23,6 +24,19 @@ pub struct LivePositionState {
     pub current_sl_price: Option<f64>,
     pub current_tp_price: Option<f64>,
     pub opening_playbook_tag: Option<String>,
+}
+
+/// Trạng thái Cooldown chống cào lệnh trả thù (Revenge Re-entry Guard)
+#[derive(Debug, Clone)]
+pub struct CooldownGuard {
+    /// Mốc timestamp mà Cooldown sẽ hết hạn (ms)
+    pub locked_until_ts: i64,
+    /// Mốc bar index mà Cooldown sẽ hết hạn
+    pub locked_until_bar: usize,
+    /// Chiều bị khóa ("LONG" hoặc "SHORT")
+    pub locked_side: String,
+    /// Giá thoát lệnh của vị thế vừa đóng
+    pub last_exit_price: f64,
 }
 
 /// Actor quản lý một Tài sản Giao dịch (AssetActor)
@@ -45,6 +59,12 @@ pub struct AssetActor {
     pub execution_engine: Box<dyn ExecutionEngine>,
     pub config: EngineConfig,
     pub initial_sync_until: Option<i64>,
+    /// Bộ DNA mới đang chờ nạp khi vị thế hiện tại đóng hoàn toàn (Lock DNA on Active Trade)
+    pub pending_dna: Option<crate::models::models::OptimizedDna>,
+    /// Bộ đệm theo dõi Cooldown chống cào lệnh trả thù sau khi cắt lỗ / đóng lệnh
+    pub cooldown_guard: Option<CooldownGuard>,
+    /// Số lượng nến giãn cách Cooldown mặc định (mặc định: 15 nến = 15 phút)
+    pub cooldown_bars: usize,
 }
 
 impl AssetActor {
@@ -79,7 +99,16 @@ impl AssetActor {
             execution_engine,
             config,
             initial_sync_until: None,
+            pending_dna: None,
+            cooldown_guard: None,
+            cooldown_bars: 15,
         }
+    }
+
+    /// Thiết lập số nến giãn cách Cooldown sau khi đóng lệnh (mặc định: 15 nến)
+    pub fn with_cooldown_bars(mut self, bars: usize) -> Self {
+        self.cooldown_bars = bars;
+        self
     }
 
     /// Thiết lập kênh nến đồng bộ có Backpressure (dành cho mô phỏng Walk-Forward)
@@ -154,12 +183,27 @@ impl AssetActor {
                 Ok(_) = self.dna_rx.changed() => {
                     let new_dna_opt = self.dna_rx.borrow().clone();
                     if let Some(dna) = new_dna_opt {
-                        if let Some(ref mut strategy) = self.strategy {
-                            strategy.update_from_dna(&dna.dna);
-                            info!(
-                                "🧬 [DNA HOT-SWAP] Symbol: {} | New DNA Deployed (Fitness: {:.2}%, Dim: {})",
-                                self.symbol, dna.fitness, dna.dna.len()
+                        // 🧬 SENSOR PROBE & LOCK DNA ON ACTIVE TRADE:
+                        // Nếu đang có vị thế mở -> Khóa vị thế với DNA cũ, lưu DNA mới vào pending_dna để kích hoạt sau khi vị thế đóng.
+                        if let Some(pos) = self.execution_engine.get_position() {
+                            let side_str = if pos.position_amt > 0.0 { "LONG" } else { "SHORT" };
+                            let current_bars = self.asset.ohlcv.len().saturating_sub(pos.live_entry_bar);
+                            warn!(
+                                "🔒 [LOCK DNA ON ACTIVE TRADE] Symbol: {} | Active Position: {} @ {:.2} (Age: {} bars) \
+                                | DNA HOT-SWAP RECEIVED MID-TRADE! Locking active trade with existing DNA. Storing new DNA (Fitness: {:.2}%, Dim: {}) in pending_dna!",
+                                self.symbol, side_str, pos.entry_price, current_bars, dna.fitness, dna.dna.len()
                             );
+                            self.pending_dna = Some(dna.clone());
+                        } else {
+                            // Không có vị thế (Flat) -> Cập nhật trực tiếp vào strategy ngay lập tức
+                            if let Some(ref mut strategy) = self.strategy {
+                                strategy.update_from_dna(&dna.dna);
+                                info!(
+                                    "🧬 [DNA HOT-SWAP APPLIED] Symbol: {} | Account FLAT -> New DNA Deployed (Fitness: {:.2}%, Dim: {})",
+                                    self.symbol, dna.fitness, dna.dna.len()
+                                );
+                            }
+                            self.pending_dna = None;
                         }
 
                         let candles_vec = self.asset.get_candles_vec();
@@ -189,6 +233,18 @@ impl AssetActor {
                 // Lắng nghe trạng thái tài khoản và vị thế
                 Ok(acc_evt) = self.account_rx.recv() => {
                     self.execution_engine.on_account_event(&acc_evt).await;
+                    // Nếu sau sự kiện tài khoản vị thế đã đóng -> Kích hoạt ngay Pending DNA nếu có
+                    if self.execution_engine.get_position().is_none() {
+                        if let Some(pending) = self.pending_dna.take() {
+                            if let Some(ref mut strategy) = self.strategy {
+                                strategy.update_from_dna(&pending.dna);
+                                info!(
+                                    "🔄 [PENDING DNA ACTIVATED] Symbol: {} | Account Event (Position closed) -> Swapped in pending DNA (Fitness: {:.2}%, Dim: {})",
+                                    self.symbol, pending.fitness, pending.dna.len()
+                                );
+                            }
+                        }
+                    }
                 }
 
                 // Lắng nghe nến đồng bộ có Backpressure (MPSC - Walk-Forward / Fast Simulation)
@@ -268,9 +324,21 @@ impl AssetActor {
         if self.dna_rx.has_changed().unwrap_or(false) {
             let dna_data = self.dna_rx.borrow_and_update();
             if let Some(ref dna) = *dna_data {
-                if let Some(ref mut strategy) = self.strategy {
-                    strategy.update_from_dna(&dna.dna);
-                    info!("✨ [{}] Đã cập nhật bộ não Helios với DNA mới từ Re-Optimizer! (Fitness: {:.4})", self.symbol, dna.fitness);
+                if let Some(pos) = self.execution_engine.get_position() {
+                    let side_str = if pos.position_amt > 0.0 { "LONG" } else { "SHORT" };
+                    let current_bars = self.asset.ohlcv.len().saturating_sub(pos.live_entry_bar);
+                    warn!(
+                        "🔒 [LOCK DNA ON ACTIVE TRADE] Symbol: {} | Active Position: {} @ {:.2} (Age: {} bars) \
+                        | Postponing DNA update (Fitness: {:.2}%) until position closes! Storing in pending_dna.",
+                        self.symbol, side_str, pos.entry_price, current_bars, dna.fitness
+                    );
+                    self.pending_dna = Some(dna.clone());
+                } else {
+                    if let Some(ref mut strategy) = self.strategy {
+                        strategy.update_from_dna(&dna.dna);
+                        info!("✨ [{}] Đã cập nhật bộ não Helios với DNA mới từ Re-Optimizer! (Fitness: {:.4})", self.symbol, dna.fitness);
+                    }
+                    self.pending_dna = None;
                 }
             }
         }
@@ -328,9 +396,25 @@ impl AssetActor {
 
         // 3. Nếu đang ở trạng thái Trading, thực thi chiến lược
         if self.state == AssetState::Trading {
+            // 0. Đồng bộ AccountEvent dồn đọng từ WebSocket/sàn trước khi xử lý nến mới
+            while let Ok(acc_evt) = self.account_rx.try_recv() {
+                self.execution_engine.on_account_event(&acc_evt).await;
+            }
+
             let full_buffer = self.asset.get_candles_vec();
             let live_position = self.execution_engine.get_position();
             let current_bar_idx = full_buffer.len().saturating_sub(1);
+
+            // Kiểm tra giải phóng Cooldown nếu đã hết thời gian khóa
+            if let Some(ref guard) = self.cooldown_guard {
+                if candle.timestamp >= guard.locked_until_ts || current_bar_idx >= guard.locked_until_bar {
+                    info!(
+                        "🟢 [COOLDOWN EXPIRED] Symbol: {} | Side {} cooldown released at bar {} (ts: {}). System ready for new trades.",
+                        self.symbol, guard.locked_side, current_bar_idx, candle.timestamp
+                    );
+                    self.cooldown_guard = None;
+                }
+            }
             
             // Cắt nến bộ nhớ: Đảm bảo cửa sổ luôn chứa nến mở vị thế (live_entry_bar) và padding an toàn
             let max_mem = if let Some(ref pos) = live_position {
@@ -344,11 +428,63 @@ impl AssetActor {
             let rolling_buffer = &full_buffer[slice_start..];
 
             // BƯỚC 3.1: Quét nến real-time cho ExecutionEngine (Paper Trader tự kiểm tra Trailing SL/TP tại đây)
+            let pos_before = self.execution_engine.get_position();
             let _ = self.execution_engine.on_candle_ctx(&candle, current_bar_idx).await;
+            let pos_after = self.execution_engine.get_position();
+
+            // KIỂM CHỨNG LỖ HỔNG 2: Vị thế vừa bị đóng trong chính cây nến này (SL/TP)
+            let closed_intra_candle = pos_before.is_some() && pos_after.is_none();
+            if closed_intra_candle {
+                if let Some(ref p) = pos_before {
+                    let side_str = if p.position_amt > 0.0 { "LONG" } else { "SHORT" };
+                    let exit_price = if p.position_amt > 0.0 {
+                        p.current_sl_price.unwrap_or(candle.low)
+                    } else {
+                        p.current_sl_price.unwrap_or(candle.high)
+                    };
+                    let trade_pnl = if p.position_amt > 0.0 {
+                        exit_price - p.entry_price
+                    } else {
+                        p.entry_price - exit_price
+                    };
+
+                    info!(
+                        "⚡ [INTRA-CANDLE EXIT] Symbol: {} | Position {} entry {:.2} was CLOSED during candle {} (bar_idx: {}) at est. {:.2} (Est PnL: {:+.2})",
+                        self.symbol, side_str, p.entry_price, candle.timestamp, current_bar_idx, exit_price, trade_pnl
+                    );
+
+                    // 🛑 KÍCH HOẠT COOLDOWN GUARD: Nếu cắt lỗ hoặc hòa vốn danh nghĩa (PnL <= 0.001)
+                    if self.cooldown_bars > 0 && trade_pnl <= 0.001 {
+                        let locked_until_ts = candle.timestamp + (self.cooldown_bars as i64 * 60_000);
+                        let locked_until_bar = current_bar_idx + self.cooldown_bars;
+                        self.cooldown_guard = Some(CooldownGuard {
+                            locked_until_ts,
+                            locked_until_bar,
+                            locked_side: side_str.to_string(),
+                            last_exit_price: exit_price,
+                        });
+                        warn!(
+                            "🛑 [COOLDOWN ARMED] Symbol: {} | Side: {} | Entry: {:.2} -> Exit: {:.2} (Est PnL: {:+.2}) | Locked until bar {} (ts: {}, {} bars / {}m)",
+                            self.symbol, side_str, p.entry_price, exit_price, trade_pnl, locked_until_bar, locked_until_ts, self.cooldown_bars, self.cooldown_bars
+                        );
+                    }
+                }
+
+                // 🔄 LOCK DNA ON ACTIVE TRADE: Kích hoạt ngay Pending DNA nếu vị thế vừa đóng bởi Trailing SL/TP
+                if let Some(pending) = self.pending_dna.take() {
+                    if let Some(ref mut strategy) = self.strategy {
+                        strategy.update_from_dna(&pending.dna);
+                        info!(
+                            "🔄 [PENDING DNA ACTIVATED] Symbol: {} | Position closed (Intra-candle SL/TP) -> Swapped in pending DNA (Fitness: {:.2}%, Dim: {}) for subsequent trades!",
+                            self.symbol, pending.fitness, pending.dna.len()
+                        );
+                    }
+                }
+            }
 
             // BƯỚC 3.2: Lấy số dư vốn thực tế và trạng thái vị thế mới nhất
             let current_equity = self.execution_engine.get_equity();
-            let current_position = self.execution_engine.get_position();
+            let current_position = pos_after.clone();
 
             // BƯỚC 3.3: Gọi HeliosBridge::evaluate_live_tick để đánh giá tín hiệu và dời Trailing SL cho nến tiếp theo
             if let Some(ref mut strategy) = self.strategy {
@@ -360,22 +496,110 @@ impl AssetActor {
                     strategy.as_mut(),
                     current_equity,
                 );
+
+                // 🛡️ BƯỚC 2: CHỐT CHẶN REVENGE RE-ENTRY & COOLDOWN GUARD
+                let mut valid_actions = Vec::new();
+
+                for action in actions {
+                    match &action {
+                        Action::Buy { .. } | Action::Sell { .. } => {
+                            let order_side = if matches!(action, Action::Buy { .. }) { "LONG" } else { "SHORT" };
+
+                            // TẦNG 1: CẤM TUYỆT ĐỐI MỞ LỆNH TRÊN CÙNG CÂY NẾN VỪA ĐÓNG VỊ THẾ (No Same-Bar Re-entry)
+                            if closed_intra_candle {
+                                let prev_side = pos_before.as_ref().map(|p| if p.position_amt > 0.0 { "LONG" } else { "SHORT" }).unwrap_or("UNKNOWN");
+                                warn!(
+                                    "🛡️ [REVENGE RE-ENTRY BLOCKED] Symbol: {} | Position {} was closed intra-candle at bar_idx {} -> SUPPRESSED new order {:?} on the SAME candle!",
+                                    self.symbol, prev_side, current_bar_idx, action
+                                );
+                                continue;
+                            }
+
+                            // TẦNG 2: KIỂM TRA COOLDOWN LIÊN NẾN (Inter-Candle Cooldown)
+                            if let Some(ref guard) = self.cooldown_guard {
+                                if guard.locked_side == order_side {
+                                    let price_diff = (current_close - guard.last_exit_price).abs();
+                                    let breakout_threshold = guard.last_exit_price * 0.015; // 1.5% breakout
+                                    if price_diff < breakout_threshold {
+                                        warn!(
+                                            "🛡️ [COOLDOWN BLOCKED] Symbol: {} | Order {:?} BLOCKED by Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2}, Current Close: {:.2}, Diff: {:.2} < {:.2} (1.5%)",
+                                            self.symbol, action, guard.locked_until_bar, guard.locked_until_bar.saturating_sub(current_bar_idx),
+                                            guard.last_exit_price, current_close, price_diff, breakout_threshold
+                                        );
+                                        continue;
+                                    } else {
+                                        info!(
+                                            "⚡ [COOLDOWN VOLATILITY OVERRIDE] Symbol: {} | Price moved {:.2} >= {:.2} from last exit {:.2} -> Early release Cooldown!",
+                                            self.symbol, price_diff, breakout_threshold, guard.last_exit_price
+                                        );
+                                        self.cooldown_guard = None;
+                                    }
+                                }
+                            }
+
+                            valid_actions.push(action);
+                        }
+                        _ => {
+                            valid_actions.push(action);
+                        }
+                    }
+                }
                 
-                if !actions.is_empty() {
-                    debug!("🎯 [{}] Strategy generated {} actions on candle {}!", self.symbol, actions.len(), current_close);
-                    for action in actions {
+                if !valid_actions.is_empty() {
+                    debug!("🎯 [{}] Executing {} valid actions on candle {}!", self.symbol, valid_actions.len(), current_close);
+                    for action in valid_actions {
                         if let Err(e) = self.execution_engine.execute_action_ctx(&action, current_close, candle.timestamp, current_bar_idx).await {
                             error!("❌ [{}] Lỗi thực thi action {:?}: {:?}", self.symbol, action, e);
                         }
                     }
                 } else {
-                    debug!("🧠 [{}] Strategy evaluated. No actions generated on close {}.", self.symbol, current_close);
+                    debug!("🧠 [{}] Strategy evaluated. No actions executed on close {}.", self.symbol, current_close);
                 }
             }
 
             // Đồng bộ AccountEvent vừa phát ra ngay lập tức
             while let Ok(acc_evt) = self.account_rx.try_recv() {
                 self.execution_engine.on_account_event(&acc_evt).await;
+            }
+
+            // Kích hoạt Cooldown nếu vị thế vừa đóng bởi Action ở Bước 3.4 (ví dụ ClosePosition / Stagnant Decay)
+            let pos_post_action = self.execution_engine.get_position();
+            if pos_after.is_some() && pos_post_action.is_none() {
+                if let Some(ref p) = pos_after {
+                    let side_str = if p.position_amt > 0.0 { "LONG" } else { "SHORT" };
+                    let trade_pnl = if p.position_amt > 0.0 {
+                        current_close - p.entry_price
+                    } else {
+                        p.entry_price - current_close
+                    };
+                    if self.cooldown_bars > 0 && trade_pnl <= 0.001 {
+                        let locked_until_ts = candle.timestamp + (self.cooldown_bars as i64 * 60_000);
+                        let locked_until_bar = current_bar_idx + self.cooldown_bars;
+                        self.cooldown_guard = Some(CooldownGuard {
+                            locked_until_ts,
+                            locked_until_bar,
+                            locked_side: side_str.to_string(),
+                            last_exit_price: current_close,
+                        });
+                        warn!(
+                            "🛑 [COOLDOWN ARMED (ACTION EXIT)] Symbol: {} | Side: {} | Entry: {:.2} -> Exit: {:.2} (PnL: {:+.2}) | Locked until bar {} (ts: {}, {} bars / {}m)",
+                            self.symbol, side_str, p.entry_price, current_close, trade_pnl, locked_until_bar, locked_until_ts, self.cooldown_bars, self.cooldown_bars
+                        );
+                    }
+                }
+            }
+
+            // 🔄 LOCK DNA ON ACTIVE TRADE: Kích hoạt Pending DNA nếu vị thế đã đóng hoàn toàn (Flat) sau khi thực thi Action
+            if pos_post_action.is_none() {
+                if let Some(pending) = self.pending_dna.take() {
+                    if let Some(ref mut strategy) = self.strategy {
+                        strategy.update_from_dna(&pending.dna);
+                        info!(
+                            "🔄 [PENDING DNA ACTIVATED] Symbol: {} | Position is now FLAT (Post-Action) -> Swapped in pending DNA (Fitness: {:.2}%, Dim: {}) for subsequent trades!",
+                            self.symbol, pending.fitness, pending.dna.len()
+                        );
+                    }
+                }
             }
         }
     }

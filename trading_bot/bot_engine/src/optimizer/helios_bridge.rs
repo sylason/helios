@@ -9,7 +9,7 @@ use ferro_trade::stats::{Stats, StatsInput, compute_stats};
 use ferro_trade::data::Timeframe;
 use smallvec::SmallVec;
 use crate::models::models::Candle;
-use tracing::{debug, error};
+use tracing::{debug, warn, error};
 
 /// Danh sách các khung thời gian tiêu chuẩn cho chiến lược Helios V3
 pub const HELIOS_REQUIRED_TIMEFRAMES: [Timeframe; 4] = [
@@ -218,6 +218,14 @@ impl HeliosBridge {
             if pos.position_amt != 0.0 {
                 // Tìm vị trí cây nến mở lệnh thực tế theo Timestamp (bất biến trước mọi thao tác cắt tỉa buffer)
                 let mapped_entry_bar = if pos.entry_timestamp > 0 {
+                    // 🌊 SENSOR PROBE: Bắt méo mó High Watermark khi nến vào lệnh trôi ra ngoài biên trái buffer
+                    if !candles.is_empty() && pos.entry_timestamp < candles[0].timestamp {
+                        warn!(
+                            "🌊 [FLAW CONFIRMED: HIGH WATERMARK BUFFER BLEED] Symbol: {} | Entry ts: {} is OLDER than Buffer Start: {} \
+                            | mapped_entry_bar FALLBACK TO 0! Strategy will scan peak_val from index 1 (Scanning pre-entry candles into High Watermark)!",
+                            _symbol, pos.entry_timestamp, candles[0].timestamp
+                        );
+                    }
                     match candles.binary_search_by_key(&pos.entry_timestamp, |c| c.timestamp) {
                         Ok(idx) => idx,
                         Err(idx) => idx.saturating_sub(1),
@@ -225,6 +233,20 @@ impl HeliosBridge {
                 } else {
                     pos.live_entry_bar.saturating_sub(slice_start)
                 };
+
+                // 🔒 SENSOR PROBE: Bắt hiện tượng Take Profit Tĩnh bị đóng băng (Static TP Lock)
+                if let (Some(tp), Some(tag)) = (pos.current_tp_price, &pos.opening_playbook_tag) {
+                    if tag == "RANGE_OSC" {
+                        let current_close = candles[last_idx].close;
+                        let diff = (current_close - tp).abs();
+                        warn!(
+                            "🔒 [STATIC TP FROZEN SENSOR] Symbol: {} | Playbook: RANGE_OSC | Locked TP: {:.2} | Current Close: {:.2} (Diff: {:.2}) \
+                            | Strategy preserves static trade.tp_price without trailing to dynamic bands!",
+                            _symbol, tp, current_close, diff
+                        );
+                    }
+                }
+
                 let mut trade = ferro_trade::broker::trade::Trade::new(
                     1,
                     pos.position_amt,

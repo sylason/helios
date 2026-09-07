@@ -37,7 +37,7 @@ const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
 // 2. Dữ liệu & Cửa sổ thời gian
-const TOTAL_FETCH_DAYS: i64 = 18;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
+const TOTAL_FETCH_DAYS: i64 = 21;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
 const TRAIN_WINDOW_DAYS: i64 = 14;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
 
 // 3. Chu kỳ Vòng lặp Tịnh tiến
@@ -156,7 +156,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         let market_filter = syncer.fetch_market_filter(SYMBOL).await.unwrap_or_default();
-        let strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
+        let mut strategy_inst = HeliosStrategyV3::new(&std::collections::HashMap::new());
+        strategy_inst.debug_mode = true; // BẬT TELEMETRY CHO ASSET ACTOR TRONG WALK FORWARD (GA Optimizer KHÔNG bị ảnh hưởng)
+        let strategy = Box::new(strategy_inst);
 
         let engine_config = EngineConfig {
             initial_cash: INITIAL_CASH,

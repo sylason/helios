@@ -15,6 +15,7 @@ use chrono::Utc;
 use crate::models::market_info::MarketFilter;
 use crate::error::BotError;
 use ferro_trade::broker::actions::Action;
+use ferro_trade::broker::policies::RiskPolicy;
 use crate::data_engine::sqlite_impl::SqliteStore;
 use binance_sdk::common::models::{RateLimitType, Interval as BinanceInterval};
 use crate::models::weight_monitor::WeightMonitor;
@@ -149,11 +150,27 @@ impl OrderExecutor {
         }
 
         let (side, is_close_all, risk_percentage) = match action {
-            Action::Buy { size, stop, .. } => {
+            Action::Buy { size, stop, policy, .. } => {
+                // ⚠️ SENSOR PROBE: Bắt thiếu sót đặt lệnh Take Profit trên Binance Live
+                if let Some(RiskPolicy::FixedPrice { tp_price: Some(tp), .. }) = &policy {
+                    warn!(
+                        "⚠️ [LIVE ENGINE GAP: TP NOT PLACED ON EXCHANGE] Symbol: {} | Strategy emitted Take Profit at {:.2}, \
+                        but OrderExecutor ONLY places Algo STOP_MARKET for SL. NO Take Profit order submitted to Binance Futures!",
+                        symbol, tp
+                    );
+                }
                 sl_price_to_set = stop;
                 (NewOrderSideEnum::Buy, false, size)
             },
-            Action::Sell { size, stop, .. } => {
+            Action::Sell { size, stop, policy, .. } => {
+                // ⚠️ SENSOR PROBE: Bắt thiếu sót đặt lệnh Take Profit trên Binance Live
+                if let Some(RiskPolicy::FixedPrice { tp_price: Some(tp), .. }) = &policy {
+                    warn!(
+                        "⚠️ [LIVE ENGINE GAP: TP NOT PLACED ON EXCHANGE] Symbol: {} | Strategy emitted Take Profit at {:.2}, \
+                        but OrderExecutor ONLY places Algo STOP_MARKET for SL. NO Take Profit order submitted to Binance Futures!",
+                        symbol, tp
+                    );
+                }
                 sl_price_to_set = stop;
                 (NewOrderSideEnum::Sell, false, size)
             },

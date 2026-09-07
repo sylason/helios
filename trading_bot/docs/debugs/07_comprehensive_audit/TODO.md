@@ -69,11 +69,25 @@ Mục tiêu: Rà soát 100% mã nguồn, cấu hình, logic toán học, thuật
   - [x] H.7 Hai kiến trúc V2 và V3 nằm lẫn lộn (>50% mã nguồn là rác V2 mồ côi: `types.rs`, `memory.rs`, `core_v2/`) (Major).
   - [x] H.8 Cấp phát Heap liên tục (6 lần `Box::new` / nến) trong vòng lặp `next()`, ngốn >250,000 allocations mỗi backtest (Performance).
 
+- [x] **TẦNG 9: 4 LỖ HỔNG CHÍ MẠNG PHÂN KỲ GIỮA BOT ENGINE VÀ HELIOS V3 (Walk-Forward Divergence Audit)** - *(Chi tiết: xem [10_critical_bot_engine_desync_flaws.md](file:///E:/Projects/Automations/trading_backtest/trading_bot/docs/debugs/07_comprehensive_audit/10_critical_bot_engine_desync_flaws.md))*
+  - [x] 9.1 Lỗ hổng 1: Đóng băng Cooldown vĩnh viễn (Index Freeze Deadlock) & Tính sai PnL thoát lệnh do dùng giá Close râu nến (Critical).
+  - [x] 9.2 Lỗ hổng 2: Lệnh tàng hình & Bỏ qua Cooldown khi lệnh mở và đóng trong cùng chu kỳ nến (Critical).
+  - [x] 9.3 Lỗ hổng 3: Bất đồng bộ mô hình khớp lệnh khi nến quét cả SL & TP giữa PaperTrader và Broker (Critical).
+  - [x] 9.4 Lỗ hổng 4: Sốc rủi ro khi Hot-Swap DNA áp đặt hồi tố lên vị thế đang mở (Critical).
+
+---
+
+## 🛠️ Kế Hoạch Triển Khai Sửa Lỗi (Remediation Roadmap)
+- [x] **Bước 1:** Triển khai "Lock DNA on Active Trade" (`pending_dna` trong `AssetActor`) - *(Đã triển khai & Pass build 100%)*
+- [x] **Bước 2:** Chốt chặn Revenge Re-Entry & Cooldown Guard (`AssetActor`) - *(Đã triển khai, chặn cùng nến & Cooldown liên nến, Pass 29/29 tests 100%)*
+- [ ] **Bước 3:** Tái thiết kế Stagnant Decay (Khai thông 2 gen `max_stagnant_hold_bars`, `stagnant_min_profit_pct` & Loại bỏ máy chém 45m)
+- [ ] **Bước 4:** Chuẩn hóa cờ `trade_on_close` (Khớp 1:1 giữa Live Tick và GA Optimizer)
+
 ---
 
 ## 📊 Tổng Kết Toàn Diện Cuộc Tổng Duyệt Toàn Hệ Sinh Thái
-- **Tổng số lỗi phát hiện:** **85 lỗ hổng**
-  - **Critical (Nguy kịch, mất tiền/cháy tài khoản/sập bot):** **36 lỗi**
+- **Tổng số lỗi phát hiện:** **89 lỗ hổng**
+  - **Critical (Nguy kịch, mất tiền/cháy tài khoản/sập bot):** **40 lỗi**
   - **Major (Nghiêm trọng, sai lệch toán học/logic/hiệu năng):** **25 lỗi**
   - **High/Medium/Perf (Rủi ro biên, phân mảnh, dead code, hiệu năng):** **24 lỗi**
 - **Độ phủ kiểm toán:** **100% không góc khuất** trên cả 3 dự án `ferro_trade`, `helios`, và `trading_bot` (từ lõi toán học, optimizer di truyền, khớp lệnh cho đến hạ tầng mạng WebSocket, quy chuẩn sàn, Desktop UI Tauri v2, và toàn bộ 27 file trong `helios/src`).
