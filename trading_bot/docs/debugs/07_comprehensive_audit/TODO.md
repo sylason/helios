@@ -80,7 +80,7 @@ Mục tiêu: Rà soát 100% mã nguồn, cấu hình, logic toán học, thuật
 ## 🛠️ Kế Hoạch Triển Khai Sửa Lỗi (Remediation Roadmap)
 - [x] **Bước 1:** Triển khai "Lock DNA on Active Trade" (`pending_dna` trong `AssetActor`) - *(Đã triển khai & Pass build 100%)*
 - [x] **Bước 2:** Chốt chặn Revenge Re-Entry & Cooldown Guard (`AssetActor`) - *(Đã triển khai, chặn cùng nến & Cooldown liên nến, Pass 29/29 tests 100%)*
-- [ ] **Bước 3:** Tái thiết kế Stagnant Decay (Khai thông 2 gen `max_stagnant_hold_bars`, `stagnant_min_profit_pct` & Loại bỏ máy chém 45m)
+- [x] **Bước 3:** Tái thiết kế Stagnant Decay (`risk.rs` & `config.rs`) - *(Đã kết nối 2 gen max_stagnant_hold_bars [120..2880] và stagnant_min_profit_pct [0.002..0.050], loại bỏ máy chém 45m, Pass 100% test)*
 - [ ] **Bước 4:** Chuẩn hóa cờ `trade_on_close` (Khớp 1:1 giữa Live Tick và GA Optimizer)
 
 ---

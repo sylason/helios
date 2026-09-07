@@ -526,10 +526,13 @@ graph TD
   - Tầng 1: Cấm tuyệt đối mở lệnh mới (`Action::Buy`, `Action::Sell`) trên cùng cây nến vừa đóng vị thế intra-candle (`closed_intra_candle == true`).
   - Tầng 2: Tự động kích hoạt `CooldownGuard` khi lệnh thoát với $PnL \le 0.001$, chặn mở lệnh cùng chiều trong `cooldown_bars` (mặc định 15 nến) trừ khi có bứt phá mạnh biến động ($1.5\%$).
   - Kích hoạt Cooldown tương tự nếu vị thế bị đóng bởi Action Exit (ví dụ Stagnant Decay).
-  - Vượt qua toàn bộ 29/29 bài test tự động của `bot_engine`.
-- [ ] **BƯỚC 3: Tái Thiết Kế Stagnant Decay (`risk.rs` & `config.rs`)**
-  - Khai thông 2 gen `max_stagnant_hold_bars` [120..2880 bars] và `stagnant_min_profit_pct` [0.002..0.050].
-  - Loại bỏ hoàn toàn việc dùng `time_countdown_bars` làm máy chém cắt non sau 45 phút.
+- [x] **BƯỚC 3: Tái Thiết Kế Stagnant Decay (`risk.rs` & `config.rs`)** - *(HOÀN THÀNH & PASS TEST 100%)*
+  - Chuẩn hóa dải tham số phổ quát: `max_stagnant_hold_bars` [120..2880 nến] và `stagnant_min_profit_pct` [0.002..0.050].
+  - Dọn sạch thuộc tính `#[dna]` thừa gắn nhầm trên `enable_re_entry_cooldown`.
+  - Kết nối trực tiếp 2 gen vào `manage_trailing_stop` trong `risk.rs`: Chỉ đóng lệnh khi ngâm quá `max_stagnant_hold_bars` VÀ lợi nhuận không đạt `stagnant_min_profit_pct`.
+  - Xóa bỏ hoàn toàn logic máy chém `decay_cycles > 0 && current_pnl <= 0.0` (vốn giết non lệnh sau 45 phút).
+  - Bảo tồn nguyên vẹn cơ chế Progressive Trailing SL Tightening (`time_countdown_bars` & `tighten_step_multiplier`).
+  - Vượt qua 5/5 test `helios`, 29/29 test `bot_engine` và build thành công `walk_forward_smart_seed`.
 - [ ] **BƯỚC 4: Chuẩn Hóa Cờ Khớp Lệnh `trade_on_close` & Mô Hình Khớp Nến**
   - Đồng bộ `trade_on_close` giữa `evaluate_live_tick` và GA Optimizer.
 
