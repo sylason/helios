@@ -533,7 +533,13 @@ graph TD
   - Xóa bỏ hoàn toàn logic máy chém `decay_cycles > 0 && current_pnl <= 0.0` (vốn giết non lệnh sau 45 phút).
   - Bảo tồn nguyên vẹn cơ chế Progressive Trailing SL Tightening (`time_countdown_bars` & `tighten_step_multiplier`).
   - Vượt qua 5/5 test `helios`, 29/29 test `bot_engine` và build thành công `walk_forward_smart_seed`.
-- [ ] **BƯỚC 4: Chuẩn Hóa Cờ Khớp Lệnh `trade_on_close` & Mô Hình Khớp Nến**
-  - Đồng bộ `trade_on_close` giữa `evaluate_live_tick` và GA Optimizer.
+- [x] **BƯỚC 4: Chuẩn Hóa Cờ Khớp Lệnh `trade_on_close` & Mô Hình Khớp Nến** - *(HOÀN THÀNH & PASS TEST 100%)*
+  - Đồng bộ `trade_on_close(true)` trong `HeliosBridge::analyze` khớp 1:1 với GA Optimizer (`prospector_runner.rs`) và `diagnostic_backtest_with_config`.
+  - Khớp lệnh Pessimistic Matching trong `PaperTrader::on_candle`: Khi nến quét cả SL & TP, loại bỏ heuristic khoảng cách, ưu tiên khớp Stop Loss trước 1:1 với `ferro_trade::Broker`.
+  - Triển khai Monotonic Ratchet Guard & Naked Position Guard trong `PaperTrader::process_action`: Ngăn chặn tuyệt đối việc lùi/nới lỏng SL hoặc xóa sổ SL về `None` khi đang có vị thế mở.
+  - Đồng bộ chuẩn xác SL/TP giữa `PaperTrader` và `PaperExecutionEngine::live_position`.
+  - Sửa đổi và chuẩn hóa `trailing_sl_test.rs` chuyển sang `HeliosStrategyV3` với timestamp thực từ nến.
+  - Vượt qua 31/31 unit tests `bot_engine`, 4/4 integration tests `trailing_sl_test`, 5/5 tests `helios`, và build thành công `walk_forward_smart_seed`.
 
 ---
+

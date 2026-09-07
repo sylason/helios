@@ -50,7 +50,7 @@ pub struct PaperTradeRecord {
     pub equity_after: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PositionType {
     None,
     Long,
@@ -394,49 +394,38 @@ impl PaperTrader {
         };
 
         if is_sl_hit && is_tp_hit {
-            // Nếu cả SL và TP cùng chạm trong 1 cây nến:
-            // Ưu tiên cái nào gần giá Open hơn (Heuristic của PaperTrader)
+            // =========================================================================
+            // 🛡️ CHUẨN HÓA MÔ HÌNH KHỚP LỆNH PESSIMISTIC (KHỚP 1:1 VỚI FERRO_TRADE BROKER)
+            // =========================================================================
+            // Trong ferro_trade::Broker (kế thừa 1:1 từ backtesting.py), lệnh Stop Loss luôn được
+            // push_front vào đầu hàng đợi và duyệt trước Take Profit. Khi nến quét cả 2 mức SL & TP,
+            // Stop Loss LUÔN ĐƯỢC KHỚP và Take Profit bị hủy ngay lập tức (Bảo thủ tuyệt đối).
             let sl = sl_opt.unwrap();
             let tp = tp_opt.unwrap();
-            let dist_sl = (candle.open - sl).abs();
-            let dist_tp = (candle.open - tp).abs();
-
-            // 🚨 SENSOR PROBE: Bắt bất đồng bộ Dual-Hit giữa PaperTrader và Backtest Broker
-            let choice_str = if dist_sl <= dist_tp { "STOP LOSS" } else { "TAKE PROFIT (WIN)" };
-            warn!(
-                "🚨 [FLAW 3 CONFIRMED: DUAL-HIT DIVERGENCE] Symbol: {} | Candle: {} | O: {:.2}, H: {:.2}, L: {:.2}, C: {:.2} \
-                | Pos: {:?} @ {:.2} | SL: {:.2} (dist: {:.2}) vs TP: {:.2} (dist: {:.2}) \
-                | Choice: PaperTrader EXECUTED {} but Backtest Broker ALWAYS EXECUTES SL (push_front Pessimistic Model)! Result Divergence Confirmed!",
+            info!(
+                "🛡️ [PESSIMISTIC DUAL-HIT MATCHED] Symbol: {} | Candle: {} | O: {:.2}, H: {:.2}, L: {:.2}, C: {:.2} \
+                | Pos: {:?} @ {:.2} | Both SL: {:.2} and TP: {:.2} hit -> EXECUTED STOP LOSS (1:1 with Backtest Broker)!",
                 self.symbol, candle.timestamp, candle.open, candle.high, candle.low, candle.close,
-                self.position_type, self.entry_price, sl, dist_sl, tp, dist_tp, choice_str
+                self.position_type, self.entry_price, sl, tp
             );
 
-            if dist_sl <= dist_tp {
-                let is_tsl = self.check_is_tsl(sl);
-                let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
-                let (exec_sl, has_gap) = match self.position_type {
-                    PositionType::Long => if candle.open < sl { (candle.open, true) } else { (sl, false) },
-                    PositionType::Short => if candle.open > sl { (candle.open, true) } else { (sl, false) },
-                    PositionType::None => (sl, false),
-                };
-                if has_gap {
-                    let slip_diff = (candle.open - sl).abs();
-                    let slip_pct = (slip_diff / self.entry_price) * 100.0;
-                    warn!(
-                        "⚠️ [GAP SLIPPAGE HIT] Symbol: {} | Side: {:?} | Target SL: {:.2} | Candle Open: {:.2} \
-                        | Gap Slippage: {:.2} USDT ({:.2}%) | Executed at Open ({:.2}) instead of SL price!",
-                        self.symbol, self.position_type, sl, candle.open, slip_diff, slip_pct, exec_sl
-                    );
-                }
-                self.close_position(exec_sl, reason, candle.timestamp, bar_index, account_tx);
-            } else {
-                let exec_tp = match self.position_type {
-                    PositionType::Long => if candle.open > tp { candle.open } else { tp },
-                    PositionType::Short => if candle.open < tp { candle.open } else { tp },
-                    PositionType::None => tp,
-                };
-                self.close_position(exec_tp, ExitReason::TakeProfit, candle.timestamp, bar_index, account_tx);
+            let is_tsl = self.check_is_tsl(sl);
+            let reason = if is_tsl { ExitReason::TrailingStopLoss } else { ExitReason::HardStopLoss };
+            let (exec_sl, has_gap) = match self.position_type {
+                PositionType::Long => if candle.open < sl { (candle.open, true) } else { (sl, false) },
+                PositionType::Short => if candle.open > sl { (candle.open, true) } else { (sl, false) },
+                PositionType::None => (sl, false),
+            };
+            if has_gap {
+                let slip_diff = (candle.open - sl).abs();
+                let slip_pct = (slip_diff / self.entry_price) * 100.0;
+                warn!(
+                    "⚠️ [GAP SLIPPAGE HIT] Symbol: {} | Side: {:?} | Target SL: {:.2} | Candle Open: {:.2} \
+                    | Gap Slippage: {:.2} USDT ({:.2}%) | Executed at Open ({:.2}) instead of SL price!",
+                    self.symbol, self.position_type, sl, candle.open, slip_diff, slip_pct, exec_sl
+                );
             }
+            self.close_position(exec_sl, reason, candle.timestamp, bar_index, account_tx);
             return true;
         } else if is_sl_hit {
             let sl = sl_opt.unwrap();
@@ -552,14 +541,50 @@ impl PaperTrader {
                         );
                     }
 
-                    if let Some(new_sl) = new_sl_price {
+                    // 🛡️ MONOTONIC RATCHET GUARD: Chốt chặn an toàn 1 chiều
+                    // 1. Chống lùi SL (Monotonic Ratchet): Long chỉ dời tăng lên, Short chỉ dời giảm xuống.
+                    // 2. Chống xóa sổ SL (Naked Position): Nếu đang có vị thế và đã có SL, không bao giờ cho phép new_sl_price = None.
+                    let safe_sl_price = match (self.position_type, self.current_sl_price, new_sl_price) {
+                        (PositionType::Long, Some(old_sl), Some(new_sl)) => {
+                            if new_sl < old_sl - 1e-4 {
+                                warn!(
+                                    "🛡️ [MONOTONIC RATCHET BLOCKED] Symbol: {} | Long SL retracted from {:.2} to {:.2}. Guarded & kept tighter SL: {:.2}",
+                                    self.symbol, old_sl, new_sl, old_sl
+                                );
+                                Some(old_sl)
+                            } else {
+                                Some(new_sl)
+                            }
+                        }
+                        (PositionType::Short, Some(old_sl), Some(new_sl)) => {
+                            if new_sl > old_sl + 1e-4 {
+                                warn!(
+                                    "🛡️ [MONOTONIC RATCHET BLOCKED] Symbol: {} | Short SL retracted from {:.2} to {:.2}. Guarded & kept tighter SL: {:.2}",
+                                    self.symbol, old_sl, new_sl, old_sl
+                                );
+                                Some(old_sl)
+                            } else {
+                                Some(new_sl)
+                            }
+                        }
+                        (PositionType::Long | PositionType::Short, Some(old_sl), None) => {
+                            warn!(
+                                "🛡️ [NAKED POSITION GUARD BLOCKED] Symbol: {} | Attempted to wipe out SL {:.2} with None! Guarded & kept existing SL.",
+                                self.symbol, old_sl
+                            );
+                            Some(old_sl)
+                        }
+                        _ => new_sl_price,
+                    };
+
+                    if let Some(new_sl) = safe_sl_price {
                         let should_log = self.current_sl_price.map_or(true, |old_sl| (new_sl - old_sl).abs() > 1e-4);
                         if should_log {
                             let old_sl_str = self.current_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
                             info!("🛡️ [TRAILING SL UPDATE] Symbol: {} | SL Ratchet: {} -> {:.2}", self.symbol, old_sl_str, new_sl);
                         }
                     }
-                    self.current_sl_price = new_sl_price;
+                    self.current_sl_price = safe_sl_price;
                     self.current_tp_price = new_tp_price;
                     self.broadcast_account_events(account_tx);
                 }
@@ -646,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn test_paper_trader_cancel_sl() {
+    fn test_paper_trader_block_naked_position_cancel() {
         use ferro_trade::broker::policies::RiskPolicy;
         let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
 
@@ -654,24 +679,24 @@ mod tests {
         trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, 1600000000, 0, None);
         assert_eq!(trader.current_sl_price, Some(1950.0));
 
-        // Hủy SL bằng cách truyền None
+        // Cố tình hủy SL bằng cách truyền None -> Bị Naked Position Guard chặn đứng, bảo tồn SL 1950.0
         trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: None, new_tp_price: None }, 2000.0, 1600000120, 2, None);
-        assert_eq!(trader.current_sl_price, None);
+        assert_eq!(trader.current_sl_price, Some(1950.0), "Naked Position Guard phải giữ nguyên SL không cho phép xóa sổ để tránh rủi ro Naked Position!");
 
         let candle = crate::models::models::Candle {
             symbol: "ETHUSDT".to_string(),
             timestamp: 1600000180,
             open: 1990.0,
             high: 2010.0,
-            low: 1940.0,
+            low: 1940.0, // Thủng mức SL 1950.0
             close: 1960.0,
             volume: 10.0,
         };
 
-        // Khi SL đã bị hủy thì candle.low <= 1950 không làm đóng vị thế
+        // Do SL được bảo tồn ở 1950.0 nên vị thế vẫn được bảo vệ và cắt lỗ thành công
         let sl_hit = trader.on_candle(&candle, 3, None);
-        assert!(!sl_hit);
-        assert_eq!(trader.position_type, PositionType::Long);
+        assert!(sl_hit);
+        assert_eq!(trader.position_type, PositionType::None);
     }
 
     #[test]
@@ -748,6 +773,63 @@ mod tests {
         let hit = trader.on_candle(&candle, 2, None);
         assert!(hit);
         assert_eq!(trader.closed_trades[0].exit_reason, ExitReason::TrailingStopLoss);
+    }
+
+    #[test]
+    fn test_monotonic_ratchet_guard() {
+        use ferro_trade::broker::policies::RiskPolicy;
+        let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
+
+        // Long 1 ETH tại 2000, SL ban đầu 1900
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1900.0), tp_price: None });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, 1600000000, 0, None);
+        assert_eq!(trader.current_sl_price, Some(1900.0));
+
+        // 1. Siết SL lên 1950 -> Hợp lệ, SL được nâng lên 1950
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(1950.0), new_tp_price: None }, 2020.0, 1600000060, 1, None);
+        assert_eq!(trader.current_sl_price, Some(1950.0));
+
+        // 2. Cố tình lùi/nới lỏng SL về 1920 -> BỊ MONOTONIC RATCHET CHẶN ĐỨNG! SL vẫn giữ 1950
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(1920.0), new_tp_price: None }, 2010.0, 1600000120, 2, None);
+        assert_eq!(trader.current_sl_price, Some(1950.0), "Monotonic Ratchet Guard phải giữ mức SL chặt hơn (1950.0)!");
+
+        // 3. Cố tình xóa sổ SL với None -> BỊ NAKED POSITION GUARD CHẶN ĐỨNG! SL vẫn giữ 1950
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: None, new_tp_price: None }, 2010.0, 1600000180, 3, None);
+        assert_eq!(trader.current_sl_price, Some(1950.0), "Naked Position Guard phải giữ nguyên SL không cho xóa sổ!");
+
+        // 4. Siết tiếp SL lên 1980 -> Hợp lệ, SL lên 1980
+        trader.process_action(Action::UpdateTradeSlTp { trade_id: 0, new_sl_price: Some(1980.0), new_tp_price: None }, 2030.0, 1600000240, 4, None);
+        assert_eq!(trader.current_sl_price, Some(1980.0));
+    }
+
+    #[test]
+    fn test_pessimistic_dual_hit_sl_priority() {
+        use ferro_trade::broker::policies::RiskPolicy;
+        let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
+
+        // Long tại 2000, SL = 1950, TP = 2050
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1950.0), tp_price: Some(2050.0) });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: None }, 2000.0, 1600000000, 0, None);
+
+        // Nến biến động cực mạnh quét cả TP (2060 > 2050) và SL (1940 < 1950).
+        // Giá Open = 2045 (rất gần TP 2050, cách chỉ 5 điểm, trong khi cách SL 95 điểm).
+        let candle = crate::models::models::Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1600000060,
+            open: 2045.0,
+            high: 2060.0,
+            low: 1940.0,
+            close: 1960.0,
+            volume: 100.0,
+        };
+
+        // Theo mô hình bảo thủ Pessimistic Matching (1:1 với ferro_trade::Broker):
+        // Bắt buộc phải ưu tiên khớp Stop Loss trước!
+        let hit = trader.on_candle(&candle, 1, None);
+        assert!(hit);
+        assert_eq!(trader.position_type, PositionType::None);
+        assert_eq!(trader.closed_trades[0].exit_reason, ExitReason::HardStopLoss);
+        assert_eq!(trader.closed_trades[0].exit_price, 1950.0);
     }
 }
 

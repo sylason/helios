@@ -1,7 +1,7 @@
 use bot_engine::models::models::Candle;
 use bot_engine::controller::asset_actor::LivePositionState;
 use bot_engine::optimizer::helios_bridge::HeliosBridge;
-use helios::strategy::HeliosStrategy;
+use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::broker::actions::Action;
 use ferro_trade::strategy::Strategy;
 
@@ -81,23 +81,25 @@ fn test_live_trailing_sl_generation() {
     let last_bar = candles.len() - 1;
 
     // 2. Giả lập Vị thế Thật trên Binance: Long 1.0 ETH tại $1800, mở ở nến last_bar - 4
+    // 2. Giả lập Vị thế Thật trên Binance: Long 1.0 ETH tại $1800, mở ở nến last_bar - 4
     let live_pos = LivePositionState {
         symbol: "ETHUSDT".to_string(),
         position_amt: 1.0,
         entry_price: 1800.0,
-        entry_timestamp: 1700000000000,
+        entry_timestamp: candles[last_bar - 4].timestamp,
         live_entry_bar: last_bar - 4,
         current_sl_price: Some(1790.0),
+        current_tp_price: None,
         opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
     };
 
     // 3. Khởi tạo Helios Strategy V3 với DNA
-    let mut strategy = HeliosStrategy::default();
+    let mut strategy = HeliosStrategyV3::default();
     let dna = get_mock_dna();
     strategy.update_from_dna(&dna);
 
     // 4. Đánh giá nến hiện tại
-    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, Some(&live_pos), &mut strategy);
+    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, 0, Some(&live_pos), &mut strategy, 1000.0);
 
     // 5. Kiểm tra kết quả: Phải trả về Action::UpdateTradeSlTp với new_sl_price > 1790.0
     let mut found_sl_update = false;
@@ -126,16 +128,17 @@ fn test_ratchet_protection() {
         symbol: "ETHUSDT".to_string(),
         position_amt: 1.0,
         entry_price: 1800.0,
-        entry_timestamp: 1700000000000,
+        entry_timestamp: candles[last_bar - 5].timestamp,
         live_entry_bar: last_bar - 5,
         current_sl_price: Some(1847.23),
+        current_tp_price: None,
         opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
     };
 
-    let mut strategy = HeliosStrategy::default();
+    let mut strategy = HeliosStrategyV3::default();
     strategy.update_from_dna(&get_mock_dna());
 
-    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, Some(&live_pos), &mut strategy);
+    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, 0, Some(&live_pos), &mut strategy, 1000.0);
 
     // Bánh cóc Ratchet: TUYỆT ĐỐI KHÔNG DỜI SL THẤP HƠN 1847.23 khi giá sập!
     for action in actions {
@@ -157,16 +160,17 @@ fn test_short_position_trailing() {
         symbol: "ETHUSDT".to_string(),
         position_amt: -1.0, // Short position
         entry_price: 1800.0,
-        entry_timestamp: 1700000000000,
+        entry_timestamp: candles[last_bar - 4].timestamp,
         live_entry_bar: last_bar - 4,
         current_sl_price: Some(1810.0), // Old SL above entry
+        current_tp_price: None,
         opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
     };
 
-    let mut strategy = HeliosStrategy::default();
+    let mut strategy = HeliosStrategyV3::default();
     strategy.update_from_dna(&get_mock_dna());
 
-    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, Some(&live_pos), &mut strategy);
+    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, 0, Some(&live_pos), &mut strategy, 1000.0);
 
     let mut found_sl_update = false;
     for action in actions {
@@ -195,16 +199,17 @@ fn test_zombie_stagnant_decay() {
         symbol: "ETHUSDT".to_string(),
         position_amt: 1.0,
         entry_price: 1800.0,
-        entry_timestamp: 1700000000000,
+        entry_timestamp: candles[last_bar - 60].timestamp,
         live_entry_bar: last_bar - 60,
         current_sl_price: Some(1790.0),
+        current_tp_price: None,
         opening_playbook_tag: Some("RANGE_OSC".to_string()),
     };
 
-    let mut strategy = HeliosStrategy::default();
+    let mut strategy = HeliosStrategyV3::default();
     strategy.update_from_dna(&get_mock_dna());
 
-    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, Some(&live_pos), &mut strategy);
+    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, 0, Some(&live_pos), &mut strategy, 1000.0);
 
     let mut found_sl_update = false;
     for action in actions {

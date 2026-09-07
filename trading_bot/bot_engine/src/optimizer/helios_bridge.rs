@@ -68,7 +68,7 @@ impl HeliosBridge {
             1.0,     // Margin rate
             Box::new(|_, _| 0.0), // Zero commission cho simulation
             0.0,     // Spread
-            false,   // trade_on_close
+            true,    // trade_on_close: Chuẩn hóa true khớp 1:1 với GA Optimizer & diagnostic_backtest
             false,   // hedging
             true,    // exclusive_orders
             None,    // max_position_size

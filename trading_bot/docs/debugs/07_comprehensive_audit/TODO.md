@@ -81,7 +81,7 @@ Mục tiêu: Rà soát 100% mã nguồn, cấu hình, logic toán học, thuật
 - [x] **Bước 1:** Triển khai "Lock DNA on Active Trade" (`pending_dna` trong `AssetActor`) - *(Đã triển khai & Pass build 100%)*
 - [x] **Bước 2:** Chốt chặn Revenge Re-Entry & Cooldown Guard (`AssetActor`) - *(Đã triển khai, chặn cùng nến & Cooldown liên nến, Pass 29/29 tests 100%)*
 - [x] **Bước 3:** Tái thiết kế Stagnant Decay (`risk.rs` & `config.rs`) - *(Đã kết nối 2 gen max_stagnant_hold_bars [120..2880] và stagnant_min_profit_pct [0.002..0.050], loại bỏ máy chém 45m, Pass 100% test)*
-- [ ] **Bước 4:** Chuẩn hóa cờ `trade_on_close` (Khớp 1:1 giữa Live Tick và GA Optimizer)
+- [x] **Bước 4:** Chuẩn hóa cờ `trade_on_close` & Mô Hình Khớp Lệnh - *(Đã đồng bộ trade_on_close(true), Pessimistic Matching ưu tiên SL khi quét 2 đầu 1:1 với Broker, Monotonic Ratchet Guard & Naked Position Guard tại PaperTrader, Pass 31/31 bot_engine tests, 4/4 trailing_sl_test, 5/5 helios tests)*
 
 ---
 
