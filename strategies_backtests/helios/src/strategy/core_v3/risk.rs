@@ -232,23 +232,45 @@ impl RiskManager {
                 raw_sl.min(max_short_sl)
             };
 
-            // [ENHANCEMENT 1: SQUEEZE-AWARE DYNAMIC BREAK-EVEN TRIGGER]
-            // Không hardcode: Ngưỡng kích hoạt tự động giãn nở theo độ nén Squeeze của Matrix và DNA base_be_roe_trigger
+            // [ENHANCEMENT 1: REGIME-AWARE DYNAMIC BREAK-EVEN TRIGGER]
+            // Không hardcode: Ngưỡng kích hoạt và khoảng đệm bảo vệ vốn phân tầng theo 3 nhóm Regime Simplex (Trend, Range, Volatile)
+            let (be_trigger_mult, be_buffer_mult) = match trade.tag.as_deref() {
+                Some("TREND_PB") | Some("ABSORPTION") => (
+                    if risk_cfg.be_atr_trigger_trend > 0.0 { risk_cfg.be_atr_trigger_trend } else { 2.5 },
+                    if risk_cfg.be_buffer_atr_trend > 0.0 { risk_cfg.be_buffer_atr_trend } else { 1.5 },
+                ),
+                Some("RANGE_OSC") | Some("REVERSAL") => (
+                    if risk_cfg.be_atr_trigger_range > 0.0 { risk_cfg.be_atr_trigger_range } else { 1.5 },
+                    if risk_cfg.be_buffer_atr_range > 0.0 { risk_cfg.be_buffer_atr_range } else { 0.8 },
+                ),
+                Some("MOMENTUM_IGN") | Some("ANOMALY") => (
+                    if risk_cfg.be_atr_trigger_volatile > 0.0 { risk_cfg.be_atr_trigger_volatile } else { 2.0 },
+                    if risk_cfg.be_buffer_atr_volatile > 0.0 { risk_cfg.be_buffer_atr_volatile } else { 1.2 },
+                ),
+                _ => (
+                    if risk_cfg.be_atr_trigger_trend > 0.0 { risk_cfg.be_atr_trigger_trend } else { 2.5 },
+                    if risk_cfg.be_buffer_atr_trend > 0.0 { risk_cfg.be_buffer_atr_trend } else { 1.5 },
+                ),
+            };
+
             let sqz_multiplier = matrix.squeeze_multiplier[i].max(0.0);
-            let base_be_atr_mult = risk_cfg.base_sl_atr.max(1.0);
-            let dynamic_be_atr = current_atr * base_be_atr_mult * (1.0 + sqz_multiplier);
-            let base_be_roe = if risk_cfg.base_be_roe_trigger > 0.0 { risk_cfg.base_be_roe_trigger } else { 0.08 };
-            let be_roe_trigger = base_be_roe * (1.0 + sqz_multiplier);
-            let be_price_buffer_pct = 0.0008; // 0.08% buffer bù đắp phí sàn 0.04% Maker/Taker
-            let is_be_triggered = current_pnl > 0.0 && (current_roe >= be_roe_trigger || current_pnl >= (dynamic_be_atr * trade.size.abs()));
+            let effective_be_trigger_atr = be_trigger_mult * (1.0 + 0.5 * sqz_multiplier);
+            let required_profit = current_atr * effective_be_trigger_atr * trade.size.abs();
+            let min_be_roe = (risk_cfg.base_be_roe_trigger.max(0.08) * (1.0 + sqz_multiplier)).min(0.50);
+            let is_be_triggered = current_pnl > 0.0 && (current_roe >= min_be_roe || current_pnl >= required_profit);
 
             if is_be_triggered && !is_mega_trend {
+                let fee_buffer_pct = 0.0008; // Buffer bù đắp phí sàn tối thiểu 0.08% Maker/Taker
                 if trade.is_long() {
-                    let be_sl = trade.entry_price * (1.0 + be_price_buffer_pct);
-                    calculated_sl = calculated_sl.max(be_sl);
+                    let min_be = trade.entry_price * (1.0 + fee_buffer_pct);
+                    let dynamic_floor = peak_val - (current_atr * be_buffer_mult);
+                    let target_be_sl = dynamic_floor.max(min_be);
+                    calculated_sl = calculated_sl.max(target_be_sl);
                 } else {
-                    let be_sl = trade.entry_price * (1.0 - be_price_buffer_pct);
-                    calculated_sl = calculated_sl.min(be_sl);
+                    let max_be = trade.entry_price * (1.0 - fee_buffer_pct);
+                    let dynamic_ceiling = peak_val + (current_atr * be_buffer_mult);
+                    let target_be_sl = dynamic_ceiling.min(max_be);
+                    calculated_sl = calculated_sl.min(target_be_sl);
                 }
             }
 

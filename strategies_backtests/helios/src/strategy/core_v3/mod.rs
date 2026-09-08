@@ -237,18 +237,30 @@ impl Strategy for HeliosStrategyV3 {
                     if self.cooldown_tracker.locked_side == Some(signal) {
                         let current_price = tick.closes()[i];
                         let current_atr = self.sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
-                        let price_diff = (current_price - self.cooldown_tracker.last_exit_price).abs();
+                        
+                        // 🎯 SỬA FLAW-4.3: Kiểm tra bứt phá định hướng (Directional Breakout) thay vì dùng .abs()
+                        // Với Long: Chỉ mở khóa nếu giá HỒI PHỤC TĂNG NGƯỢC LÊN (current_price - last_exit >= 1.5 * ATR)
+                        // Với Short: Chỉ mở khóa nếu giá TIẾP TỤC GIẢM SÂU HƠN (last_exit - current_price >= 1.5 * ATR)
+                        let is_favorable_breakout = if signal == SignalType::Long {
+                            (current_price - self.cooldown_tracker.last_exit_price) >= 1.5 * current_atr
+                        } else {
+                            (self.cooldown_tracker.last_exit_price - current_price) >= 1.5 * current_atr
+                        };
 
-                        // Kiểm tra Volatility Breakout Override: nếu giá đã bứt phá >= 1.5 * ATR thì cho phép mở khóa sớm
-                        if price_diff < 1.5 * current_atr {
+                        if !is_favorable_breakout {
                             if self.debug_mode {
+                                let diff = if signal == SignalType::Long {
+                                    current_price - self.cooldown_tracker.last_exit_price
+                                } else {
+                                    self.cooldown_tracker.last_exit_price - current_price
+                                };
                                 warn!(
-                                    "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | Diff: {:.2} < 1.5*ATR ({:.2})",
+                                    "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | FavorableDiff: {:+.2} < 1.5*ATR ({:.2})",
                                     i, signal, self.cooldown_tracker.locked_until_bar, self.cooldown_tracker.locked_until_bar.saturating_sub(i),
-                                    self.cooldown_tracker.last_exit_price, current_price, price_diff, 1.5 * current_atr
+                                    self.cooldown_tracker.last_exit_price, current_price, diff, 1.5 * current_atr
                                 );
                             }
-                            // Chưa đủ bứt phá biến động -> CHẶN CÀO LỆNH RÁC!
+                            // Chưa đủ bứt phá biến động có lợi -> CHẶN BẮT DAO RƠI & CÀO LỆNH RÁC!
                             return;
                         }
                     }
@@ -333,9 +345,14 @@ mod tests {
         }
         if current_bar < locked_until_bar {
             if locked_side == Some(signal) {
-                let price_diff = (current_price - last_exit_price).abs();
-                if price_diff < 1.5 * atr {
-                    return true; // Bị chặn bởi Cooldown
+                // 🎯 SỬA FLAW-4.3: Kiểm tra bứt phá định hướng có lợi
+                let is_favorable_breakout = if signal == SignalType::Long {
+                    (current_price - last_exit_price) >= 1.5 * atr
+                } else {
+                    (last_exit_price - current_price) >= 1.5 * atr
+                };
+                if !is_favorable_breakout {
+                    return true; // Bị chặn bởi Cooldown (chống bắt dao rơi / cào lệnh rác)
                 }
             }
         }
@@ -392,18 +409,36 @@ mod tests {
 
     #[test]
     fn test_cooldown_volatility_breakout_override() {
-        // Khi BẬT, cùng chiều, nhưng giá bứt phá mạnh >= 1.5*ATR -> MỞ KHÓA SỚM
+        // Khi BẬT, cùng chiều, nhưng giá bứt phá TĂNG NGƯỢC LÊN >= 1.5*ATR -> MỞ KHÓA SỚM
         let blocked = should_block_by_cooldown(
             true,
             10,
             25,
             Some(SignalType::Long),
             SignalType::Long,
-            1770.0, // diff = |1770.0 - 1760.0| = 10.0 >= 1.5*5.0 (7.5)
+            1770.0, // diff = 1770.0 - 1760.0 = +10.0 >= 1.5*5.0 (7.5) -> Tăng có lợi
             1760.0,
             5.0,
         );
-        assert!(!blocked, "Bứt phá biến động mạnh phải mở khóa Cooldown sớm");
+        assert!(!blocked, "Bứt phá biến động tăng mạnh phải mở khóa Cooldown sớm");
+    }
+
+    #[test]
+    fn test_cooldown_falling_knife_blocked() {
+        // 🎯 KIỂM CHỨNG FLAW-4.3: Giá tiếp tục sập hầm giảm sâu 10 USD (1750 < 1760)
+        // Code cũ dùng .abs() sẽ tính |1750 - 1760| = 10 > 7.5 và mở khóa bậy bạ!
+        // Code mới phát hiện giá đang rơi tự do -> TIẾP TỤC CHẶN COOLDOWN!
+        let blocked = should_block_by_cooldown(
+            true,
+            10,
+            25,
+            Some(SignalType::Long),
+            SignalType::Long,
+            1750.0, // Giá sập hầm từ 1760 về 1750
+            1760.0,
+            5.0,
+        );
+        assert!(blocked, "Giá sập hầm rơi tự do PHẢI BỊ CHẶN COOLDOWN, cấm bắt dao rơi!");
     }
 
     #[test]

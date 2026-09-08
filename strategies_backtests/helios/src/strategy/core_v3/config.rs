@@ -349,6 +349,16 @@ pub struct TacticalRangeParams {
     /// Ngưỡng kích hoạt mềm Range Oscillator (Universal 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
+
+    /// Ngưỡng sức mạnh Trend tối đa mà Range được phép hoạt động (0.10 -> 0.80, Step 0.05)
+    /// Đọc từ matrix.trend_strength (vốn được tính động từ ADX theo Timeframe mà DNA chọn!)
+    #[dna(min = 0.10, max = 0.80, step = 0.05)]
+    pub max_trend_strength: f64,
+
+    /// Ngưỡng dốc xu hướng KAMA tối đa cấm bắt dao rơi (0.05 -> 0.50, Step 0.05)
+    /// Ngăn chặn bắt dao rơi: Nếu Trend dốc xuống vượt ngưỡng này -> Cấm Long!
+    #[dna(min = 0.05, max = 0.50, step = 0.05)]
+    pub max_adverse_slope: f64,
 }
 
 /// 🔄 4. CHIẾN ĐỘI CLIMAX REVERSAL (Bắt đỉnh/đáy kiệt sức Parabol)
@@ -473,11 +483,35 @@ pub struct RiskStopParams {
     pub tighten_step_multiplier: f64,
 
     // =========================================================================
-    // 4. KÍCH HOẠT HÒA VỐN ĐỘNG (DYNAMIC BREAK-EVEN TRIGGER)
+    // 4. KÍCH HOẠT HÒA VỐN ĐỘNG THEO 3 NHÓM REGIME SIMPLEX (DYNAMIC BREAK-EVEN)
     // =========================================================================
-    /// Ngưỡng ROE Cơ Sở Kích Hoạt Hòa Vốn Break-Even (3% -> 25% ROE, Step 1% -> 23 nấc)
+    /// Ngưỡng ROE Cơ Sở Kích Hoạt Hòa Vốn Break-Even Fallback (3% -> 25% ROE, Step 1% -> 23 nấc)
     #[dna(min = 0.03, max = 0.25, step = 0.01)]
     pub base_be_roe_trigger: f64,
+
+    // --- 4.1 NHÓM XU HƯỚNG (TREND REGIME: TREND_PB, ABSORPTION) ---
+    /// Ngưỡng kích hoạt BE cho Trend (Lãi đạt 1.5 -> 4.0 ATR mới kéo SL, Step 0.25)
+    #[dna(min = 1.5, max = 4.0, step = 0.25)]
+    pub be_atr_trigger_trend: f64,
+    /// Khoảng đệm bảo vệ vốn dưới đỉnh cho Trend (Giữ khoảng cách 1.0 -> 2.5 ATR cho giá thở, Step 0.25)
+    #[dna(min = 1.0, max = 2.5, step = 0.25)]
+    pub be_buffer_atr_trend: f64,
+
+    // --- 4.2 NHÓM ĐI NGANG (RANGE REGIME: RANGE_OSC, REVERSAL) ---
+    /// Ngưỡng kích hoạt BE cho Range (Sóng ngắn: 1.0 -> 2.5 ATR, Step 0.20)
+    #[dna(min = 1.0, max = 2.5, step = 0.20)]
+    pub be_atr_trigger_range: f64,
+    /// Khoảng đệm bảo vệ vốn cho Range (0.5 -> 1.5 ATR, Step 0.20)
+    #[dna(min = 0.5, max = 1.5, step = 0.20)]
+    pub be_buffer_atr_range: f64,
+
+    // --- 4.3 NHÓM BIẾN ĐỘNG / XUNG LỰC (MOMENTUM_IGN, ANOMALY) ---
+    /// Ngưỡng kích hoạt BE cho Xung lực (1.0 -> 3.0 ATR, Step 0.25)
+    #[dna(min = 1.0, max = 3.0, step = 0.25)]
+    pub be_atr_trigger_volatile: f64,
+    /// Khoảng đệm bảo vệ vốn cho Xung lực (0.8 -> 2.0 ATR, Step 0.20)
+    #[dna(min = 0.8, max = 2.0, step = 0.20)]
+    pub be_buffer_atr_volatile: f64,
 
     // =========================================================================
     // 5. BỘ 3 PHÂN TẦNG ATR TRAILING STOP PHỔ QUÁT (0.5 -> 15.0 ATR KHÔNG CHỒNG CHÉO)

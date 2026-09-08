@@ -32,6 +32,12 @@ impl TacticalScanner for RangeOscScanner {
             return None;
         }
 
+        // 1.1 BỘ LỌC XU HƯỚNG QUANT: Cấm đánh Range khi thị trường đang có Trend mạnh
+        let max_trend = if range_cfg.max_trend_strength > 0.0 { range_cfg.max_trend_strength } else { 0.60 };
+        if matrix.trend_strength[i] > max_trend {
+            return None;
+        }
+
         let stoch_k = sensors.stoch_range_k[i];
         let stoch_d = sensors.stoch_range_d[i];
 
@@ -57,22 +63,36 @@ impl TacticalScanner for RangeOscScanner {
         let score_short = 0.50 * f_price_short + 0.30 * f_stoch_short + 0.20 * f_hook_short;
 
         let min_score = range_cfg.min_activation_score;
+        let max_slope = if range_cfg.max_adverse_slope > 0.0 { range_cfg.max_adverse_slope } else { 0.20 };
+        let trend_dir = matrix.trend_dir[i];
 
         if score_long >= min_score && score_long > score_short {
+            // 🛡️ CHỐNG BẮT DAO RƠI: Nếu Trend đang đổ dốc mạnh (trend_dir < -max_slope) -> Cấm Long!
+            if trend_dir < -max_slope {
+                return None;
+            }
+            // 🎯 SỬA FLAW-4.2: Take Profit của Long bắt buộc phải cao hơn giá Close ít nhất 0.2%
+            let valid_tp = bb_u.max(close * 1.002);
             Some(Proposal {
                 signal_type: SignalType::Long,
                 raw_score: score_long.min(1.0),
                 scanner_id: self.id(),
                 suggested_sl: None,
-                suggested_tp: Some(bb_u),
+                suggested_tp: Some(valid_tp),
             })
         } else if score_short >= min_score && score_short > score_long {
+            // 🛡️ CHỐNG CẢN TÀU: Nếu Trend đang dốc đứng đi lên (trend_dir > +max_slope) -> Cấm Short!
+            if trend_dir > max_slope {
+                return None;
+            }
+            // 🎯 SỬA FLAW-4.2: Take Profit của Short bắt buộc phải thấp hơn giá Close ít nhất 0.2%
+            let valid_tp = bb_l.min(close * 0.998);
             Some(Proposal {
                 signal_type: SignalType::Short,
                 raw_score: score_short.min(1.0),
                 scanner_id: self.id(),
                 suggested_sl: None,
-                suggested_tp: Some(bb_l),
+                suggested_tp: Some(valid_tp),
             })
         } else {
             None
