@@ -91,6 +91,26 @@ impl HeliosArbiter {
         self.scanners.push(scanner);
     }
 
+    /// Tính điểm tự tin đấu thầu chuẩn Quant (Weighted Geometric Mean + Zero Guard).
+    /// Triệt tiêu hoàn toàn lỗi 0^0 = 1.0, không chia cho 0, không bị bẫy bù trừ (Compensatory Trap),
+    /// và mở khóa toàn bộ dải động min_confidence [0.01 .. 0.99] của DNA.
+    #[inline]
+    pub fn compute_confidence(
+        raw_score: f64,
+        regime_weight: f64,
+        multiplier: f64,
+        scanner_weight: f64,
+    ) -> f64 {
+        let context_product = regime_weight * multiplier;
+        if raw_score <= 0.0 || context_product <= 0.0 {
+            0.0
+        } else {
+            let context_score = context_product.sqrt();
+            let w = scanner_weight.max(0.01).min(0.99);
+            raw_score.powf(w) * context_score.powf(1.0 - w)
+        }
+    }
+
     pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, _debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
         
@@ -136,8 +156,13 @@ impl HeliosArbiter {
                     continue;
                 }
 
-                // Điểm Tự Tin Đấu Thầu (Tích Hỗ Tương: Điểm Mẫu Hình * Trọng Số Bối Cảnh * Multiplier Vi Mô)
-                let confidence = proposal.raw_score * regime_weight * multiplier;
+                // Điểm Tự Tin Đấu Thầu (Weighted Geometric Mean Chuẩn Quant + Zero Guard)
+                let confidence = Self::compute_confidence(
+                    proposal.raw_score,
+                    regime_weight,
+                    multiplier,
+                    config.arbiter.scanner_weight,
+                );
                 
                 // Cạnh tranh Ngôi Quán Quân (Max Tracking trên thanh ghi CPU)
                 if confidence > max_confidence {
@@ -169,5 +194,61 @@ impl HeliosArbiter {
             final_sl: None,
             final_tp: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zero_guard_prevents_false_signals() {
+        // Kịch bản 1: Scanner không có tín hiệu (raw_score <= 0.0)
+        assert_eq!(HeliosArbiter::compute_confidence(0.0, 0.5, 0.8, 0.5), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(-0.5, 0.5, 0.8, 0.5), 0.0);
+
+        // Kịch bản 2: Bối cảnh phủ quyết hoàn toàn (regime_weight <= 0.0 hoặc multiplier <= 0.0)
+        assert_eq!(HeliosArbiter::compute_confidence(0.9, 0.0, 0.8, 0.5), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(0.9, 0.5, 0.0, 0.5), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(0.9, -0.1, 0.8, 0.5), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(0.9, 0.5, -0.2, 0.5), 0.0);
+
+        // Kịch bản 3: Cả hai đều bằng 0 (triệt tiêu lỗi 0^0 = 1.0)
+        assert_eq!(HeliosArbiter::compute_confidence(0.0, 0.0, 0.0, 0.5), 0.0);
+    }
+
+    #[test]
+    fn test_full_dynamic_range_coverage() {
+        // Kiểm chứng khả năng vươn tới các mức tự tin cao (> 0.50 đến > 0.80)
+        // để kích hoạt toàn bộ dải DNA min_confidence (1% .. 99%)
+        let conf_mid = HeliosArbiter::compute_confidence(0.75, 0.40, 0.65, 0.5);
+        assert!(conf_mid > 0.50, "conf_mid ({}) phải > 0.50", conf_mid);
+
+        let conf_high = HeliosArbiter::compute_confidence(0.85, 0.55, 0.80, 0.5);
+        assert!(conf_high > 0.70, "conf_high ({}) phải > 0.70", conf_high);
+
+        let conf_max = HeliosArbiter::compute_confidence(0.95, 0.70, 0.90, 0.5);
+        assert!(conf_max > 0.80, "conf_max ({}) phải > 0.80", conf_max);
+    }
+
+    #[test]
+    fn test_scanner_weight_activation() {
+        let raw_score = 0.90;
+        let regime_weight = 0.30;
+        let multiplier = 0.50;
+        // context_score = sqrt(0.15) ≈ 0.3873
+
+        // Khi scanner_weight cao (0.85), ưu tiên tín hiệu scanner (0.90) -> confidence cao hơn
+        let conf_scanner_heavy = HeliosArbiter::compute_confidence(raw_score, regime_weight, multiplier, 0.85);
+
+        // Khi scanner_weight thấp (0.15), ưu tiên bối cảnh vĩ mô (0.3873) -> confidence thấp hơn
+        let conf_context_heavy = HeliosArbiter::compute_confidence(raw_score, regime_weight, multiplier, 0.15);
+
+        assert!(
+            conf_scanner_heavy > conf_context_heavy,
+            "Scanner-heavy ({}) phải lớn hơn Context-heavy ({})",
+            conf_scanner_heavy,
+            conf_context_heavy
+        );
     }
 }

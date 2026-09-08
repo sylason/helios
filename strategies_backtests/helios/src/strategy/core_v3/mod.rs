@@ -142,6 +142,7 @@ impl Strategy for HeliosStrategyV3 {
         // ABSORPTION VWMA SENSOR
         s.vwma = ctx.vwma(ind.vwma.timeframe, "VWMA", ind.vwma.period);
         s.z_score = ctx.z_score(ind.kama.timeframe, "ZScore", ind.z_score_lookback);
+        s.vol_z_score = ctx.z_score_volume(ind.kama.timeframe, "VolZScore", ind.z_score_lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
 
         // MACD SENSOR (Vẫn được tính toán đầy đủ cho hệ thống Cảm biến)
@@ -455,5 +456,46 @@ mod tests {
             5.0,
         );
         assert!(!blocked, "Hết thời gian nghỉ phải cho phép vào lệnh");
+    }
+
+    #[test]
+    fn test_volume_zscore_differentiation_from_price() {
+        use crate::strategy::sensors::HeliosSensors;
+        use crate::strategy::core_v3::matrix::MarketMatrixV3;
+        use crate::strategy::core_v3::config::HeliosConfigV3;
+
+        // Mô phỏng: Giá đi ngang phẳng lặng (z_score = 0.0), nhưng volume nổ tung (vol_z_score = 3.5, MFI = 80.0)
+        let mut sensors = HeliosSensors::default();
+        let len = 50;
+        sensors.closes = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.highs = std::sync::Arc::new(vec![2005.0; len]);
+        sensors.lows = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.volumes = std::sync::Arc::new(vec![1000.0; len]);
+        sensors.natr = std::sync::Arc::new(vec![1.5; len]);
+
+        sensors.z_score = std::sync::Arc::new(vec![0.0; len]); // Giá không hề biến động
+        sensors.vol_z_score = std::sync::Arc::new(vec![3.5; len]); // Volume nổ 3.5 sigma!
+        sensors.mfi = std::sync::Arc::new(vec![80.0; len]);
+        sensors.chaos_ratio = std::sync::Arc::new(vec![0.5; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.5; len]);
+        sensors.adx = std::sync::Arc::new(vec![25.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.05; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.kc_upper = std::sync::Arc::new(vec![2012.0; len]);
+        sensors.kc_lower = std::sync::Arc::new(vec![1988.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+
+        let mut config = HeliosConfigV3::default();
+        config.matrix.z_score_sensitivity = 2.0;
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // 🎯 KIỂM CHỨNG FLAW-3.2:
+        // Price Z-Score phải bằng 0.0 (giá phẳng)
+        assert_eq!(matrix.price_z_score[len - 1], 0.0, "Price Z-Score phải phản ánh giá phẳng = 0.0");
+        // Volume Force phải phản ứng với Vol Z-Score = 3.5 và MFI = 80 -> vf phải cao > 0.60
+        assert!(matrix.volume_force[len - 1] > 0.60, "Volume Force phải phát hiện bùng nổ thanh khoản!");
     }
 }

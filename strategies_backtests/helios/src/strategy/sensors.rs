@@ -19,6 +19,7 @@ pub struct HeliosSensors {
     pub efficiency_ratio: Arc<Vec<f64>>,
     pub mfi: Arc<Vec<f64>>,
     pub z_score: Arc<Vec<f64>>,
+    pub vol_z_score: Arc<Vec<f64>>,
     
     // --- Trend & Regime (KAMA & KAMA Slope) ---
     pub adx: Arc<Vec<f64>>,

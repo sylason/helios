@@ -78,7 +78,8 @@ impl MarketMatrixV3 {
         }
 
         // TÍNH TOÁN CÁC DÒNG CHUẨN HÓA V3.3
-        let trend_strength = normalization::tanh_scale(&adx_centered, config.matrix.z_score_sensitivity);
+        let z_sens = if config.matrix.z_score_sensitivity <= 0.0 { 1.0 } else { config.matrix.z_score_sensitivity };
+        let trend_strength = normalization::tanh_scale(&adx_centered, z_sens);
         
         let trend_dir: Vec<f64> = sensors.kama_slope_adj.iter().map(|&s| {
             if s.is_nan() { 0.0 } else { (s / 0.50).max(-1.0).min(1.0) }
@@ -89,10 +90,10 @@ impl MarketMatrixV3 {
         let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, config.matrix.squeeze_lookback);
         let entropy = normalization::rolling_percentile(&sensors.efficiency_ratio, config.matrix.trend_lookback);
 
-        let price_z_score = normalization::tanh_scale(&sensors.z_score, config.matrix.z_score_sensitivity);
+        let price_z_score = normalization::tanh_scale(&sensors.z_score, z_sens);
 
         // VOLUME FORCE CHUẨN QUANT: 0.5 * Tanh(Vol_Z_Score) + 0.5 * (MFI / 100)
-        let vol_z_scale = normalization::tanh_scale(&sensors.z_score, 0.5);
+        let vol_z_scale = normalization::tanh_scale(&sensors.vol_z_score, 0.5);
         let mut volume_force = Vec::with_capacity(len);
         for i in 0..len {
             let mfi_norm = (sensors.mfi[i] / 100.0).max(0.0).min(1.0);
