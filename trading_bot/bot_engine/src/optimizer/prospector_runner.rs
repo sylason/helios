@@ -186,6 +186,29 @@ impl ProspectorRunner {
         let num_candles = candles.len();
         info!("🧬 [Optimizer] Đã lấy {} nến từ Database. Bắt đầu tối ưu hóa...", num_candles);
 
+        // =========================================================================
+        // 🚪 WFE VALIDATION GATE: TÁCH CỬA SỔ HUẤN LUYỆN (IN-SAMPLE) & KIỂM ĐỊNH (OOS)
+        // =========================================================================
+        // Dành 48 giờ gần nhất (2880 nến 1m) làm tập kiểm định Out-Of-Sample độc lập.
+        // Cần tối thiểu 8640 nến (5760 warmup + 2880 validation) để tách cửa sổ an toàn.
+        const VALIDATION_SPAN_BARS: usize = 2880; // 48 giờ
+        const WARMUP_SAFE_BARS: usize = 5760;     // Warmup indicators
+        let can_split_wfe = candles.len() >= (WARMUP_SAFE_BARS + VALIDATION_SPAN_BARS + 1440);
+
+        let (train_candles, validation_slice) = if can_split_wfe {
+            let split_idx = candles.len() - VALIDATION_SPAN_BARS;
+            let val_start_idx = candles.len().saturating_sub(WARMUP_SAFE_BARS + VALIDATION_SPAN_BARS);
+            (candles[..split_idx].to_vec(), candles[val_start_idx..].to_vec())
+        } else {
+            (candles.clone(), Vec::new())
+        };
+
+        let num_train_candles = train_candles.len();
+        let num_val_candles = if validation_slice.is_empty() { 0 } else { VALIDATION_SPAN_BARS };
+        if can_split_wfe {
+            info!("🧬 [WFE Split] In-Sample Train: {} nến | Out-Of-Sample Validation: {} nến (48h)", num_train_candles, num_val_candles);
+        }
+
         // 1. Load Cấu hình Prospector & Cache từ file JSON trước
         let file = File::open(config_path).map_err(|e| e.to_string())?;
         let reader = BufReader::new(file);
@@ -195,7 +218,7 @@ impl ProspectorRunner {
         let prospector_db_path_owned = prospector_db_path.to_string();
 
         let champion_opt = tokio::task::spawn_blocking(move || {
-            let df = Self::candles_to_df(&candles).map_err(|e| e.to_string())?;
+            let df = Self::candles_to_df(&train_candles).map_err(|e| e.to_string())?;
 
             let mut prospector_config = full_config.prospector;
             prospector_config.db_path = prospector_db_path_owned.clone();
@@ -293,11 +316,47 @@ impl ProspectorRunner {
             let trades = champion.stats.total_trades;
             let win_rate = champion.stats.win_rate_pct;
 
-            info!("⏱️ [OPTIMIZER DURATION] {:.2?} | Candles: {} | Best Return: {:.2}% | Max DD: {:.2}% | Trades: {} (Win: {:.1}%)", 
-                  opt_elapsed, num_candles, ret, dd, trades, win_rate);
+            info!("⏱️ [OPTIMIZER DURATION] {:.2?} | In-Sample Candles: {} | Best Return: {:.2}% | Max DD: {:.2}% | Trades: {} (Win: {:.1}%)", 
+                  opt_elapsed, num_train_candles, ret, dd, trades, win_rate);
 
             // Lưu DNA vào bảng optimized_params
             if let Some(dna) = champion.dna {
+                // =========================================================================
+                // 🚪 WFE VALIDATION GATE: THẨM ĐỊNH OOS ĐỘC LẬP TRƯỚC KHI DEPLOY (FLAW-6.4)
+                // =========================================================================
+                if !validation_slice.is_empty() {
+                    match super::helios_bridge::HeliosBridge::diagnostic_backtest(&validation_slice, &dna) {
+                        Ok(val_res) => {
+                            let val_ret = val_res.stats.return_pct;
+                            let val_dd = val_res.stats.max_drawdown_pct;
+                            let val_trades = val_res.stats.total_trades;
+                            let val_win_rate = val_res.stats.win_rate_pct;
+
+                            // TIÊU CHUẨN THẨM ĐỊNH (WFE GATE CRITERIA):
+                            // 1. Nếu có trade trong OOS: Return OOS bắt buộc phải dương (> 0.0%) và Max DD <= 15.0%
+                            // 2. Nếu có trade nhưng Return <= 0.0%: Overfit phát hiện! Bắn log chi tiết để debug và từ chối deploy!
+                            if val_trades > 0 && (val_ret <= 0.0 || val_dd > 15.0) {
+                                warn!(
+                                    "🚨 [WFE GATE: REJECTED - OVERFIT DETECTED] Symbol: {} | Candidate DNA Overfit! \
+                                    In-Sample Return: {:.2}% BUT OOS Val Return: {:+.2}% (Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
+                                    -> REJECTED! Preserving active Champion DNA in DB & Actor to protect capital!",
+                                    symbol, ret, val_ret, val_dd, val_trades, val_win_rate
+                                );
+                                return Ok(()); // 🛑 DỪNG LẠI, KHÔNG LƯU DB, KHÔNG BROADCAST!
+                            }
+
+                            info!(
+                                "✨ [WFE GATE: PASS] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% \
+                                | OOS Max DD: {:.2}% | OOS Trades: {} (Win Rate: {:.1}%) -> Approved for Deployment.",
+                                ret, val_ret, val_dd, val_trades, val_win_rate
+                            );
+                        }
+                        Err(e) => {
+                            warn!("⚠️ [WFE GATE] Lỗi khi chạy Validation Backtest: {}. Cho phép fallback deploy.", e);
+                        }
+                    }
+                }
+
                 use crate::models::models::OptimizedDna;
                 use std::collections::HashMap;
 

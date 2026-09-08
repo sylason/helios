@@ -77,11 +77,40 @@ Mục tiêu: Rà soát 100% mã nguồn, cấu hình, logic toán học, thuật
 
 ---
 
-## 🛠️ Kế Hoạch Triển Khai Sửa Lỗi (Remediation Roadmap)
-- [x] **Bước 1:** Triển khai "Lock DNA on Active Trade" (`pending_dna` trong `AssetActor`) - *(Đã triển khai & Pass build 100%)*
-- [x] **Bước 2:** Chốt chặn Revenge Re-Entry & Cooldown Guard (`AssetActor`) - *(Đã triển khai, chặn cùng nến & Cooldown liên nến, Pass 29/29 tests 100%)*
-- [x] **Bước 3:** Tái thiết kế Stagnant Decay (`risk.rs` & `config.rs`) - *(Đã kết nối 2 gen max_stagnant_hold_bars [120..2880] và stagnant_min_profit_pct [0.002..0.050], loại bỏ máy chém 45m, Pass 100% test)*
-- [x] **Bước 4:** Chuẩn hóa cờ `trade_on_close` & Mô Hình Khớp Lệnh - *(Đã đồng bộ trade_on_close(true), Pessimistic Matching ưu tiên SL khi quét 2 đầu 1:1 với Broker, Monotonic Ratchet Guard & Naked Position Guard tại PaperTrader, Pass 31/31 bot_engine tests, 4/4 trailing_sl_test, 5/5 helios tests)*
+## 🛠️ Kế Hoạch Triển Khai Sửa Lỗi & Chi Tiết Lỗi Đã Debug
+
+### 1. Chi Tiết Các Lỗ Hổng Đã Debug & Khắc Phục Thành Công
+- [x] **Flaw 9.4 (Critical - Lỗ hổng 4): Sốc rủi ro khi Hot-Swap DNA áp đặt hồi tố lên vị thế đang mở:**
+  - *Mã nguồn:* [`asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs)
+  - *Giải pháp đã debug:* Bổ sung `pending_dna: Option<OptimizedDna>`. Khóa 100% DNA cũ bảo vệ vị thế đang mở, tự động nạp DNA mới khi vị thế chuyển về trạng thái Flat ("Lock DNA on Active Trade").
+- [x] **Flaw 9.2 (Critical - Lỗ hổng 2): Lệnh tàng hình & Bỏ qua Cooldown khi lệnh mở-đóng cùng nến (Revenge Re-Entry):**
+  - *Mã nguồn:* [`asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs)
+  - *Giải pháp đã debug:* Di chuyển vòng lặp xả WebSocket `account_rx` lên đầu nến; thiết lập Chốt chặn Tầng 1 cấm mở lệnh cùng cây nến vừa đóng (`closed_intra_candle`), và Chốt chặn Tầng 2 `CooldownGuard` chặn vào lệnh cùng chiều trong 15 nến nếu PnL $\le 0.001$.
+- [x] **Flaw H.4 & 9.1 một phần (Critical): Bẫy cắt lỗ sớm Stagnant Decay (Máy chém giết non lệnh sau 45 phút):**
+  - *Mã nguồn:* [`risk.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs) & [`config.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs)
+  - *Giải pháp đã debug:* Xóa bỏ hoàn toàn logic `decay_cycles > 0 && current_pnl <= 0.0`; kết nối trực tiếp 2 gen DNA phổ quát `max_stagnant_hold_bars` [120..2880 nến] và `stagnant_min_profit_pct` [0.002..0.050]. Giữ nguyên cơ chế siết Stop Loss trượt (Progressive TSL Tightening).
+- [x] **Flaw 9.3 & 5.5 (Critical - Lỗ hổng 3 Sai lệch 1): Bất đồng bộ mô hình khớp lệnh khi nến quét cả SL & TP (Dual-Hit Conflict):**
+  - *Mã nguồn:* [`paper_trader.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/paper_trader.rs)
+  - *Giải pháp đã debug:* Loại bỏ triệt để heuristic khoảng cách Open (vốn gây thắng ảo 50-70% ở Paper), áp dụng mô hình bảo thủ Pessimistic Matching: luôn ưu tiên khớp Stop Loss trước 1:1 với `ferro_trade::Broker`.
+- [x] **Flaw 5.2 / Tầng 5 (Critical): Thiếu Monotonic Ratchet Guard & Nguy cơ Naked Position tại PaperTrader:**
+  - *Mã nguồn:* [`paper_trader.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/paper_trader.rs) & [`paper_engine.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/paper_engine.rs)
+  - *Giải pháp đã debug:* Ngăn chặn tuyệt đối việc lùi/nới lỏng Stop Loss (Long chỉ tăng, Short chỉ giảm); ngăn chặn việc xóa sổ SL về `None` khi đang có vị thế mở; đồng bộ trực tiếp SL/TP đã qua thẩm định từ `PaperTrader` sang `LivePositionState`.
+- [x] **Flaw 1.4 một phần (Major): Lệch pha cờ `trade_on_close`:**
+  - *Mã nguồn:* [`helios_bridge.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs)
+  - *Giải pháp đã debug:* Chuyển cờ `trade_on_close` từ `false` sang `true` đồng nhất 100% với GA Optimizer và Backtest.
+- [x] **Flaw H.1 (Critical): `update_from_dna` không cập nhật `MarketMatrixV3`:**
+  - *Mã nguồn:* [`core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)
+  - *Giải pháp đã debug:* Đã bổ sung `self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);` trong `update_from_dna`.
+- [x] **Flaw H.2 (Critical): Thuộc tính `#[dna]` gắn nhầm vào trường `bool`:**
+  - *Mã nguồn:* [`core_v3/config.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs)
+  - *Giải pháp đã debug:* Đã gỡ bỏ `#[dna]` khỏi `enable_re_entry_cooldown`.
+- [x] **Kiểm thử Tích hợp Trailing SL bị lệch chuẩn:**
+  - *Mã nguồn:* [`trailing_sl_test.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/tests/trailing_sl_test.rs)
+  - *Giải pháp đã debug:* Nâng cấp lên `HeliosStrategyV3`, thêm `Default` cho V3, sửa timestamp vào lệnh gắn chặt theo nến thực tế (Pass 4/4 test).
+
+### 2. Trạng Thái Tiến Độ Kiểm Thử
+- **Unit & Integration Tests:** Đã vượt qua 100% (`bot_engine`: 31/31 passed; `helios`: 5/5 passed; `trailing_sl_test`: 4/4 passed).
+- **Thực nghiệm Walk-Forward (`walk_forward_smart_seed`):** TẠM HOÃN do môi trường phần cứng máy tính quá tải/quạt ồn. Đã hoàn thành `cargo check` chuẩn xác (Exit 0), sẽ kích hoạt chạy thực nghiệm sau.
 
 ---
 
