@@ -133,7 +133,10 @@ impl MarketMatrixV3 {
             let abs_score = 0.5 * squeeze_intensity[i] + 0.5 * volume_force[i];
             absorption_multiplier.push(abs_score.max(0.0).min(1.0));
 
-            let vol_exp_score = 0.5 * chaos_ratio[i] + 0.5 * volume_force[i];
+            let c_ratio = if chaos_ratio[i].is_nan() { 1.0 } else { chaos_ratio[i] };
+            let v_force = if volume_force[i].is_nan() { 0.5 } else { volume_force[i] };
+
+            let vol_exp_score = 0.5 * c_ratio + 0.5 * v_force;
             volatility_expansion_multiplier.push(vol_exp_score.max(0.0).min(1.0));
 
             // SIMPLEX NORMALIZATION: w_trend + w_range + w_volatile ≡ 1.00
@@ -141,14 +144,25 @@ impl MarketMatrixV3 {
             let slope_factor = if slope_val.is_nan() { 0.5 } else { (1.0 + (slope_val.abs() / 0.10).tanh()) / 2.0 };
             let w_trend_raw = t_mul * slope_factor;
 
-            let w_volatile_raw = chaos_ratio[i] * volume_force[i];
-            let max_trend_vol = w_trend_raw.max(w_volatile_raw);
+            let w_volatile_raw = c_ratio * v_force;
+            let max_trend_vol = if w_volatile_raw.is_nan() { w_trend_raw } else { w_trend_raw.max(w_volatile_raw) };
             let w_range_raw = (1.0 - max_trend_vol).max(0.05).min(1.0);
 
-            let sum = (w_trend_raw + w_range_raw + w_volatile_raw).max(1e-5);
-            w_trend_norm.push((w_trend_raw / sum).max(0.0).min(1.0));
-            w_range_norm.push((w_range_raw / sum).max(0.0).min(1.0));
-            w_volatile_norm.push((w_volatile_raw / sum).max(0.0).min(1.0));
+            let w_t = if w_trend_raw.is_nan() { 0.0 } else { w_trend_raw.max(0.0) };
+            let w_r = if w_range_raw.is_nan() { 0.0 } else { w_range_raw.max(0.0) };
+            let w_v = if w_volatile_raw.is_nan() { 0.0 } else { w_volatile_raw.max(0.0) };
+
+            let sum = w_t + w_r + w_v;
+            if sum <= 1e-6 || sum.is_nan() {
+                // Fallback an toàn tuyệt đối: Chia đều 1/3 cho cả 3 chế độ (Simplex 100%)
+                w_trend_norm.push(1.0 / 3.0);
+                w_range_norm.push(1.0 / 3.0);
+                w_volatile_norm.push(1.0 / 3.0);
+            } else {
+                w_trend_norm.push((w_t / sum).max(0.0).min(1.0));
+                w_range_norm.push((w_r / sum).max(0.0).min(1.0));
+                w_volatile_norm.push((w_v / sum).max(0.0).min(1.0));
+            }
         }
 
         Self {
@@ -173,6 +187,53 @@ impl MarketMatrixV3 {
             w_trend_norm: Arc::new(w_trend_norm),
             w_range_norm: Arc::new(w_range_norm),
             w_volatile_norm: Arc::new(w_volatile_norm),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::strategy::sensors::HeliosSensors;
+    use crate::strategy::core_v3::config::HeliosConfigV3;
+
+    #[test]
+    fn test_simplex_normalization_nan_resilience() {
+        let mut sensors = HeliosSensors::default();
+        let len = 10;
+        // Giả lập dữ liệu có chứa NaN trong chaos_ratio và kama_slope_adj
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![105.0; len]);
+        sensors.lows = Arc::new(vec![95.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+        sensors.natr = Arc::new(vec![f64::NAN; len]);
+        sensors.bb_upper = Arc::new(vec![105.0; len]);
+        sensors.bb_lower = Arc::new(vec![95.0; len]);
+        sensors.bb_middle = Arc::new(vec![100.0; len]);
+        sensors.kc_upper = Arc::new(vec![106.0; len]);
+        sensors.kc_lower = Arc::new(vec![94.0; len]);
+        sensors.adx = Arc::new(vec![f64::NAN; len]);
+        sensors.kama_slope_adj = Arc::new(vec![f64::NAN; len]);
+        sensors.mfi = Arc::new(vec![f64::NAN; len]);
+        sensors.chaos_ratio = Arc::new(vec![f64::NAN; len]);
+        sensors.efficiency_ratio = Arc::new(vec![f64::NAN; len]);
+        sensors.z_score = Arc::new(vec![f64::NAN; len]);
+        sensors.vol_z_score = Arc::new(vec![f64::NAN; len]);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        for i in 0..len {
+            let wt = matrix.w_trend_norm[i];
+            let wr = matrix.w_range_norm[i];
+            let wv = matrix.w_volatile_norm[i];
+
+            assert!(!wt.is_nan(), "w_trend không được là NaN tại index {}", i);
+            assert!(!wr.is_nan(), "w_range không được là NaN tại index {}", i);
+            assert!(!wv.is_nan(), "w_volatile không được là NaN tại index {}", i);
+
+            let sum = wt + wr + wv;
+            assert!((sum - 1.0).abs() < 1e-4, "Tổng Simplex ({}) phải xấp xỉ 1.0 tại index {}", sum, i);
         }
     }
 }

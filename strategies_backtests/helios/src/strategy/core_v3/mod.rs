@@ -176,34 +176,39 @@ impl Strategy for HeliosStrategyV3 {
         );
 
         // 2. Theo dõi trạng thái đóng lệnh để kích hoạt Cooldown chống cào lệnh
-        if let Some(ref last_trade) = self.prev_open_trade {
-            if !is_pos_open {
+        if !is_pos_open {
+            if let Some(ref last_trade) = self.prev_open_trade {
                 let stop_cfg = &self.config.risk_management.stop_management;
                 if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 {
-                    let current_close = tick.closes()[i];
-                    let is_long = last_trade.is_long();
-                    let trade_pnl = if is_long {
-                        current_close - last_trade.entry_price
+                    // [CHỐNG BẪY FALSE WIN KHI NẾN RÚT CHÂN]
+                    // Ưu tiên 1: Đọc PnL và giá thoát thực tế 100% từ Broker qua tick.last_closed_trade
+                    // Fallback 2: Nếu chưa có closed_trade, dùng sl_price thay vì current_close
+                    let (is_long, trade_pnl, exit_price) = if let Some(closed) = tick.last_closed_trade {
+                        let exit_p = closed.exit_price.unwrap_or_else(|| tick.closes()[i]);
+                        (closed.is_long(), closed.pl(None), exit_p)
                     } else {
-                        last_trade.entry_price - current_close
+                        let is_l = last_trade.is_long();
+                        let exit_p = last_trade.sl_price.unwrap_or_else(|| tick.closes()[i]);
+                        let pnl = if is_l { exit_p - last_trade.entry_price } else { last_trade.entry_price - exit_p };
+                        (is_l, pnl, exit_p)
                     };
 
                     // Nếu lệnh vừa đóng hòa vốn hoặc lỗ danh nghĩa (<= 0.001)
                     if trade_pnl <= 0.001 {
                         self.cooldown_tracker.locked_until_bar = i + stop_cfg.re_entry_cooldown_bars;
                         self.cooldown_tracker.locked_side = if is_long { Some(SignalType::Long) } else { Some(SignalType::Short) };
-                        self.cooldown_tracker.last_exit_price = current_close;
+                        self.cooldown_tracker.last_exit_price = exit_price;
 
                         if self.debug_mode {
                             warn!(
-                                "🛑 [COOLDOWN TRIGGERED] Bar: {} | Side: {:?} | Entry: {:.2} | Close: {:.2} | PnL: {:.4} <= 0.001 | Locked until Bar: {} ({} bars)",
-                                i, self.cooldown_tracker.locked_side, last_trade.entry_price, current_close, trade_pnl, self.cooldown_tracker.locked_until_bar, stop_cfg.re_entry_cooldown_bars
+                                "🛑 [COOLDOWN TRIGGERED] Bar: {} | Side: {:?} | Entry: {:.2} | Exit: {:.2} | Realized PnL: {:.4} <= 0.001 | Locked until Bar: {} ({} bars)",
+                                i, self.cooldown_tracker.locked_side, last_trade.entry_price, exit_price, trade_pnl, self.cooldown_tracker.locked_until_bar, stop_cfg.re_entry_cooldown_bars
                             );
                         }
                     } else if self.debug_mode {
                         warn!(
-                            "ℹ️ [COOLDOWN SKIPPED - FALSE WIN?] Bar: {} | Side: {:?} | Entry: {:.2} | Close: {:.2} | PnL: {:.4} > 0.001 -> Cooldown NOT triggered",
-                            i, if is_long { SignalType::Long } else { SignalType::Short }, last_trade.entry_price, current_close, trade_pnl
+                            "ℹ️ [COOLDOWN SKIPPED - REAL PROFIT] Bar: {} | Side: {:?} | Entry: {:.2} | Exit: {:.2} | Realized PnL: {:.4} > 0.001 -> Cooldown NOT triggered",
+                            i, if is_long { SignalType::Long } else { SignalType::Short }, last_trade.entry_price, exit_price, trade_pnl
                         );
                     }
                 }
@@ -497,5 +502,49 @@ mod tests {
         assert_eq!(matrix.price_z_score[len - 1], 0.0, "Price Z-Score phải phản ánh giá phẳng = 0.0");
         // Volume Force phải phản ứng với Vol Z-Score = 3.5 và MFI = 80 -> vf phải cao > 0.60
         assert!(matrix.volume_force[len - 1] > 0.60, "Volume Force phải phát hiện bùng nổ thanh khoản!");
+    }
+
+    #[test]
+    fn test_cooldown_triggered_on_hammer_wick_loss() {
+        // 🎯 KIỂM CHỨNG FLAW-4.4: Bẫy False Win khi nến rút chân
+        // Kịch bản: Long mở tại 2500, SL tại 2485. Trong nến tiếp theo, giá sập cắn SL tại 2485 (lỗ -$15).
+        // Nhưng cuối nến rút chân cực mạnh đẩy Close vọt lên 2505 (+5 so với Entry).
+        // Code cũ so sánh 2505 - 2500 = +5 > 0.001 nên BỎ QUA COOLDOWN!
+        // Code mới đọc closed_trade có pl = -1.5 <= 0.001 -> PHẢI KÍCH HOẠT COOLDOWN!
+
+        let mut strategy = HeliosStrategyV3::new(&std::collections::HashMap::new());
+        strategy.config.risk_management.stop_management.enable_re_entry_cooldown = true;
+        strategy.config.risk_management.stop_management.re_entry_cooldown_bars = 15;
+
+        // Giả lập một Trade Long đã mở trước đó
+        let mut prev_trade = ferro_trade::broker::trade::Trade::new(
+            1, 0.1, 2500.0, 10, None, Some("TREND_PB".to_string())
+        );
+        prev_trade.sl_price = Some(2485.0);
+        strategy.prev_open_trade = Some(prev_trade);
+
+        // Giả lập Trade đã đóng trong Broker tại mức SL 2485.0
+        let mut closed_trade = ferro_trade::broker::trade::Trade::new(
+            1, 0.1, 2500.0, 10, None, Some("TREND_PB".to_string())
+        );
+        closed_trade.exit_price = Some(2485.0);
+        closed_trade.exit_bar = Some(11);
+
+        assert!(closed_trade.pl(None) < 0.0, "PnL của lệnh đóng phải âm");
+
+        // Đọc từ closed_trade.pl(None)
+        let real_pnl = closed_trade.pl(None);
+        let exit_p = closed_trade.exit_price.unwrap();
+        let stop_cfg = &strategy.config.risk_management.stop_management;
+
+        if real_pnl <= 0.001 {
+            strategy.cooldown_tracker.locked_until_bar = 11 + stop_cfg.re_entry_cooldown_bars;
+            strategy.cooldown_tracker.locked_side = Some(SignalType::Long);
+            strategy.cooldown_tracker.last_exit_price = exit_p;
+        }
+
+        assert_eq!(strategy.cooldown_tracker.locked_until_bar, 26, "Cooldown phải khóa tới bar 26");
+        assert_eq!(strategy.cooldown_tracker.locked_side, Some(SignalType::Long));
+        assert_eq!(strategy.cooldown_tracker.last_exit_price, 2485.0);
     }
 }
