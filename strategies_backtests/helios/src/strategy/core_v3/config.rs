@@ -121,19 +121,32 @@ pub struct KeltnerParams {
     pub ma_type: MaType,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct MacdParams {
-    #[dna(min = 2.0, max = 18.0, step = 4.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    #[serde(default = "default_macd_fast", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub fast: usize, 
-    #[dna(min = 20.0, max = 80.0, step = 4.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    #[serde(default = "default_macd_slow", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub slow: usize,
-    #[dna(min = 2.0, max = 20.0, step = 4.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    #[serde(default = "default_macd_signal", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub signal: usize, 
-    #[dna(subset = "5m, 15m, 1h, 4h")]
+    #[serde(default = "default_timeframe")]
     pub timeframe: Timeframe,
+}
+
+fn default_macd_fast() -> usize { 12 }
+fn default_macd_slow() -> usize { 26 }
+fn default_macd_signal() -> usize { 9 }
+fn default_timeframe() -> Timeframe { Timeframe::T5m }
+
+impl Default for MacdParams {
+    fn default() -> Self {
+        Self {
+            fast: default_macd_fast(),
+            slow: default_macd_slow(),
+            signal: default_macd_signal(),
+            timeframe: default_timeframe(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
@@ -184,13 +197,23 @@ pub struct MfiParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct VolMaParams {
-    #[dna(min = 8.0, max = 80.0, step = 3.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    #[serde(default = "default_vol_ma_period", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub period: usize,
-    #[dna(subset = "5m, 15m, 1h, 4h")]
+    #[serde(default = "default_timeframe")]
     pub timeframe: Timeframe,
+}
+
+fn default_vol_ma_period() -> usize { 20 }
+
+impl Default for VolMaParams {
+    fn default() -> Self {
+        Self {
+            period: default_vol_ma_period(),
+            timeframe: default_timeframe(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
@@ -447,28 +470,67 @@ pub struct RiskManagementConfig {
 }
 
 /// 💰 QUẢN TRỊ VỐN CƠ SỞ & ĐÒN BẨY
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct RiskBaseParams {
-    /// 1. Tỷ Lệ Vốn Ký Quỹ Trên Mỗi Lệnh (2% -> 50% vốn, Step 2% -> 25 nấc)
-    #[dna(min = 0.02, max = 0.50, step = 0.02)]
+    /// 1. Tỷ Lệ Vốn Ký Quỹ Trên Mỗi Lệnh (User Setting: Mặc định 20% vốn = 0.20)
+    #[serde(default = "default_percent_per_trade")]
     pub percent_per_trade: f64,
 
-    /// 2. Khoảng Cách Đặt SL Tối Thiểu Tránh Quét Spread (0.1% -> 3.0% giá, Step 0.1% -> 30 nấc)
-    #[dna(min = 0.001, max = 0.030, step = 0.001)]
+    /// 2. Khoảng Cách Đặt SL Tối Thiểu Tránh Quét Spread
+    #[serde(default = "default_sl_min_dist_pct")]
     pub sl_min_dist_pct: f64,
 
-    /// 3. Kích Thước Lot Cơ Sở Tối Thiểu (0.1 -> 2.0 Lot, Step 0.1 -> 20 nấc)
-    #[dna(min = 0.1, max = 2.0, step = 0.1)]
+    /// 3. Kích Thước Lot Cơ Sở Tối Thiểu
+    #[serde(default = "default_base_lot_size")]
     pub base_lot_size: f64,
 
-    /// 4. Đòn Bẩy Tài Khoản Margin/Futures (1x -> 50x, Step 1.0 -> 50 nấc)
-    #[dna(min = 1.0, max = 50.0, step = 1.0)]
+    /// 4. Đòn Bẩy Tài Khoản Margin/Futures Chuẩn (User Setting: Mặc định 20x)
+    #[serde(default = "default_leverage")]
     pub leverage: f64,
+
+    /// 5. Đòn Bẩy Chiến Lược Nuke Độc Lập (User Setting: Mặc định 50x)
+    #[serde(default = "default_nuke_leverage")]
+    pub nuke_leverage: f64,
+
+    /// 6. Kích Thước Lệnh Danh Nghĩa Tối Thiểu USD ($21.0 chống sàn từ chối min notional)
+    #[serde(default = "default_min_order_usd")]
+    pub min_order_usd: f64,
+
+    /// 7. Tỷ Lệ Ký Quỹ Tối Đa Trên Mỗi Vị Thế (Trần bảo vệ rủi ro: Mặc định 25% vốn)
+    #[serde(default = "default_max_cap_fraction")]
+    pub max_cap_fraction: f64,
+}
+
+fn default_percent_per_trade() -> f64 { 0.20 }
+fn default_sl_min_dist_pct() -> f64 { 0.005 }
+fn default_base_lot_size() -> f64 { 0.01 }
+fn default_leverage() -> f64 { 20.0 }
+fn default_nuke_leverage() -> f64 { 50.0 }
+fn default_min_order_usd() -> f64 { 21.0 }
+fn default_max_cap_fraction() -> f64 { 0.25 }
+
+impl Default for RiskBaseParams {
+    fn default() -> Self {
+        Self {
+            percent_per_trade: default_percent_per_trade(),
+            sl_min_dist_pct: default_sl_min_dist_pct(),
+            base_lot_size: default_base_lot_size(),
+            leverage: default_leverage(),
+            nuke_leverage: default_nuke_leverage(),
+            min_order_usd: default_min_order_usd(),
+            max_cap_fraction: default_max_cap_fraction(),
+        }
+    }
 }
 
 /// 🛡️ CƠ CHẾ CẮT LỖ & TRAILING STOP THÍCH ỨNG
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct RiskStopParams {
+    /// 0. Khoảng Đệm ATR Tối Thiểu Khi Dời TSL Chống Râu Nến Liếm (0.4 -> 2.5 ATR, Step 0.10 -> 22 nấc)
+    #[dna(min = 0.4, max = 2.5, step = 0.10)]
+    #[serde(default = "default_tsl_buffer_floor_atr")]
+    pub tsl_buffer_floor_atr: f64,
+
     /// 1. Sàn Cắt Lỗ Khởi Tạo Tối Thiểu (0.1% -> 3.0% giá, tương đương 2% -> 60% ROE trên 20x, Step 0.1% -> 30 nấc)
     #[dna(min = 0.001, max = 0.030, step = 0.001)]
     pub min_initial_sl_pct: f64,
@@ -490,27 +552,27 @@ pub struct RiskStopParams {
     pub base_be_roe_trigger: f64,
 
     // --- 4.1 NHÓM XU HƯỚNG (TREND REGIME: TREND_PB, ABSORPTION) ---
-    /// Ngưỡng kích hoạt BE cho Trend (Lãi đạt 1.5 -> 4.0 ATR mới kéo SL, Step 0.25)
-    #[dna(min = 1.5, max = 4.0, step = 0.25)]
+    /// Ngưỡng kích hoạt BE cho Trend (Lãi đạt 1.0 -> 4.5 ATR mới kéo SL, Step 0.10)
+    #[dna(min = 1.0, max = 4.5, step = 0.10)]
     pub be_atr_trigger_trend: f64,
-    /// Khoảng đệm bảo vệ vốn dưới đỉnh cho Trend (Giữ khoảng cách 1.0 -> 2.5 ATR cho giá thở, Step 0.25)
-    #[dna(min = 1.0, max = 2.5, step = 0.25)]
+    /// Khoảng đệm bảo vệ vốn dưới đỉnh cho Trend (Giữ khoảng cách 0.8 -> 3.0 ATR cho giá thở, Step 0.10)
+    #[dna(min = 0.8, max = 3.0, step = 0.10)]
     pub be_buffer_atr_trend: f64,
 
     // --- 4.2 NHÓM ĐI NGANG (RANGE REGIME: RANGE_OSC, REVERSAL) ---
-    /// Ngưỡng kích hoạt BE cho Range (Sóng ngắn: 1.0 -> 2.5 ATR, Step 0.20)
-    #[dna(min = 1.0, max = 2.5, step = 0.20)]
+    /// Ngưỡng kích hoạt BE cho Range (Sóng ngắn: 0.8 -> 3.0 ATR, Step 0.10)
+    #[dna(min = 0.8, max = 3.0, step = 0.10)]
     pub be_atr_trigger_range: f64,
-    /// Khoảng đệm bảo vệ vốn cho Range (0.5 -> 1.5 ATR, Step 0.20)
-    #[dna(min = 0.5, max = 1.5, step = 0.20)]
+    /// Khoảng đệm bảo vệ vốn cho Range (0.4 -> 2.0 ATR, Step 0.10)
+    #[dna(min = 0.4, max = 2.0, step = 0.10)]
     pub be_buffer_atr_range: f64,
 
     // --- 4.3 NHÓM BIẾN ĐỘNG / XUNG LỰC (MOMENTUM_IGN, ANOMALY) ---
-    /// Ngưỡng kích hoạt BE cho Xung lực (1.0 -> 3.0 ATR, Step 0.25)
-    #[dna(min = 1.0, max = 3.0, step = 0.25)]
+    /// Ngưỡng kích hoạt BE cho Xung lực (0.8 -> 3.5 ATR, Step 0.10)
+    #[dna(min = 0.8, max = 3.5, step = 0.10)]
     pub be_atr_trigger_volatile: f64,
-    /// Khoảng đệm bảo vệ vốn cho Xung lực (0.8 -> 2.0 ATR, Step 0.20)
-    #[dna(min = 0.8, max = 2.0, step = 0.20)]
+    /// Khoảng đệm bảo vệ vốn cho Xung lực (0.5 -> 2.5 ATR, Step 0.10)
+    #[dna(min = 0.5, max = 2.5, step = 0.10)]
     pub be_buffer_atr_volatile: f64,
 
     // =========================================================================
@@ -520,12 +582,12 @@ pub struct RiskStopParams {
     #[dna(min = 0.5, max = 3.0, step = 0.10)]
     pub tsl_atr_tight: f64,
 
-    /// - Phân Tầng Chuẩn: Dành cho xu hướng bậc thang Trend Pullback & Absorption (3.0 -> 7.5 ATR, Step 0.15 -> 31 nấc)
-    #[dna(min = 3.0, max = 7.5, step = 0.15)]
+    /// - Phân Tầng Chuẩn: Dành cho xu hướng bậc thang Trend Pullback & Absorption (3.0 -> 7.5 ATR, Step 0.10 -> 46 nấc)
+    #[dna(min = 3.0, max = 7.5, step = 0.10)]
     pub tsl_atr_normal: f64,
 
-    /// - Phân Tầng Nới Lỏng: Dành cho siêu sóng bùng nổ Momentum & Anomaly (7.5 -> 15.0 ATR, Step 0.25 -> 31 nấc)
-    #[dna(min = 7.5, max = 15.0, step = 0.25)]
+    /// - Phân Tầng Nới Lỏng: Dành cho siêu sóng bùng nổ Momentum & Anomaly (7.5 -> 15.0 ATR, Step 0.15 -> 51 nấc)
+    #[dna(min = 7.5, max = 15.0, step = 0.15)]
     pub tsl_atr_loose: f64,
 
     // =========================================================================
@@ -535,9 +597,8 @@ pub struct RiskStopParams {
     #[dna(min = 0.01, max = 0.20, step = 0.005)]
     pub mega_trend_pnl_trigger: f64,
 
-    /// Số Chu Kỳ Tối Đa Được Hưởng Chế Độ Bảo Vệ Thả Diều (2 -> 30 chu kỳ, Step 1.0 -> 29 nấc)
-    #[dna(min = 2.0, max = 30.0, step = 1.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    /// Số Chu Kỳ Tối Đa Được Hưởng Chế Độ Bảo Vệ Thả Diều (Tham số dự phòng: Mặc định 10 chu kỳ)
+    #[serde(default = "default_mega_trend_max_cycles", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub mega_trend_max_cycles: usize,
 
     /// Tỷ Lệ Khóa Lợi Nhuận Đỉnh Sóng Khi Kích Hoạt Mega Trend (20% -> 80% đỉnh lãi, Step 5% -> 13 nấc)
@@ -551,8 +612,8 @@ pub struct RiskStopParams {
     // =========================================================================
     // 7. THAM SỐ PHỤ TRỢ & TÍCH LŨY & COOLDOWN
     // =========================================================================
-    /// Thời Gian Ngâm Tối Đa Trước Khi Giải Phóng Vốn (120 nến -> 2880 nến / 48 tiếng, Step 60 nến -> 47 nấc)
-    #[dna(min = 120.0, max = 2880.0, step = 60.0)]
+    /// Thời Gian Ngâm Tối Đa Trước Khi Giải Phóng Vốn (60 nến -> 720 nến / 12 tiếng, Step 30 nến -> 23 nấc)
+    #[dna(min = 60.0, max = 720.0, step = 30.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub max_stagnant_hold_bars: usize,
 
@@ -560,8 +621,8 @@ pub struct RiskStopParams {
     #[dna(min = 0.002, max = 0.050, step = 0.002)]
     pub stagnant_min_profit_pct: f64,
 
-    /// Khoảng Cách Cắt Lỗ Ban Đầu Mặc Định Theo ATR (0.5 -> 6.0 ATR, Step 0.2 -> 28 nấc)
-    #[dna(min = 0.5, max = 6.0, step = 0.2)]
+    /// Khoảng Cách Cắt Lỗ Ban Đầu Mặc Định Theo ATR (0.5 -> 6.0 ATR, Step 0.10 -> 56 nấc)
+    #[dna(min = 0.5, max = 6.0, step = 0.10)]
     pub base_sl_atr: f64,
 
     /// Cờ Bật/Tắt Cơ Chế Giãn Cách Cooldown Sau Khi Hòa Vốn / Cắt Lỗ (true: BẬT, false: TẮT)
@@ -572,6 +633,14 @@ pub struct RiskStopParams {
     #[dna(min = 0.0, max = 60.0, step = 5.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub re_entry_cooldown_bars: usize,
+}
+
+fn default_tsl_buffer_floor_atr() -> f64 {
+    1.0
+}
+
+fn default_mega_trend_max_cycles() -> usize {
+    10
 }
 
 fn default_true() -> bool {

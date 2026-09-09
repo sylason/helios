@@ -123,7 +123,8 @@ impl MarketMatrixV3 {
             squeeze_multiplier.push(squeeze_intensity[i]);
 
             let z_abs = price_z_score[i].abs();
-            let ano_score = 0.5 * z_abs + 0.5 * chaos_ratio[i];
+            let c_ratio = if chaos_ratio[i].is_nan() { 0.0 } else { chaos_ratio[i] };
+            let ano_score = 0.5 * z_abs + 0.5 * c_ratio;
             anomaly_multiplier.push(ano_score.max(0.0).min(1.0));
 
             let rev_trend_factor = if t_mul > 0.80 { 0.20 } else { 1.0 - t_mul };
@@ -133,7 +134,6 @@ impl MarketMatrixV3 {
             let abs_score = 0.5 * squeeze_intensity[i] + 0.5 * volume_force[i];
             absorption_multiplier.push(abs_score.max(0.0).min(1.0));
 
-            let c_ratio = if chaos_ratio[i].is_nan() { 1.0 } else { chaos_ratio[i] };
             let v_force = if volume_force[i].is_nan() { 0.5 } else { volume_force[i] };
 
             let vol_exp_score = 0.5 * c_ratio + 0.5 * v_force;

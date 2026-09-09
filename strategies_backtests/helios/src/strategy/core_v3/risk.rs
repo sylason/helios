@@ -8,7 +8,10 @@ pub struct RiskManager;
 impl RiskManager {
     /// Tính toán Size dựa trên Fixed Percentage (Fraction của Ký quỹ) nhưng đảm bảo Min Order Size.
     /// Trả về một giá trị < 1.0 (ví dụ 0.1 = 10%) để `ferro_trade` dùng làm Initial Margin.
-    pub fn calculate_size(equity: f64, risk_pct: f64, min_order_usd: f64, leverage: f64) -> f64 {
+    pub fn calculate_size(equity: f64, risk_pct: f64, min_order_usd: f64, leverage: f64, max_cap_fraction: f64) -> f64 {
+        if equity <= 0.0 || risk_pct <= 0.0 || leverage <= 0.0 {
+            return 0.0;
+        }
         let mut target_margin = equity * risk_pct;
         let mut order_size_usd = target_margin * leverage;
         
@@ -18,7 +21,8 @@ impl RiskManager {
         }
         
         let size_fraction = target_margin / equity;
-        size_fraction.min(0.20)
+        let cap = if max_cap_fraction <= 0.0 { 0.25 } else { max_cap_fraction };
+        size_fraction.min(cap)
     }
 
     /// Hàm khống chế trần SL ban đầu theo % tối đa cho phép và đòn bẩy (Leverage Safety Bounds)
@@ -291,8 +295,9 @@ impl RiskManager {
 
             // [ENHANCEMENT 3: MONOTONIC RATCHET GUARD]
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
-            // Chỉ kích hoạt khi vị thế có lãi danh nghĩa (current_pnl > 0.0).
+            let underwater_cycles = bars_held / time_countdown_bars;
             if current_pnl > 0.0 {
+                // KHI CÓ LÃI DANH NGHĨA (current_pnl > 0.0): Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
                 let should_update = if trade.is_long() {
                     calculated_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
                 } else {
@@ -302,7 +307,133 @@ impl RiskManager {
                 if should_update {
                     tick.update_trade_sl_tp(trade.id, Some(calculated_sl), trade.tp_price);
                 }
+            } else if underwater_cycles > 0 {
+                // KHI ĐANG ÂM (current_pnl <= 0.0) VÀ BỊ NGÂM VỐN (underwater_cycles > 0):
+                // Thu hẹp khoảng cách Stop Loss từ entry_price để cắt lỗ sớm bảo toàn vốn
+                let progressive_factor = risk_cfg.tighten_step_multiplier.powi(underwater_cycles as i32);
+                let underwater_mult = (risk_cfg.base_sl_atr * progressive_factor).max(risk_cfg.tsl_atr_tight);
+
+                let tightened_sl = if trade.is_long() {
+                    trade.entry_price - (current_atr * underwater_mult)
+                } else {
+                    trade.entry_price + (current_atr * underwater_mult)
+                };
+
+                // CHỐT CHẶN 1: Chống nhảy qua đầu giá nến hiện tại
+                // Nếu mức SL siết chặt đã chạm hoặc vượt qua giá nến hiện tại -> Giải phóng vốn ngay!
+                let should_force_close = if trade.is_long() {
+                    tightened_sl >= current_close
+                } else {
+                    tightened_sl <= current_close
+                };
+
+                if should_force_close {
+                    if _debug_mode {
+                        tracing::info!(
+                            "⏳ [UNDERWATER STAGNANT TIMEOUT] Bar: {} | Trade #{:?} | Tightened SL {:.2} reached current price {:.2} -> Closed to protect capital",
+                            i, trade.id, tightened_sl, current_close
+                        );
+                    }
+                    tick.close(None);
+                    continue;
+                }
+
+                // CHỐT CHẶN 2: Buffer Floor tối thiểu từ cấu hình DNA chống quét non (Whipsaw)
+                let floor_atr = if config.risk_management.stop_management.tsl_buffer_floor_atr <= 0.0 {
+                    1.0
+                } else {
+                    config.risk_management.stop_management.tsl_buffer_floor_atr
+                };
+                let min_buffer = current_atr * floor_atr;
+                let safe_tightened_sl = if trade.is_long() {
+                    tightened_sl.min(current_close - min_buffer)
+                } else {
+                    tightened_sl.max(current_close + min_buffer)
+                };
+
+                // CHỐT CHẶN 3: Monotonic Ratchet Guard (TUYỆT ĐỐI CẤM LÙI SL)
+                let should_update = if trade.is_long() {
+                    safe_tightened_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
+                } else {
+                    safe_tightened_sl < trade.sl_price.unwrap_or(f64::INFINITY)
+                };
+
+                if should_update {
+                    tick.update_trade_sl_tp(trade.id, Some(safe_tightened_sl), trade.tp_price);
+                }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clamp_sl_price_and_initial_sl_bounds() {
+        let price = 2500.0;
+        let is_long = true;
+        let max_initial_sl_pct = 0.05;
+        let min_initial_sl_pct = 0.002;
+        let leverage = 20.0;
+
+        // SL quá xa (> 4% bị kẹp bởi leverage cap 0.80 / 20 = 0.04)
+        let too_far_sl = 2300.0; // cách 200 giá = 8%
+        let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, max_initial_sl_pct, min_initial_sl_pct, leverage);
+        let expected_min_sl = price * (1.0 - 0.04); // 2400.0
+        assert_eq!(clamped, expected_min_sl, "SL quá xa phải bị kẹp bởi trần đòn bẩy 20x (4%)");
+
+        // SL quá gần (< 0.2% min_pct)
+        let too_close_sl = 2499.0; // cách 1 giá = 0.04%
+        let clamped_close = RiskManager::clamp_sl_price(price, too_close_sl, is_long, max_initial_sl_pct, min_initial_sl_pct, leverage);
+        let expected_max_sl = price * (1.0 - min_initial_sl_pct); // 2495.0
+        assert_eq!(clamped_close, expected_max_sl, "SL quá gần phải bị kẹp bởi sàn min_pct");
+    }
+
+    #[test]
+    fn test_underwater_tightening_math_formula() {
+        let entry_price: f64 = 2500.0;
+        let current_atr: f64 = 10.0;
+        let base_sl_atr: f64 = 4.0;
+        let tsl_atr_tight: f64 = 1.0;
+        let step_multiplier: f64 = 0.80; // Mỗi chu kỳ siết 20%
+
+        // Chu kỳ 1: multiplier = 4.0 * 0.8 = 3.2
+        let mult_c1 = (base_sl_atr * step_multiplier).max(tsl_atr_tight);
+        assert!((mult_c1 - 3.2).abs() < 1e-9);
+        let sl_c1 = entry_price - (current_atr * mult_c1);
+        assert!((sl_c1 - 2468.0).abs() < 1e-9, "Chu kỳ 1 phải siết SL từ 2460 lên 2468");
+
+        // Chu kỳ 2: multiplier = 4.0 * 0.64 = 2.56
+        let mult_c2 = (base_sl_atr * step_multiplier * step_multiplier).max(tsl_atr_tight);
+        assert!((mult_c2 - 2.56).abs() < 1e-9);
+        let sl_c2 = entry_price - (current_atr * mult_c2);
+        assert!((sl_c2 - 2474.4).abs() < 1e-9, "Chu kỳ 2 phải siết SL lên 2474.4");
+
+        // Đảm bảo Monotonic: sl_c2 > sl_c1
+        assert!(sl_c2 > sl_c1, "SL phải dời tăng dần để bảo vệ vốn khi ngâm lệnh âm");
+    }
+
+    #[test]
+    fn test_calculate_size_nan_resilience_and_cap() {
+        // Trường hợp bình thường
+        let size = RiskManager::calculate_size(100.0, 0.20, 21.0, 20.0, 0.25);
+        assert!(size > 0.0 && size <= 0.25);
+
+        // Trường hợp min order size $21.0 khi vốn nhỏ ($60)
+        let size_small = RiskManager::calculate_size(60.0, 0.10, 21.0, 20.0, 0.25);
+        assert_eq!(size_small, 0.10);
+
+        // Trường hợp order size < 21.0 (vốn $10, risk 5%, margin $0.5 -> order $10 < $21)
+        // order_size nâng lên $21 -> margin = 21/20 = 1.05 -> fraction = 1.05/10 = 0.105
+        let size_min_bump = RiskManager::calculate_size(10.0, 0.05, 21.0, 20.0, 0.25);
+        assert!((size_min_bump - 0.105).abs() < 1e-9);
+
+        // Chốt chặn NaN / Âm vốn / Zero equity
+        assert_eq!(RiskManager::calculate_size(0.0, 0.20, 21.0, 20.0, 0.25), 0.0);
+        assert_eq!(RiskManager::calculate_size(-50.0, 0.20, 21.0, 20.0, 0.25), 0.0);
+        assert_eq!(RiskManager::calculate_size(100.0, 0.0, 21.0, 20.0, 0.25), 0.0);
+        assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, 0.0, 0.25), 0.0);
     }
 }

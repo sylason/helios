@@ -61,7 +61,7 @@ impl Strategy for HeliosStrategyV3 {
     fn init(&mut self, ctx: &mut InitContext) {
         let ind = &self.config.indicators;
 
-        if ind.natr.period == 0 || ind.mfi.period == 0 || ind.vol_ma.period == 0 || 
+        if ind.natr.period == 0 || ind.mfi.period == 0 || 
            ind.kama.short_period == 0 || ind.kama.long_period == 0 ||
            ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 {
             println!("!!! [SAFETY V3.3] CRITICAL PERIOD IS ZERO, ABORTING INIT !!!");
@@ -276,8 +276,9 @@ impl Strategy for HeliosStrategyV3 {
                 let size = RiskManager::calculate_size(
                     tick.equity, 
                     self.config.risk_management.risk_base.percent_per_trade, 
-                    21.0, 
-                    leverage
+                    self.config.risk_management.risk_base.min_order_usd, 
+                    leverage,
+                    self.config.risk_management.risk_base.max_cap_fraction,
                 );
                 
                 let is_long = signal == SignalType::Long;
@@ -299,7 +300,7 @@ impl Strategy for HeliosStrategyV3 {
                         tick,
                         &self.sensors,
                         is_long,
-                        self.config.risk_management.stop_management.tsl_atr_normal,
+                        self.config.risk_management.stop_management.base_sl_atr,
                         playbook_max_sl_pct,
                         min_initial_sl_pct,
                         leverage,
@@ -640,4 +641,28 @@ mod tests {
         let ano_p = ano_proposal.unwrap();
         assert!(ano_p.raw_score >= 0.65, "Anomaly raw_score ({}) phải >= 0.65", ano_p.raw_score);
     }
+
+    #[test]
+    fn test_dna_width_and_parameter_defs_integrity() {
+        let width = HeliosConfigV3::DNA_WIDTH;
+        let defs = HeliosConfigV3::parameter_defs();
+        assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
+
+        // Thử cập nhật với vector toàn 0.0 (giả sử GA sinh số 0)
+        let zeros = vec![0.0; width];
+        let mut cfg = HeliosConfigV3::default();
+        cfg.update_from_dna(&zeros);
+
+        let ind = &cfg.indicators;
+        assert!(ind.natr.period > 0, "natr.period must be > 0");
+        assert!(ind.mfi.period > 0, "mfi.period must be > 0");
+        assert!(ind.vol_ma.period > 0, "vol_ma.period must be > 0");
+        assert!(ind.kama.short_period > 0, "kama.short_period must be > 0");
+        assert!(ind.kama.long_period > 0, "kama.long_period must be > 0");
+        assert!(ind.adx.period > 0, "adx.period must be > 0");
+        assert!(ind.bbands.period > 0, "bbands.period must be > 0");
+        assert!(ind.atr.period > 0, "atr.period must be > 0");
+    }
 }
+
+
