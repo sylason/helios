@@ -121,7 +121,7 @@ pub struct KeltnerParams {
     pub ma_type: MaType,
 }
 
-#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MacdParams {
     #[serde(default = "default_macd_fast", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub fast: usize, 
@@ -146,6 +146,17 @@ impl Default for MacdParams {
             signal: default_macd_signal(),
             timeframe: default_timeframe(),
         }
+    }
+}
+
+impl DnaMappable for MacdParams {
+    const DNA_WIDTH: usize = 0;
+    fn update_from_dna(&mut self, _dna: &[f64]) {}
+    fn parameter_defs() -> Vec<(String, ferro_trade::optimizer::ParamDefinition)> {
+        Vec::new()
+    }
+    fn dna_signature() -> u64 {
+        0
     }
 }
 
@@ -197,7 +208,7 @@ pub struct MfiParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct VolMaParams {
     #[serde(default = "default_vol_ma_period", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub period: usize,
@@ -213,6 +224,17 @@ impl Default for VolMaParams {
             period: default_vol_ma_period(),
             timeframe: default_timeframe(),
         }
+    }
+}
+
+impl DnaMappable for VolMaParams {
+    const DNA_WIDTH: usize = 0;
+    fn update_from_dna(&mut self, _dna: &[f64]) {}
+    fn parameter_defs() -> Vec<(String, ferro_trade::optimizer::ParamDefinition)> {
+        Vec::new()
+    }
+    fn dna_signature() -> u64 {
+        0
     }
 }
 

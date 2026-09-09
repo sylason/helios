@@ -77,7 +77,6 @@ impl Strategy for HeliosStrategyV3 {
 
         s.natr = ctx.natr(ind.natr.timeframe, "NATR", ind.natr.period);
         s.chaos_ratio = ctx.chaos_ratio(ind.natr.timeframe, "ChaosRatio", ind.natr.period);
-        s.vol_sma = ctx.volume_sma(ind.vol_ma.timeframe, "VOL_SMA", ind.vol_ma.period);
         s.efficiency_ratio = ctx.efficiency_ratio(ind.kama.timeframe, "ER", ind.kama.short_period);
 
         let (mfi, _tp, _mf, _pmf, _nmf) = ctx.mfi(ind.mfi.timeframe, "MFI", ind.mfi.period);
@@ -144,14 +143,6 @@ impl Strategy for HeliosStrategyV3 {
         s.z_score = ctx.z_score(ind.kama.timeframe, "ZScore", ind.z_score_lookback);
         s.vol_z_score = ctx.z_score_volume(ind.kama.timeframe, "VolZScore", ind.z_score_lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
-
-        // MACD SENSOR (Vẫn được tính toán đầy đủ cho hệ thống Cảm biến)
-        if ind.macd.fast > 0 && ind.macd.slow > 0 && ind.macd.signal > 0 {
-            let (macd_m, macd_s, macd_h, _, _) = ctx.macd(ind.macd.timeframe, "MACD", ind.macd.fast, ind.macd.slow, ind.macd.signal);
-            s.macd_main = macd_m;
-            s.macd_signal = macd_s;
-            s.macd_hist = macd_h;
-        }
 
         self.sensors = s;
         self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
@@ -647,6 +638,11 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
+        assert_eq!(width, 108, "DNA_WIDTH phải là chính xác 108 chiều sau khi loại bỏ hoàn toàn gen ma!");
+        let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
+        let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
+        assert!(!has_macd, "defs không được chứa macd!");
+        assert!(!has_vol_ma, "defs không được chứa vol_ma!");
 
         // Thử cập nhật với vector toàn 0.0 (giả sử GA sinh số 0)
         let zeros = vec![0.0; width];
