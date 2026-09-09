@@ -44,9 +44,13 @@ const TRAIN_WINDOW_DAYS: i64 = 14;       // Độ dài cửa sổ nến huấn l
 const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Re-Optimizer (4h)
 const BACKTEST_INTERVAL_MINS: i64 = 240;  // M MINUTES: Tần suất chạy Single Backtest chẩn đoán (4h đồng bộ)
 
-// 4. Tài khoản & Đòn bẩy
+// 4. Tài khoản & Đòn bẩy & Quản trị Vị thế (Account, Leverage & Sizing Settings)
 const INITIAL_CASH: f64 = 60.0;          // Vốn khởi tạo ($60)
-const LEVERAGE: f64 = 20.0;              // Đòn bẩy tài khoản (20x)
+const LEVERAGE: f64 = 20.0;              // Đòn bẩy tài khoản tiêu chuẩn (20x)
+const NUKE_LEVERAGE: f64 = 50.0;          // Đòn bẩy chiến lược Nuke độc lập (50x)
+const PERCENT_PER_TRADE: f64 = 0.20;     // Tỷ lệ vốn ký quỹ mỗi lệnh (20% vốn)
+const MIN_ORDER_USD: f64 = 21.0;         // Kích thước lệnh tối thiểu sàn cho phép ($21)
+const MAX_CAPITAL_FRACTION: f64 = 0.25;  // Trần tỷ lệ ký quỹ tối đa trên mỗi vị thế (25% vốn)
 const COMMISSION_RATE: f64 = 0.0004;     // Tỷ lệ phí giao dịch (0.04% Maker/Taker Binance Futures)
 const FRACTIONAL_UNIT: f64 = 0.0001;     // Đơn vị bước nhảy khối lượng
 
@@ -158,6 +162,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let market_filter = syncer.fetch_market_filter(SYMBOL).await.unwrap_or_default();
         let mut strategy_inst = HeliosStrategyV3::new(&std::collections::HashMap::new());
         strategy_inst.debug_mode = true; // BẬT TELEMETRY CHO ASSET ACTOR TRONG WALK FORWARD (GA Optimizer KHÔNG bị ảnh hưởng)
+        strategy_inst.config.risk_management.risk_base.leverage = LEVERAGE;
+        strategy_inst.config.risk_management.risk_base.nuke_leverage = NUKE_LEVERAGE;
+        strategy_inst.config.risk_management.risk_base.percent_per_trade = PERCENT_PER_TRADE;
+        strategy_inst.config.risk_management.risk_base.min_order_usd = MIN_ORDER_USD;
+        strategy_inst.config.risk_management.risk_base.max_cap_fraction = MAX_CAPITAL_FRACTION;
         let strategy = Box::new(strategy_inst);
 
         let engine_config = EngineConfig {

@@ -112,6 +112,7 @@ impl HeliosBridge {
                     data_view: &broker.data,
                     indicator_manager: &indicator_manager,
                     trades: &broker.trades,
+                    last_closed_trade: broker.closed_trades.last(),
                     actions: &mut actions_buffer,
                     position: position_snapshot,
                 };
@@ -280,6 +281,7 @@ impl HeliosBridge {
                 data_view: &data_view,
                 indicator_manager: &indicator_manager,
                 trades: &live_trades,
+                last_closed_trade: None,
                 actions: &mut actions_buffer,
                 position: live_position_snapshot,
             };

@@ -1,8 +1,8 @@
-# 🚨 MASTER TODO: 40 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
+# 🚨 MASTER TODO: 46 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
 
-> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 40 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
+> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 46 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **11/40 lỗi đã được sửa & kiểm thử thành công**, **29/40 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **17/46 lỗi đã được sửa & kiểm thử thành công**, **29/46 lỗi đang chờ xử lý**.
 
 ---
 
@@ -12,10 +12,11 @@
 | :--- | :---: | :---: | :---: | :--- |
 | **Nhóm 1: Khớp Lệnh, Quản Trị Rủi Ro & Sàn Binance** | 8 | 1 | 7 | Naked Position trên sàn, mất Stop Loss, kẹt lệnh |
 | **Nhóm 2: Vòng Đời Actor, Cooldown & Hot-Swap DNA** | 6 | 2 | 4 | Đóng băng bot, cào lệnh trả thù, mất dữ liệu RAM |
-| **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 5 | 4 | DNA Dead Zone, dìm điểm scanner, đóng nhầm chiều |
-| **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 0 | 6 | Lấy nhầm giá thành volume, sập Simplex NaN |
+| **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
+| **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 11 | 3 | 8 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **TỔNG CỘNG** | **40** | **11** | **29** |  |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 6 | 0 | 6 | Thiếu Trailing TP, xung đột leverage sàn, hardcode magic numbers |
+| **TỔNG CỘNG** | **46** | **17** | **29** |  |
 
 ---
 
@@ -113,10 +114,9 @@
   - *Bản chất:* Ép cứng mức vào lệnh tối thiểu $21 và kẹp trần 20% vốn, vô hiệu hóa gen DNA `percent_per_trade` (vốn cho phép GA tối ưu tỷ lệ vào lệnh linh hoạt).
   - *Giải pháp đề xuất:* Đọc trực tiếp từ cấu hình DNA `risk_cfg.percent_per_trade`, chỉ fallback về min sàn nếu nhỏ hơn quy định `min_notional` của Binance.
 
-- [ ] **FLAW-4.1:** **"DNA Dead Zone" Trong Arbiter: >50% Quần Thể GA Ra 0 Trades**
+- [x] **FLAW-4.1:** **"DNA Dead Zone" Trong Arbiter: >50% Quần Thể GA Ra 0 Trades** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:102-140`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L102-L140) & [`config.rs:245`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L245)
-  - *Bản chất:* Công thức `confidence = score * regime_weight * multiplier` nhân 3 phân số $\le 1.0$ nên hầu như không bao giờ vượt qua 0.45. Khi GA chọn `min_confidence >= 0.50` (>50% không gian DNA), cá thể bị bất khả thi toán học và ra 0 trades!
-  - *Giải pháp đề xuất:* Chuẩn hóa lại công thức confidence về thang đo chuẩn hoặc thu hẹp dải DNA `min_confidence` về miền khả thi $[0.15 \dots 0.45]$.
+  - *Đã xử lý:* Đã thay thế công thức tích 3 phân số bằng **Weighted Geometric Mean** kết hợp **Zero Guard**: $C = \sqrt{w_{regime} \times M}$; nếu $S \le 0.0 \lor C \le 0.0$ thì $\text{confidence} = 0.0$, ngược lại $\text{confidence} = S^W \times C^{1.0 - W}$. Kích hoạt trực tiếp gen ma `scanner_weight` ($W$, một phần FLAW-2.1) và giải phóng 100% dải động DNA `min_confidence` ($0.01 \dots 0.99$), triệt tiêu hoàn toàn "vùng đất chết". Kèm 3 unit tests xác minh.
 
 - [x] **FLAW-4.2:** **Take Profit Không Validate Dẫn Đến Đóng Nhầm Chiều (Wrong-Side TP)** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs)
@@ -126,34 +126,31 @@
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)
   - *Đã xử lý:* Đã xóa bỏ hoàn toàn `.abs()`, bổ sung kiểm tra định hướng bứt phá có lợi `is_favorable_breakout`: Chỉ mở khóa Cooldown Long nếu giá bứt phá TĂNG NGƯỢC LÊN $\ge 1.5$ ATR (và Short nếu giá sập sâu $\ge 1.5$ ATR). Kèm unit test xác minh `test_cooldown_falling_knife_blocked`.
 
-- [ ] **FLAW-4.4:** **Nhận Diện Sai Lệnh Thắng / Thua (False Win) Khi Nến Rút Chân**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:180-189`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L180-L189)
-  - *Bản chất:* Tính PnL bằng `current_close - entry_price` thay vì giá cắt lỗ thực tế. Nếu Long bị cắn SL ở râu nến dưới nhưng cuối nến rút chân tăng, code nhận diện SAI là lệnh thắng $\rightarrow$ Không kích hoạt Cooldown và đu đỉnh mua lại ngay đỉnh rút chân!
-  - *Giải pháp đề xuất:* Nhận diện PnL dựa trên `last_trade.exit_price` (hoặc sự kiện đóng lệnh thực tế từ Engine).
+- [x] **FLAW-4.4:** **Nhận Diện Sai Lệnh Thắng / Thua (False Win) Khi Nến Rút Chân** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:180-212`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L180-L212) & [`ferro_trade/src/backtest/context.rs`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/context.rs)
+  - *Đã xử lý:* Bổ sung trường `pub last_closed_trade: Option<&'a Trade>` vào `TickContext` (Zero-Cost reference mượn trực tiếp từ `broker.closed_trades.last()`), nạp đồng bộ trong cả `engine.rs` và `helios_bridge.rs`. Trong `core_v3/mod.rs`, Cooldown Tracker đọc trực tiếp `real_pnl = closed.pl(None)` và `exit_price` từ lệnh đóng thực tế, triệt tiêu 100% bẫy False Win và bẫy đu đỉnh khi nến rút chân (Hammer). Kèm unit test xác minh `test_cooldown_triggered_on_hammer_wick_loss`.
 
-- [ ] **FLAW-4.5:** **Lỗi "Double Tanh" Dìm Điểm Tê Liệt Reversal & Anomaly Scanners**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:35`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs#L35) & [`anomaly.rs:39`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/anomaly.rs#L39)
-  - *Bản chất:* `price_z_score` vốn đã qua `tanh` nén về $(-1.0, 1.0)$. Scanner lại chia tiếp cho $z_{thresh} (2.5 \dots 3.0)$ rồi `tanh` lần 2. Điểm $f_z$ tối đa chỉ đạt $0.32$ dù thị trường sập 10-sigma, làm tê liệt 2 scanner này.
-  - *Giải pháp đề xuất:* Giữ Z-Score gốc dạng tuyến tính trước khi đưa vào scanner hoặc bỏ lần nén `tanh` thứ hai.
+- [x] **FLAW-4.5:** **Lỗi "Double Tanh" Dìm Điểm Tê Liệt Reversal & Anomaly Scanners** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:20`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs#L20) & [`anomaly.rs:20`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/anomaly.rs#L20)
+  - *Đã xử lý:* Chuyển cả 2 scanner sang đọc Z-Score tuyến tính trực tiếp từ `sensors.z_score[i]` thay vì `matrix.price_z_score[i]`. Triệt tiêu hoàn toàn lần nén tanh thứ hai, khôi phục phân bố điểm $f_z = \tanh(|Z_{\text{raw}}| / z_{\text{thresh}}) \in [0.0, 1.0]$ phản ánh trung thực số độ lệch chuẩn $\sigma$ thực tế và giải phóng sức mạnh cho 2 scanner Reversal và Anomaly. Kèm unit test `test_reversal_and_anomaly_use_raw_z_score_not_double_tanh` xác minh.
 
 ---
 
 ## 📐 NHÓM 4: TOÁN HỌC SENSORS, CHỈ BÁO & MTF BUFFER (6 LỖ HỔNG)
 
-- [ ] **FLAW-3.2:** **`volume_force` Lấy Nhầm Z-Score GIÁ Thay Vì KHỐI LƯỢNG**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:94-101`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L94-L101)
-  - *Bản chất:* `tanh_scale(&sensors.z_score, 0.5)` truyền vào Z-Score của GIÁ thay vì Khối lượng. Biến `volume_lookback` bị bỏ hoang.
-  - *Giải pháp đề xuất:* Bổ sung mảng `vol_z_score` vào `HeliosSensors`, tính Z-Score trên Volume và truyền đúng vào ma trận.
+- [x] **FLAW-3.2:** **`volume_force` Lấy Nhầm Z-Score GIÁ Thay Vì KHỐI LƯỢNG** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:94-101`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L94-L101) & [`ferro_trade/src/indicators/factory/bulk.rs`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/factory/bulk.rs)
+  - *Đã xử lý:* Bổ sung chỉ báo `z_score_volume` vào `ferro_trade::BulkIndicatorFactory` (tính Z-Score trực tiếp trên chuỗi `"Volume"`). Bổ sung `vol_z_score` vào `HeliosSensors`, nạp độc lập trong `mod.rs` và truyền vào `matrix.rs` để tính `volume_force`. Bổ sung guard chống chia cho 0 khi `z_score_sensitivity <= 0.0`. Kèm unit test xác minh phân tách độc lập Volume Z-Score và Price Z-Score.
 
-- [ ] **FLAW-3.3:** **Sập Simplex Normalization (Tổng Trọng Số Vọt Lên 200%) Khi Gặp `NaN`**
-  - *Vị trí:* [`ferro_trade/src/indicators/calculate/bulk.rs:1647`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/calculate/bulk.rs#L1647) & [`matrix.rs:143-151`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L143-L151)
-  - *Bản chất:* `chaos_ratio` sinh ra `NaN` làm mẫu số `sum` thành `NaN`. Biểu thức `NaN.max(1e-5)` ép mẫu số về `1e-5`, khiến $w_{trend} = 1.0, w_{range} = 1.0$ (tổng = 200%), làm tê liệt Arbiter.
-  - *Giải pháp đề xuất:* Xử lý an toàn NaN trong `chaos_ratio` và kẹp trọng số `w_volatile_raw = 0.0` nếu là NaN.
+- [x] **FLAW-3.3:** **Sập Simplex Normalization (Tổng Trọng Số Vọt Lên 200%) Khi Gặp `NaN`** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`ferro_trade/src/indicators/calculate/bulk.rs:1637-1652`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/calculate/bulk.rs#L1637-L1652) & [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:126-140`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L126-L140)
+  - *Đã xử lý:* Áp dụng chuẩn toán học Quant 2 lớp (2-Layer Defense):
+    1. **Lớp 1 (Source Warmup Guard):** Trong `ferro_trade/src/indicators/calculate/bulk.rs` hàm `chaos_ratio`, trả về `f64::NAN` cho chuỗi warmup (`clean_natr.len() < sma_period` hoặc `v.is_nan() || sma_val.is_nan()`) để `IndicatorManager` tự động phát hiện và tính đúng `warmup_period`. Kèm unit test `test_chaos_ratio_returns_nan_during_warmup` xác minh.
+    2. **Lớp 2 (Matrix Percentile & Arithmetic Guard):** Trong `strategies_backtests/helios/src/strategy/core_v3/matrix.rs`, fallback `c_ratio` khi gặp `NaN` về `0.0` (thị trường 0% Chaos - yên ắng) thay vì `1.0` (báo động giả 100% bão tố). Khi toàn bộ chỉ báo đều là `NaN` ở các nến đầu, kích hoạt fallback chia đều $1/3 - 1/3 - 1/3$, bảo đảm tổng trọng số Simplex luôn luôn $\sum \equiv 1.00$ trong mọi điều kiện toán học. Kèm unit test `test_simplex_normalization_nan_resilience` xác minh.
 
-- [ ] **FLAW-3.4:** **Cache Collision Trong `IndicatorType::KamaSlope`**
-  - *Vị trí:* [`ferro_trade/src/indicators/identifier.rs:119`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/identifier.rs#L119) & [`factory/bulk.rs:74-87`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/factory/bulk.rs#L74-L87)
-  - *Bản chất:* Định danh `KamaSlope` hoàn toàn thiếu trường `atr_period`. Khi GA hoặc các scanner gọi với các `atr_period` khác nhau, lần gọi sau bị trúng cache sai của lần trước.
-  - *Giải pháp đề xuất:* Bổ sung `atr_period: usize` vào enum `IndicatorType::KamaSlope`.
+- [x] **FLAW-3.4:** **Cache Collision Trong `IndicatorType::KamaSlope`** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`ferro_trade/src/indicators/identifier.rs:119`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/identifier.rs#L119) & [`factory/bulk.rs:80`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/factory/bulk.rs#L80)
+  - *Đã xử lý:* Bổ sung `atr_period: usize` vào biến thể `IndicatorType::KamaSlope`, cập nhật hàm khởi tạo trong `BulkIndicatorFactory::kama_slope`. Đảm bảo phân tách khóa băm `CacheKey` độc lập tuyệt đối giữa các cá thể GA có chu kỳ ATR khác nhau. Kèm unit test `test_kama_slope_cache_key_differentiation_by_atr_period` xác minh mã băm và tính bất đẳng thức của 2 key khác nhau.
 
 - [ ] **FLAW-1.1:** **Rò Rỉ Nến Chưa Đóng (Unclosed Candle) Từ Binance REST**
   - *Vị trí:* [`trading_bot/bot_engine/src/data_engine/binance_rest.rs:65-71`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/data_engine/binance_rest.rs#L65-L71) & [`models.rs:94-98`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/models/models.rs#L94-L98)
@@ -182,15 +179,15 @@
   - *Vị trí:* [`trading_bot/bot_engine/src/execution/paper_trader.rs:544-585`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/paper_trader.rs#L544-L585)
   - *Đã xử lý:* Đã chặn nới lỏng SL và cấm xóa SL về None khi đang có vị thế mở; đồng bộ chuẩn xác sang `LivePositionState`.
 
-- [ ] **FLAW-2.1:** **21 Tham Số Ma (Phantom Genes) Chiếm 19.1% DNA**
+- [x] **FLAW-2.1:** **21 Tham Số Ma (Phantom Genes) Chiếm 19.1% DNA** `[ĐÃ XỬ LÝ 11 GENES CHÍNH ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/config.rs:80-530`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L80-L530)
   - *Bản chất:* 21 trường cấu hình trong DNA được GA tối ưu và lưu DB nhưng mã nguồn runtime hoàn toàn không đọc hoặc bị ghi đè bởi hằng số cứng. Lãng phí 20% tài nguyên tính toán GA.
-  - *Giải pháp đề xuất:* Kết nối các gen ma vào runtime hoặc cắt bỏ khỏi vector DNA để giảm không gian tìm kiếm.
+  - *Đã xử lý:* Đã cắt bỏ 11 chiều gen không dùng đến: `macd` (4 genes), `vol_ma` (2 genes), `sl_min_dist_pct` (1 gene), `base_lot_size` (1 gene), `leverage` (1 gene), `percent_per_trade` (1 gene), `mega_trend_max_cycles` (1 gene). Thêm `tsl_buffer_floor_atr` (1 gene), tinh gọn DNA từ 118 xuống 108 chiều.
 
-- [ ] **FLAW-2.2:** **Xung Đột Đòn Bẩy Giữa JSON 20x Và DNA 1x-50x**
+- [x] **FLAW-2.2:** **Xung Đột Đòn Bẩy Giữa JSON 20x Và DNA 1x-50x** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`helios_optimizer_config.json:5`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/examples/helios_optimizer_config.json#L5) & [`config.rs:455`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L455)
   - *Bản chất:* JSON khóa cứng tài khoản sàn 20x (`margin_rate = 0.05`), nhưng DNA cho GA chọn 1x-50x. Nếu GA chọn 1x: Stop Loss bị nới ra 80%, trong khi sàn 20x thanh lý ở mức -5%!
-  - *Giải pháp đề xuất:* Khóa cứng `leverage = 20.0` trong DNA hoặc đồng bộ đòn bẩy sàn theo DNA.
+  - *Đã xử lý:* Tách `leverage` ra khỏi DNA, cố định 20x và chuyển thành User Setting; tạo thêm biến `nuke_leverage: f64 = 50.0` độc lập cho chiến lược Nuke.
 
 - [ ] **FLAW-2.3:** **Nguy Cơ Sập Bot (`index out of bounds`) Khi Đổi Kích Thước DNA**
   - *Vị trí:* [`ferro_trade/ferro_trade_derive/src/lib.rs:154`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/ferro_trade_derive/src/lib.rs#L154) & [`asset_actor.rs:235`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L235)
@@ -216,6 +213,11 @@
   - *Vị trí:* [`trading_bot/bot_engine/src/optimizer/prospector_runner.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/prospector_runner.rs)
   - *Đã xử lý:* Đã triển khai Cổng Thẩm Định WFE Validation Gate (48 giờ OOS): Tự động đánh giá độc lập cá thể Champion qua `diagnostic_backtest`. Nếu OOS Return $\le 0.0$ hoặc Max Drawdown $> 15\%$, hệ thống lập tức từ chối nạp, bắn log cảnh báo chi tiết `[WFE GATE: REJECTED - OVERFIT DETECTED]` và duy trì DNA an toàn trước đó.
 
+- [ ] **FLAW-6.5:** **Hiện Tượng Overfit Optimizer & Thiếu Cơ Chế Điều Hòa (Regularization / Cross-Validation)**
+  - *Vị trí:* [`trading_bot/bot_engine/src/optimizer/prospector_runner.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/prospector_runner.rs) & [`ferro_trade/src/optimizer/ga_worker.rs`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/optimizer/ga_worker.rs)
+  - *Bản chất:* Hiện tượng Overfit trong thuật toán di truyền là chắc chắn sẽ xảy ra (không thể tránh khỏi khi tối ưu trên chuỗi thời gian tài chính có độ nhiễu cao). Dù WFE Gate đã chặn được các cá thể âm OOS, nhưng khi tỷ lệ Overfit cao (như 10 lần bị REJECT trong Log 26), hệ thống phải giữ lại DNA cũ thay vì tiến hóa thích ứng kịp thời với bối cảnh thị trường mới.
+  - *Giải pháp đề xuất (Sẽ nghiên cứu & giải quyết sau):* Áp dụng các kỹ thuật từ Machine Learning vào GA Optimizer: Time-Series K-Fold Cross Validation, Phạt độ phức tạp và độ nhạy của DNA (Regularization Penalty vào hàm Fitness), Đánh giá Fitness đa cụm thời gian (Multi-Window Walk-Forward Fitness Objective), hoặc Early Stopping dựa trên Validation Loss.
+
 - [ ] **FLAW-8.1:** **WebSocket Rơi Vào Vòng Lặp `sleep(60)` Vô Tận Khi Đứt Mạng**
   - *Vị trí:* [`trading_bot/bot_engine/src/execution/ws_manager.rs:139-151`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/ws_manager.rs#L139-L151)
   - *Bản chất:* Callback SDK chạy ngầm, sau đó luồng rơi vào `loop { sleep(60) }`. Khi sàn ngắt kết nối, vòng lặp sleep chạy mãi mãi, khối reconnect phía dưới không bao giờ chạm tới được. Bot rơi vào trạng thái chết lâm sàng.
@@ -235,3 +237,54 @@
   - *Vị trí:* [`trading_bot/bot_desktop_client`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_desktop_client)
   - *Bản chất:* Backend Tauri chỉ là template `greet`, 0 lệnh điều khiển bot được kết nối với Engine.
   - *Giải pháp đề xuất:* Xây dựng các Tauri commands nối trực tiếp vào `AssetActor` qua MPSC channel.
+
+---
+
+## 🔬 NHÓM 6: KIỂM TOÁN CHUYÊN SÂU HỆ THỐNG TRAILING SL, TP, SIZING & DYNAMIC RISK (AUDIT TOÀN DIỆN V3.3) (6 LỖ HỔNG)
+
+- [ ] **FLAW-TSL.1:** **Thiếu Hoàn Toàn Cơ Chế Trailing Take Profit (Static TP hoặc None)**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:353`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L353) & [`scanners/*.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners)
+  - *Bản chất:* 
+    1. Trong 6 Tactical Scanners: Chỉ có `RangeOscScanner` (chốt lời biên Bollinger Bands) và `ReversalScanner` (chốt lời tại KAMA mid) có phát sinh `suggested_tp`. Cả 4 Scanners còn lại (`TrendPullback`, `MomentumIgnition`, `Absorption`, `Anomaly`) hoàn toàn để `suggested_tp: None`.
+    2. Suốt vòng đời vị thế, `RiskManager::manage_trailing_stop` gọi `tick.update_trade_sl_tp(trade.id, Some(safe_tightened_sl), trade.tp_price);` $\rightarrow$ Mức TP nếu có thì đứng yên vĩnh viễn, không hề có cơ chế dời động (Trailing TP / Dynamic TP) theo bước sóng hoặc ATR.
+    3. Khi vào siêu sóng (Mega Trend), hệ thống chỉ dựa vào việc nâng sàn Stop Loss (`mega_trend_profit_floor`). Nếu giá giật ngược bất ngờ (Flash Dump) quét chạm SL thì bị bốc hơi một phần lợi nhuận thay vì chủ động chốt lời từng phần (Partial TP / Ladder TP).
+  - *Giải pháp đề xuất:* Thiết kế cơ chế Trailing Take Profit động (co giãn theo ATR/Sóng KAMA) hoặc cho phép cấu hình Take Profit đa tầng (Multi-Tier Partial TP) trong DNA.
+
+- [x] **FLAW-TSL.2:** **Năm Hằng Số Magic Numbers Ẩn Trong Quản Trị Rủi Ro Chưa Được Tham Số Hóa** `[ĐÃ XỬ LÝ 4 HẰNG SỐ CỐT LÕI ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs)
+  - *Bản chất:* Vẫn còn các giá trị cứng nằm sâu trong logic toán học, chưa được đưa vào cấu hình.
+  - *Đã xử lý:*
+    1. Đưa `tsl_buffer_floor_atr` vào DNA (`0.4 .. 2.5 ATR, step = 0.10`), thay thế hoàn toàn magic number 1.0 ATR ở dòng 338.
+    2. Hạ trần ngâm lệnh Zombie `max_stagnant_hold_bars` từ 2880 bars (48h) xuống tối đa 720 bars (12h) với step 30 nến.
+    3. Đưa `min_order_usd = 21.0` và `max_cap_fraction = 0.25` vào struct cấu hình, xóa bỏ hardcode 20% và $21 trong `calculate_size`.
+    4. Vá lỗi toán học `NaN` trong `calculate_size` khi `equity <= 0.0`.
+
+- [x] **FLAW-TSL.3:** **Bất Đồng Bộ Đòn Bẩy (Leverage Mismatch) Giữa DNA (1x-50x) Và Tài Khoản Sàn (20x)** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/config.rs:455`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L455) & [`paper_trader.rs:488`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/paper_trader.rs#L488)
+  - *Bản chất:* DNA cho GA chọn 1x-50x trong khi sàn cố định 20x (`margin_rate = 0.05`), gây nguy cơ cháy tài khoản trước khi chạm SL nếu GA chọn đòn bẩy thấp.
+  - *Đã xử lý:* Tách `leverage: 20.0` thành User Setting cố định khớp 1:1 với sàn; tách riêng `nuke_leverage: 50.0` cho chiến lược Nuke; cho phép người dùng tùy chỉnh từ giao diện bot/test harness.
+
+- [ ] **FLAW-TSL.4:** **Strategy Sizing Không Nhìn Thấy `MarketFilter` (Rủi Ro Altcoin Lot Size Thô)**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:11-22`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L11-L22)
+  - *Bản chất:* `RiskManager::calculate_size` chỉ tính toán theo tỷ lệ phần trăm vốn lý thuyết thuần túy (`size_fraction = target_margin / equity`), hoàn toàn không nhận thức được `step_size`, `tick_size`, `min_qty` hay `min_notional` thực tế của từng cặp tiền.
+  - *Hệ quả Edge Cases:* Đối với Altcoin có bước khối lượng lớn (ví dụ bước 1 đơn vị coin thay vì 0.001), việc làm tròn `.floor()` ở tầng dưới (`OrderExecutor` / `PaperTrader`) có thể làm sụt giảm 30-50% khối lượng thực tế so với con số tối ưu của GA, làm méo mó hoàn toàn tỷ lệ Risk/Reward đã được backtest.
+  - *Giải pháp đề xuất:* Truyền metadata sàn (`MarketFilter`) vào `TickContext` hoặc tạo lớp adapter chuẩn hóa sizing trước khi phát sinh `Action::Buy` / `Action::Sell`.
+
+- [ ] **FLAW-TSL.5:** **Độ Trễ 1 Nến Của High Watermark (`peak_val`) Tại Cây Nến Mở Lệnh (`entry_bar`)**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:107`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L107)
+  - *Bản chất:*
+    ```rust
+    let start_b = (entry_bar + 1).min(i);
+    for b in start_b..=i { peak_val = peak_val.max(high[b]); }
+    ```
+    Biểu thức khởi tạo `start_b = (entry_bar + 1).min(i)` bỏ qua toàn bộ biến động giá của chính cây nến mở lệnh (`entry_bar`).
+    Nếu thị trường có biến động mạnh ngay trong cây nến vừa mở vị thế (ví dụ giá bứt phá tạo râu nến cao vọt rồi hồi về trước khi đóng nến), mức đỉnh cao nhất đó bị bỏ lỡ, làm `peak_val` bị thấp giả tạo và khiến Trailing SL phản ứng chậm 1 nhịp.
+  - *Giải pháp đề xuất:* Khởi tạo `peak_val = trade.entry_price`, sau đó duyệt từ `b = entry_bar..=i` nhưng chỉ lấy phần râu nến nằm theo chiều có lợi so với `entry_price`.
+
+- [ ] **FLAW-TSL.6:** **Bảo Toàn Bản Sắc Stop Loss Của Từng Playbook & Tối Ưu Dải Cấu Hình DNA**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:297-307`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L297-L307)
+  - *Bản chất:* 
+    - Các Scanners như `TrendPullback`, `MomentumIgnition`, `Absorption` hiện đang trả về `suggested_sl: None`, buộc hệ thống phải fallback về dùng chung `base_sl_atr`.
+    - Dù mỗi scanner đã có cấu hình trần riêng (`max_initial_sl_pct`), nhưng việc thiếu công thức tính khoảng cách SL theo râu nến hoặc cấu trúc hỗ trợ/kháng cự vi mô khiến các Playbook này đánh mất nét đặc trưng vào lệnh.
+    - Cần rà soát và tinh chỉnh dải siêu tham số DNA của các biến số Stop Loss (`base_sl_atr`, `wick_sl_buffer_atr`, `tsl_atr_tight`, `tsl_atr_normal`, `tsl_atr_loose`) để đảm bảo phủ kín từ mức siêu nhạy 0.3 ATR đến mức chịu rung lắc cực đại 8.0 ATR cho mọi điều kiện thị trường.
+  - *Giải pháp đề xuất:* Bổ sung logic tính `suggested_sl` theo râu nến/cản vi mô cho toàn bộ các Scanner còn lại và mở rộng dải DNA tương ứng.
