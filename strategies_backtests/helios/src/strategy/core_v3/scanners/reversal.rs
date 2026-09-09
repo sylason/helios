@@ -17,7 +17,7 @@ impl TacticalScanner for ReversalScanner {
         let i = tick.i;
         let rev_cfg = &config.tactical_sniper.reversal;
         
-        let z_score = matrix.price_z_score[i];
+        let z_score = sensors.z_score[i];
         let kama_mid = sensors.kama_mid[i];
         let current_atr = sensors.atr_sl[i];
         let close_price = tick.closes()[i];

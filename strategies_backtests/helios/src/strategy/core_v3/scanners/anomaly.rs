@@ -13,11 +13,11 @@ impl TacticalScanner for AnomalyScanner {
         ScannerId::AnomalyFade
     }
 
-    fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
+    fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, _matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
         let ano_cfg = &config.tactical_sniper.anomaly;
         
-        let z_score = matrix.price_z_score[i];
+        let z_score = sensors.z_score[i];
         let current_atr = sensors.atr_sl[i];
         
         let open = tick.opens()[i];

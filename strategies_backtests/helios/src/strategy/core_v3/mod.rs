@@ -547,4 +547,97 @@ mod tests {
         assert_eq!(strategy.cooldown_tracker.locked_side, Some(SignalType::Long));
         assert_eq!(strategy.cooldown_tracker.last_exit_price, 2485.0);
     }
+
+    #[test]
+    fn test_reversal_and_anomaly_use_raw_z_score_not_double_tanh() {
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::scanners::anomaly::AnomalyScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let opens = vec![2000.0; len];
+        let highs = vec![2005.0; len];
+        let lows = vec![1950.0; len];
+        let closes = vec![1995.0; len];
+        let volumes = vec![1000.0; len];
+        let datetimes = vec![0i64; len];
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(volumes),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        // Giả lập Sensors:
+        // Z-Score thô của giá là -3.0 sigma (thị trường sập hầm)
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.highs = std::sync::Arc::new(vec![2005.0; len]);
+        sensors.lows = std::sync::Arc::new(vec![1950.0; len]);
+        sensors.volumes = std::sync::Arc::new(vec![1000.0; len]);
+        sensors.natr = std::sync::Arc::new(vec![1.5; len]);
+        sensors.z_score = std::sync::Arc::new(vec![-3.0; len]); // Raw Z-Score = -3.0
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![30.0; len]);
+        sensors.chaos_ratio = std::sync::Arc::new(vec![0.5; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.5; len]);
+        sensors.adx = std::sync::Arc::new(vec![25.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2040.0; len]); // KAMA ở trên (2040)
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![-0.10; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2050.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2040.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.kc_upper = std::sync::Arc::new(vec![2055.0; len]);
+        sensors.kc_lower = std::sync::Arc::new(vec![1975.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.reversal.z_score_threshold = 2.5;
+        config.tactical_sniper.reversal.min_activation_score = 0.65;
+        config.tactical_sniper.anomaly.z_score_threshold = 2.5;
+        config.tactical_sniper.anomaly.min_activation_score = 0.65;
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // KIỂM CHỨNG FLAW-4.5:
+        // Với Z_raw = -3.0 và z_thresh = 2.5:
+        // f_z = tanh(3.0 / 2.5) = tanh(1.2) ≈ 0.8337!
+        // Nếu bị Double Tanh cũ: f_z ≈ 0.347 -> score < 0.65 và bị loại bỏ!
+        // Với Single Tanh mới: Reversal và Anomaly sinh Proposal thành công với raw_score >= 0.65!
+        let rev_proposal = ReversalScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(rev_proposal.is_some(), "ReversalScanner phải kích hoạt thành công khi Z-Score = -3.0 sigma!");
+        let rev_p = rev_proposal.unwrap();
+        assert!(rev_p.raw_score >= 0.65, "Reversal raw_score ({}) phải >= 0.65", rev_p.raw_score);
+
+        let ano_proposal = AnomalyScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(ano_proposal.is_some(), "AnomalyScanner phải kích hoạt thành công khi râu nến dài và Z-Score = -3.0 sigma!");
+        let ano_p = ano_proposal.unwrap();
+        assert!(ano_p.raw_score >= 0.65, "Anomaly raw_score ({}) phải >= 0.65", ano_p.raw_score);
+    }
 }
