@@ -4,12 +4,12 @@ Tài liệu quản trị vòng đời phát triển toàn diện cho dự án `t
 
 ---
 
-## 🏛️ GIAI ĐOẠN 0: HỆ THỐNG HÓA TÀI LIỆU & QUY CHUẨN TÍNH NĂNG (SPEC CONSOLIDATION)
+## 🏛️ GIAI ĐOẠN 0: HỆ THỐNG HÓA TÀI LIỆU & QUY CHUẨN TÍNH NĂNG (SPEC CONSOLIDATION) - (✅ HOÀN THÀNH)
 
-- [ ] `[G0.1]` Đọc quét 100% tài liệu trong `trading_bot/docs/` và tạo `FEATURE_INVENTORY.md`.
-- [ ] `[G0.2]` Phân loại toàn bộ tính năng: 🟢 Active, 🟡 Proposed, 🔴 Deprecated, ⚠️ Conflict.
-- [ ] `[G0.3]` Thảo luận, làm rõ và chốt quyết định kỹ thuật cho từng tính năng mâu thuẫn / chưa hợp lý.
-- [ ] `[G0.4]` Dọn dẹp cấu trúc thư mục `docs/`: Chuyển tài liệu cũ vào `archive/`, chuẩn hóa tài liệu Active.
+- [x] `[G0.1]` Đọc quét 100% tài liệu trong `trading_bot/docs/` và tạo `FEATURE_INVENTORY.md`.
+- [x] `[G0.2]` Phân loại toàn bộ tính năng: 🟢 Active, 🟡 Proposed, 🔴 Deprecated, ⚠️ Conflict.
+- [x] `[G0.3]` Thảo luận, làm rõ và chốt quyết định kỹ thuật cho từng tính năng mâu thuẫn / chưa hợp lý (7 biên bản thảo luận trong `docs/UI/discussions/`).
+- [x] `[G0.4]` Dọn dẹp cấu trúc thư mục `docs/`: Chuyển tài liệu cũ vào `archive/`, chuẩn hóa tài liệu Active theo cấu trúc `specs/` và `discussions/`.
 
 ---
 
