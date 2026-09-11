@@ -40,7 +40,7 @@ Danh sách nhiệm vụ phát triển Giao diện Desktop Client (React 19 + Tau
 ---
 
 ## 🚀 Giai đoạn 5: TÍCH HỢP TOÀN DIỆN LOCAL-FIRST TAURI IPC & CÁC MODAL AN TOÀN (TIẾP THEO)
-- [ ] `[G5.1]` **Đồng Bộ Chuẩn Hóa Type FSM:** Cập nhật `src/types/bot.ts` khớp chuẩn 1:1 với Rust FSM (`INACTIVE`, `STARTING`, `RUNNING_ACTIVE`, `PAUSED`, `GRACEFUL_STOPPING`, `STOPPED`, `ERROR`).
+- [x] `[G5.1]` **Đồng Bộ Chuẩn Hóa Type FSM:** Cập nhật `src/types/bot.ts` khớp chuẩn 1:1 với Rust FSM (`INACTIVE`, `STARTING`, `RUNNING_ACTIVE`, `PAUSED`, `GRACEFUL_STOPPING`, `STOPPED`, `ERROR`). Đã kiểm chứng Vitest và `tsc --noEmit` PASS 100%.
 - [ ] `[G5.2]` **Thanh Tìm Kiếm & Lọc Trực Tiếp (Inline Search):** Bổ sung Search Bar và Safe Liquidity Badge `💧` ngay phía trên `WatchlistTable.tsx`.
 - [ ] `[G5.3]` **Hộp Thoại Điều Chuyển Vốn An Toàn (RebalanceModal):** Xây dựng modal 2 lựa chọn (`📌 Áp dụng từ lệnh kế tiếp` vs `⚡ Đóng lệnh ngay`) khi cặp đang mở vị thế.
 - [ ] `[G5.4]` **Bảng Thoát Tổng Hợp (UnifiedExitModal):** Xây dựng modal hiển thị 6 cột vị thế kèm 3 nút dứt khoát (`Flat All`, `Leave Cloud SL`, `Cancel`); hỗ trợ Fast Exit khi toàn bộ vị thế đang FLAT.

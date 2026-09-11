@@ -1,5 +1,5 @@
 // trading_bot/bot_desktop_client/src/utils/formatters.ts
-import { AssetStatus, PositionSide } from '../types/bot';
+import { AssetStatus, PositionSide, StartingPhase } from '../types/bot';
 
 /**
  * Định dạng số tiền tiền tệ USD (ví dụ: $1,234.56 hoặc -$50.50)
@@ -23,20 +23,24 @@ export function formatPercent(value: number): string {
 }
 
 /**
- * Lấy nhãn hiển thị tiếng Việt tương ứng với AssetStatus
+ * Lấy nhãn hiển thị tiếng Việt tương ứng với AssetStatus và StartingPhase
  */
-export function getStatusLabel(status: AssetStatus): string {
+export function getStatusLabel(status: AssetStatus, phase?: StartingPhase): string {
   switch (status) {
     case 'INACTIVE':
       return 'TẮT (INACTIVE)';
-    case 'SYNCING_DATA':
-      return 'ĐANG SYNC DATA (60D)';
-    case 'GA_OPTIMIZING':
-      return 'GA OPTIMIZING...';
-    case 'READY_TRADING':
-      return 'ĐANG TRADING (LIVE)';
-    case 'GRACEFUL_EXIT':
-      return 'GRACEFUL EXITING...';
+    case 'STARTING':
+      if (phase === 'SYNCING') return 'ĐANG SYNC DATA (33D)';
+      if (phase === 'OPTIMIZING') return 'GA OPTIMIZING JIT...';
+      return 'KHỞI ĐỘNG (STARTING)...';
+    case 'RUNNING_ACTIVE':
+      return 'ĐANG GIAO DỊCH (ACTIVE)';
+    case 'PAUSED':
+      return 'TẠM DỪNG (PAUSED)';
+    case 'GRACEFUL_STOPPING':
+      return 'CHỜ CHỐT SL (GRACEFUL)';
+    case 'STOPPED':
+      return 'ĐÃ DỪNG (STOPPED)';
     case 'ERROR':
       return 'LỖI HỆ THỐNG (ERROR)';
     default:
@@ -50,14 +54,14 @@ export function getStatusLabel(status: AssetStatus): string {
 export function getStatusBadgeVariant(status: AssetStatus): string {
   switch (status) {
     case 'INACTIVE':
+    case 'STOPPED':
       return 'secondary';
-    case 'SYNCING_DATA':
+    case 'STARTING':
+    case 'PAUSED':
       return 'warning';
-    case 'GA_OPTIMIZING':
-      return 'info';
-    case 'READY_TRADING':
+    case 'RUNNING_ACTIVE':
       return 'success';
-    case 'GRACEFUL_EXIT':
+    case 'GRACEFUL_STOPPING':
       return 'dark';
     case 'ERROR':
       return 'danger';

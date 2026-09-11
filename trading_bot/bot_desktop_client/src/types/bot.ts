@@ -1,15 +1,22 @@
 // trading_bot/bot_desktop_client/src/types/bot.ts
 
 /**
- * Trạng thái vận hành của từng Cặp giao dịch (Asset)
+ * Máy trạng thái vận hành của từng Cặp giao dịch (Asset)
+ * Khớp chuẩn 1:1 với FSM trong Rust Backend (EngineController)
  */
 export type AssetStatus = 
   | 'INACTIVE' 
-  | 'SYNCING_DATA' 
-  | 'GA_OPTIMIZING' 
-  | 'READY_TRADING' 
-  | 'GRACEFUL_EXIT' 
+  | 'STARTING' 
+  | 'RUNNING_ACTIVE' 
+  | 'PAUSED' 
+  | 'GRACEFUL_STOPPING' 
+  | 'STOPPED' 
   | 'ERROR';
+
+/**
+ * Phân kỳ giai đoạn khi Asset đang ở trạng thái STARTING
+ */
+export type StartingPhase = 'SYNCING' | 'OPTIMIZING';
 
 /**
  * Phía vị thế: LONG, SHORT, hoặc FLAT (Không có vị thế)
@@ -35,9 +42,14 @@ export interface AssetState {
   symbol: string;
   marketType: string;
   status: AssetStatus;
+  startingPhase?: StartingPhase;
   strategyName: string;
   fitnessReturnPct: number;
   fitnessMaxDdPct: number;
+  initialBaseCapital: number;
+  realizedPnl: number;
+  allocatedCapital: number;
+  isSafeLiquidity: boolean;
   position: LivePosition;
   recentLogs: string[];
 }
@@ -60,9 +72,37 @@ export interface SystemHealth {
   apiWeightMax: number;
   wsConnected: boolean;
   latencyMs: number;
+  sqliteStoreActive?: boolean;
 }
 
 /**
  * Định danh trang ứng dụng (State-based Navigation Routing)
  */
 export type PageId = 'control' | 'dashboard';
+
+/**
+ * Chế độ lọc nhanh trên thanh công cụ Watchlist
+ */
+export type FastFilterMode = 'ALL' | 'ACTIVE' | 'PAUSED' | 'INACTIVE' | 'SAFE_LIQUIDITY';
+
+/**
+ * Các hành động lựa chọn khi thực hiện Bảng Thoát Tổng Hợp (Unified Exit Modal)
+ */
+export type UnifiedExitAction = 'FLAT_ALL' | 'LEAVE_CLOUD_SL' | 'CANCEL';
+
+/**
+ * Tùy chọn khi điều chuyển vốn (Capital Rebalance Modal)
+ */
+export type RebalanceOption = 'APPLY_NEXT_TRADE' | 'CLOSE_IMMEDIATELY';
+
+/**
+ * Cấu trúc thông báo Toast nổi (Floating Toast Notification)
+ */
+export interface ToastNotification {
+  id: string;
+  title: string;
+  message: string;
+  variant: 'danger' | 'warning' | 'success' | 'info';
+  timestamp: number;
+  symbol?: string;
+}

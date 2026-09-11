@@ -32,44 +32,47 @@ function App() {
   }, [account, activeCount]);
 
   /**
-   * Kích hoạt Bot cho một Cặp tiền (Sync -> GA Optimize -> Live Trading)
+   * Kích hoạt Bot cho một Cặp tiền (STARTING Sync -> GA Optimize -> RUNNING_ACTIVE)
    */
   const handleActivate = async (symbol: string) => {
-    // 1. Chuyển sang SYNCING_DATA
+    // 1. Chuyển sang STARTING (SYNCING)
     setAssets(prev => prev.map(a => {
       if (a.symbol === symbol) {
         return {
           ...a,
-          status: 'SYNCING_DATA',
-          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 📥 Starting 60-Day Kline Sync from Binance REST...`],
+          status: 'STARTING',
+          startingPhase: 'SYNCING',
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 📥 Starting 33-Day Kline Sync from Binance REST...`],
         };
       }
       return a;
     }));
 
-    await BotService.activateAsset(symbol);
+    await BotService.startAsset(symbol);
 
-    // 2. Giả lập sau 1.5s chuyển sang GA_OPTIMIZING
+    // 2. Giả lập sau 1.5s chuyển sang STARTING (OPTIMIZING)
     setTimeout(() => {
       setAssets(prev => prev.map(a => {
         if (a.symbol === symbol) {
           return {
             ...a,
-            status: 'GA_OPTIMIZING',
-            recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🧬 Prospector GA Engine building Champion DNA...`],
+            status: 'STARTING',
+            startingPhase: 'OPTIMIZING',
+            recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🧬 Prospector GA Engine building Champion DNA (JIT)...`],
           };
         }
         return a;
       }));
 
-      // 3. Giả lập sau 1.5s nữa chuyển sang READY_TRADING
+      // 3. Giả lập sau 1.5s nữa chuyển sang RUNNING_ACTIVE
       setTimeout(() => {
         setAssets(prev => prev.map(a => {
           if (a.symbol === symbol) {
             const isLong = symbol === 'ETHUSDT' || symbol === 'SOLUSDT';
             return {
               ...a,
-              status: 'READY_TRADING',
+              status: 'RUNNING_ACTIVE',
+              startingPhase: undefined,
               position: {
                 side: isLong ? 'LONG' : 'SHORT',
                 qty: symbol === 'ETHUSDT' ? 1.5 : (symbol === 'BTCUSDT' ? 0.05 : 10.0),
@@ -80,8 +83,8 @@ function App() {
               },
               recentLogs: [
                 ...a.recentLogs, 
-                `[${new Date().toLocaleTimeString()}] 🚀 Champion DNA loaded. READY TO TRADE on Binance Futures Testnet.`,
-                `[${new Date().toLocaleTimeString()}] 🛡️ Trailing SL target order initialized.`,
+                `[${new Date().toLocaleTimeString()}] 🚀 Champion DNA loaded. RUNNING_ACTIVE on Binance Futures Testnet.`,
+                `[${new Date().toLocaleTimeString()}] 🛡️ Mark Price Trailing SL order initialized.`,
               ],
             };
           }
@@ -97,21 +100,21 @@ function App() {
   };
 
   /**
-   * Dừng an toàn (Graceful Terminate)
+   * Dừng an toàn (GRACEFUL_STOPPING)
    */
   const handleGracefulTerminate = async (symbol: string) => {
     setAssets(prev => prev.map(a => {
       if (a.symbol === symbol) {
         return {
           ...a,
-          status: 'GRACEFUL_EXIT',
+          status: 'GRACEFUL_STOPPING',
           recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🟡 Graceful termination requested. Waiting for Trailing SL execution...`],
         };
       }
       return a;
     }));
 
-    await BotService.gracefulTerminateAsset(symbol);
+    await BotService.gracefulStop(symbol);
 
     // Giả lập sau 3s đóng xong vị thế
     setTimeout(() => {
@@ -130,7 +133,7 @@ function App() {
   };
 
   /**
-   * Ngắt khẩn cấp (Immediate Terminate)
+   * Ngắt khẩn cấp (FORCE_STOP_ASSET)
    */
   const handleImmediateTerminate = async (symbol: string) => {
     setAssets(prev => prev.map(a => {
@@ -145,11 +148,11 @@ function App() {
       return a;
     }));
 
-    await BotService.immediateTerminateAsset(symbol);
+    await BotService.forceStopAsset(symbol);
   };
 
   /**
-   * Dừng khẩn cấp Toàn cục (Emergency Stop All)
+   * Dừng khẩn cấp Toàn cục (EMERGENCY_STOP_ALL)
    */
   const handleEmergencyStopAll = async () => {
     setAssets(prev => prev.map(a => ({

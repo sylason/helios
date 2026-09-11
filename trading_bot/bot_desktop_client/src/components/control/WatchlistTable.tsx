@@ -53,8 +53,8 @@ export const WatchlistTable: React.FC<WatchlistTableProps> = ({
           <tbody>
             {assets.map((asset) => {
               const isSelected = selectedSymbol === asset.symbol;
-              const isBusy = asset.status === 'SYNCING_DATA' || asset.status === 'GA_OPTIMIZING';
-              const isActive = asset.status === 'READY_TRADING' || isBusy || asset.status === 'GRACEFUL_EXIT';
+              const isBusy = asset.status === 'STARTING';
+              const isActive = asset.status === 'RUNNING_ACTIVE' || isBusy || asset.status === 'GRACEFUL_STOPPING' || asset.status === 'PAUSED';
 
               return (
                 <tr 
@@ -75,7 +75,7 @@ export const WatchlistTable: React.FC<WatchlistTableProps> = ({
                       bg={getStatusBadgeVariant(asset.status)} 
                       className={`px-3 py-2 text-uppercase ${isBusy ? 'placeholder-wave' : ''}`}
                     >
-                      {getStatusLabel(asset.status)}
+                      {getStatusLabel(asset.status, asset.startingPhase)}
                     </Badge>
                   </td>
 
@@ -145,7 +145,7 @@ export const WatchlistTable: React.FC<WatchlistTableProps> = ({
                       variant="outline-warning" 
                       className="w-100 py-2 fw-semibold text-uppercase"
                       onClick={() => onGracefulTerminate(asset.symbol)}
-                      disabled={!isActive || asset.status === 'GRACEFUL_EXIT'}
+                      disabled={!isActive || asset.status === 'GRACEFUL_STOPPING'}
                     >
                       🟡 GRACEFUL EXIT
                     </Button>

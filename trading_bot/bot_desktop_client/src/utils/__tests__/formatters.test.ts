@@ -21,21 +21,25 @@ describe('Formatters Utils Test Suite', () => {
     expect(formatPercent(0)).toBe('0.00%');
   });
 
-  test('getStatusLabel should return correct Vietnamese labels for AssetStatus', () => {
+  test('getStatusLabel should return correct Vietnamese labels for Rust FSM statuses', () => {
     expect(getStatusLabel('INACTIVE')).toBe('TẮT (INACTIVE)');
-    expect(getStatusLabel('SYNCING_DATA')).toBe('ĐANG SYNC DATA (60D)');
-    expect(getStatusLabel('GA_OPTIMIZING')).toBe('GA OPTIMIZING...');
-    expect(getStatusLabel('READY_TRADING')).toBe('ĐANG TRADING (LIVE)');
-    expect(getStatusLabel('GRACEFUL_EXIT')).toBe('GRACEFUL EXITING...');
+    expect(getStatusLabel('STARTING', 'SYNCING')).toBe('ĐANG SYNC DATA (33D)');
+    expect(getStatusLabel('STARTING', 'OPTIMIZING')).toBe('GA OPTIMIZING JIT...');
+    expect(getStatusLabel('STARTING')).toBe('KHỞI ĐỘNG (STARTING)...');
+    expect(getStatusLabel('RUNNING_ACTIVE')).toBe('ĐANG GIAO DỊCH (ACTIVE)');
+    expect(getStatusLabel('PAUSED')).toBe('TẠM DỪNG (PAUSED)');
+    expect(getStatusLabel('GRACEFUL_STOPPING')).toBe('CHỜ CHỐT SL (GRACEFUL)');
+    expect(getStatusLabel('STOPPED')).toBe('ĐÃ DỪNG (STOPPED)');
     expect(getStatusLabel('ERROR')).toBe('LỖI HỆ THỐNG (ERROR)');
   });
 
-  test('getStatusBadgeVariant should return correct Bootstrap badge variants', () => {
+  test('getStatusBadgeVariant should return correct Bootstrap badge variants for FSM', () => {
     expect(getStatusBadgeVariant('INACTIVE')).toBe('secondary');
-    expect(getStatusBadgeVariant('SYNCING_DATA')).toBe('warning');
-    expect(getStatusBadgeVariant('GA_OPTIMIZING')).toBe('info');
-    expect(getStatusBadgeVariant('READY_TRADING')).toBe('success');
-    expect(getStatusBadgeVariant('GRACEFUL_EXIT')).toBe('dark');
+    expect(getStatusBadgeVariant('STOPPED')).toBe('secondary');
+    expect(getStatusBadgeVariant('STARTING')).toBe('warning');
+    expect(getStatusBadgeVariant('PAUSED')).toBe('warning');
+    expect(getStatusBadgeVariant('RUNNING_ACTIVE')).toBe('success');
+    expect(getStatusBadgeVariant('GRACEFUL_STOPPING')).toBe('dark');
     expect(getStatusBadgeVariant('ERROR')).toBe('danger');
   });
 
