@@ -2,7 +2,7 @@
 
 > **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 49 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **19/49 lỗi đã được sửa & kiểm thử thành công**, **30/49 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **20/49 lỗi đã được sửa & kiểm thử thành công**, **29/49 lỗi đang chờ xử lý**.
 
 ---
 
@@ -15,8 +15,8 @@
 | **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 11 | 3 | 8 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 4 | 5 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
-| **TỔNG CỘNG** | **49** | **19** | **30** |  |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 5 | 4 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
+| **TỔNG CỘNG** | **49** | **20** | **29** |  |
 
 ---
 
@@ -301,12 +301,15 @@
     - Chỉ trong 1 ngày, tài khoản bị vả liên tiếp 4 lệnh cả 2 đầu (#0004, #0005, #0007, #0008), bốc hơi 16% tổng tài sản.
   - *Giải pháp đề xuất:* Khi gặp khoản lỗ nặng ($ROE \le -10\%$) hoặc khi thị trường đang ở trạng thái Choppy/Noise: Kích hoạt **Bidirectional Cooldown (Khóa cả 2 chiều Long & Short)** trong ít nhất 15-30 phút để bot không vào bất kỳ lệnh nào. Tích hợp cơ chế Exponential Backoff giãn cách thời gian nếu thua liên tiếp.
 
-- [ ] **FLAW-TSL.8:** **Hardcode `0.80 / lev` Trong `clamp_sl_price` Cho Phép Lệnh Thua Tới -80% ROE (Thiếu Hard Max Loss Cap Theo ROE)**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:29-44`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L29-L44)
-  - *Bản chất:* 
-    - Biểu thức `max_sl_by_lev = 0.80 / lev` là hằng số cứng (magic number), cho phép Initial Stop Loss mở rộng tới 4.0% giá trên đòn bẩy 20x (-80% ROE).
-    - Khi `base_sl_atr` rơi vào 4-5 ATR lúc thị trường biến động, lệnh đặt SL cách xa 60-75 giá ETH (như Lệnh `#0011` trong Log 33 thua tới **-$5.05, -51.6% ROE**). Một lệnh thua làm bốc hơi hơn một nửa tiền ký quỹ, xóa sạch thành quả của 5-7 lệnh thắng trước đó.
-  - *Giải pháp đề xuất:* Tham số hóa và hạ trần cứng `max_sl_by_lev` từ `0.80 / lev` xuống tối đa **`0.30 / lev` (tương đương tối đa -30% ROE, hoặc 1.5% giá trên đòn bẩy 20x)**. Đưa `max_loss_roe_cap` vào struct cấu hình.
+- [x] **FLAW-TSL.8:** **Hardcode `0.80 / lev` Trong `clamp_sl_price` Cho Phép Lệnh Thua Tới -80% ROE** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:29-66, 105-120, 277-295`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs) & [`config.rs:325-475, 555-565`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs) & [`mod.rs:280-315, 644-650`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)
+  - *Đã xử lý (Per-Playbook ROE Cap & Fallback Hierarchy):*
+    1. **Xóa bỏ vĩnh viễn magic number:** Loại bỏ hoàn toàn `0.80 / lev` (cho phép âm -80% ROE) và giá trị hardcode `0.05` khi lệnh không có tag.
+    2. **Fallback Hierarchy:** Lệnh có tag đọc `max_sl_roe_cap` của chính Scanner đó (`0.04 .. 0.40, step = 0.015`, default `0.15 - 0.25`). Lệnh không có tag (`None`) hoặc lệnh thủ công Adopted từ sàn fallback về `default_sl_roe_cap` (`0.04 .. 0.40, step = 0.015`, default `0.20`).
+    3. **Min Distance Floor Guard:** `effective_cap = (roe_cap / lev).max(min_initial_sl_pct)`. Triệt tiêu hoàn toàn nghịch lý kẹp ngược khi đòn bẩy cao ($50\times - 100\times$), bảo vệ nến khỏi micro-noise và phí sàn Binance Futures.
+    4. **Mở rộng dải sàn `min_initial_sl_pct`:** Đổi sang `[min = 0.0015, max = 0.040, step = 0.0005]` ($0.15\% \to 4.0\%$).
+    5. **Mở rộng DNA 112 chiều:** Tích hợp `default_sl_roe_cap` vào `RiskStopParams`, bảo toàn 100% tính đơn điệu Monotonic Ratchet. Đã có 5 unit tests chuyên sâu kiểm chứng Spot 1x, Short 20x, Nuke 50x/100x và Untagged Fallback (25/25 Helios + 34/34 Bot Engine = 59/59 tests pass 100%).
+
 
 - [ ] **FLAW-TSL.9:** **Playbook `ABSORPTION` Bị Bội Thực Tín Hiệu (Over-Trading / Churn) Trong Vùng Choppy Market**
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs) & [`arbiter.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs)
