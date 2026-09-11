@@ -54,6 +54,13 @@ impl Strategy for HeliosStrategyV3 {
     }
 
     fn update_from_dna(&mut self, dna: &[f64]) {
+        if dna.len() < HeliosConfigV3::DNA_WIDTH {
+            warn!(
+                "⚠️ [DNA LENGTH MISMATCH] Yêu cầu {} gen nhưng DNA chỉ có {} gen -> Bỏ qua nạp DNA không tương thích để chống crash!",
+                HeliosConfigV3::DNA_WIDTH, dna.len()
+            );
+            return;
+        }
         self.config.update_from_dna(dna);
         self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
     }
@@ -638,7 +645,7 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 108, "DNA_WIDTH phải là chính xác 108 chiều sau khi loại bỏ hoàn toàn gen ma!");
+        assert_eq!(width, 111, "DNA_WIDTH phải là chính xác 111 chiều sau khi tích hợp 3 tham số Hybrid TTP (FLAW-TSL.1)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         assert!(!has_macd, "defs không được chứa macd!");

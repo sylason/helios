@@ -655,6 +655,36 @@ pub struct RiskStopParams {
     #[dna(min = 0.0, max = 60.0, step = 5.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub re_entry_cooldown_bars: usize,
+
+    // =========================================================================
+    // 8. CƠ CHẾ CHỐT LỜI ĐỘNG LAI (HYBRID TRAILING TAKE PROFIT - FLAW-TSL.1)
+    // =========================================================================
+    /// Ngưỡng ROE Kích Hoạt Radar Thả Diều Bám Đỉnh Cho Trend Scanners (10% -> 50% ROE, Step 5% -> 9 nấc)
+    #[dna(min = 0.10, max = 0.50, step = 0.05)]
+    #[serde(default = "default_ttp_activation_roe")]
+    pub ttp_activation_roe: f64,
+
+    /// Khoảng Cách Quay Đầu Từ Đỉnh Theo ATR Để Chốt Lời Khóa Lãi (0.4 -> 2.0 ATR, Step 0.10 -> 17 nấc)
+    #[dna(min = 0.4, max = 2.0, step = 0.10)]
+    #[serde(default = "default_ttp_callback_atr")]
+    pub ttp_callback_atr: f64,
+
+    /// Sàn Bảo Vệ Lãi Tối Thiểu Khi Dải Bollinger Co Hẹp Chống Chốt Lỗ (0.1% -> 0.8% giá, Step 0.05% -> 15 nấc)
+    #[dna(min = 0.001, max = 0.008, step = 0.0005)]
+    #[serde(default = "default_dynamic_tp_min_gain_pct")]
+    pub dynamic_tp_min_gain_pct: f64,
+}
+
+fn default_ttp_activation_roe() -> f64 {
+    0.20
+}
+
+fn default_ttp_callback_atr() -> f64 {
+    0.80
+}
+
+fn default_dynamic_tp_min_gain_pct() -> f64 {
+    0.002
 }
 
 fn default_tsl_buffer_floor_atr() -> f64 {

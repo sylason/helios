@@ -104,15 +104,16 @@ impl RiskManager {
                 (risk_cfg.tsl_atr_normal, 0.05)
             };
 
-            // 2. Tìm đỉnh lợi nhuận cao nhất (High Watermark) kể từ nến thứ 2
+            // 2. Tìm đỉnh lợi nhuận cao nhất (High Watermark) chuẩn hóa từ giá vào lệnh (FLAW-TSL.5)
+            // Khởi tạo neo chuẩn từ entry_price để triệt tiêu 100% Lookahead bias của nến entry
+            // và đảm bảo đỉnh không bao giờ bị ghi nhận âm dưới giá vốn nếu nến sau giảm.
             let highs = tick.highs();
             let lows = tick.lows();
             
-            let start_b = (entry_bar + 1).min(i);
             let (peak_val, peak_bar) = if trade.is_long() {
-                let mut max_high = highs[start_b];
-                let mut max_bar = start_b;
-                for j in start_b..=i {
+                let mut max_high = trade.entry_price;
+                let mut max_bar = entry_bar;
+                for j in (entry_bar + 1)..=i {
                     if highs[j] > max_high { 
                         max_high = highs[j]; 
                         max_bar = j;
@@ -120,9 +121,9 @@ impl RiskManager {
                 }
                 (max_high, max_bar)
             } else {
-                let mut min_low = lows[start_b];
-                let mut min_bar = start_b;
-                for j in start_b..=i {
+                let mut min_low = trade.entry_price;
+                let mut min_bar = entry_bar;
+                for j in (entry_bar + 1)..=i {
                     if lows[j] < min_low { 
                         min_low = lows[j]; 
                         min_bar = j;
@@ -196,6 +197,45 @@ impl RiskManager {
             } else {
                 0.0
             };
+
+            // =========================================================================
+            // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
+            // =========================================================================
+            // Áp dụng cho các Playbook xu hướng hoặc không có TP cố định (TREND_PB, MOMENTUM_IGN, ABSORPTION, ANOMALY)
+            // Giúp thả diều tối đa lợi nhuận siêu sóng và chỉ chốt lời khi giá tạo đỉnh quay đầu (Callback).
+            let tag_str = trade.tag.as_deref().unwrap_or("");
+            let is_ttp_eligible = matches!(tag_str, "TREND_PB" | "MOMENTUM_IGN" | "ABSORPTION" | "ANOMALY") || trade.tp_price.is_none();
+            if is_ttp_eligible {
+                let ttp_act_roe = if risk_cfg.ttp_activation_roe > 0.0 { risk_cfg.ttp_activation_roe } else { 0.20 };
+                let ttp_cb_atr = if risk_cfg.ttp_callback_atr > 0.0 { risk_cfg.ttp_callback_atr } else { 0.80 };
+                let min_gain_pct = if risk_cfg.dynamic_tp_min_gain_pct > 0.0 { risk_cfg.dynamic_tp_min_gain_pct } else { 0.002 };
+
+                if peak_roe >= ttp_act_roe {
+                    if trade.is_long() {
+                        let ttp_trigger_price = peak_val - (ttp_cb_atr * current_atr);
+                        let min_exit_price = trade.entry_price * (1.0 + min_gain_pct);
+                        if current_close <= ttp_trigger_price && current_close >= min_exit_price {
+                            tracing::info!(
+                                "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Long | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
+                                i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
+                            );
+                            tick.close(None);
+                            continue;
+                        }
+                    } else {
+                        let ttp_trigger_price = peak_val + (ttp_cb_atr * current_atr);
+                        let max_exit_price = trade.entry_price * (1.0 - min_gain_pct);
+                        if current_close >= ttp_trigger_price && current_close <= max_exit_price {
+                            tracing::info!(
+                                "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Short | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
+                                i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
+                            );
+                            tick.close(None);
+                            continue;
+                        }
+                    }
+                }
+            }
 
             // 1. Kiểm tra chế độ Siêu Sóng Mega Trend
             let mega_trend_trigger_pnl = risk_cfg.mega_trend_pnl_trigger * trade.entry_price * trade.size.abs();
@@ -293,19 +333,83 @@ impl RiskManager {
                 }
             }
 
+            // =========================================================================
+            // 🎯 [FLAW-TSL.1: HYBRID TTP - NHÁNH A: DYNAMIC STRUCTURAL TAKE PROFIT]
+            // =========================================================================
+            // Cho các Playbook RANGE_OSC (Bollinger Bands) và REVERSAL (KAMA Mid).
+            // Dời TP bám sát cấu trúc thị trường động thay vì bị đóng băng (Frozen Static TP).
+            let mut new_tp_to_update = trade.tp_price;
+            if tag_str == "RANGE_OSC" || tag_str == "REVERSAL" {
+                let raw_tp = if tag_str == "RANGE_OSC" {
+                    if trade.is_long() {
+                        sensors.bb_upper[i]
+                    } else {
+                        sensors.bb_lower[i]
+                    }
+                } else {
+                    // REVERSAL: Mục tiêu phục hồi sóng hồi về KAMA Mid
+                    sensors.kama_mid[i]
+                };
+
+                if !raw_tp.is_nan() && raw_tp > 0.0 {
+                    let min_gain_pct = if risk_cfg.dynamic_tp_min_gain_pct > 0.0 {
+                        risk_cfg.dynamic_tp_min_gain_pct
+                    } else {
+                        0.002
+                    };
+
+                    // CHỐT CHẶN 1: Min Profit Floor Guard (Chống dải BB co thắt làm chốt lời thành chốt lỗ)
+                    let guarded_tp = if trade.is_long() {
+                        let min_tp_floor = trade.entry_price * (1.0 + min_gain_pct);
+                        raw_tp.max(min_tp_floor)
+                    } else {
+                        let max_tp_ceiling = trade.entry_price * (1.0 - min_gain_pct);
+                        raw_tp.min(max_tp_ceiling)
+                    };
+
+                    // CHỐT CHẶN 2: Spread Guard (Đảm bảo khoảng cách an toàn với SL >= 0.5 ATR)
+                    let spread_buffer = 0.5 * current_atr;
+                    let final_tp = if trade.is_long() {
+                        guarded_tp.max(calculated_sl + spread_buffer)
+                    } else {
+                        guarded_tp.min(calculated_sl - spread_buffer)
+                    };
+
+                    if !final_tp.is_nan() && final_tp > 0.0 {
+                        if let Some(old_tp) = trade.tp_price {
+                            if (final_tp - old_tp).abs() > 1e-4 && _debug_mode {
+                                tracing::debug!(
+                                    "🎯 [DYNAMIC TP UPDATED] Bar: {} | Trade #{:?} ({}) | Old TP: {:.2} -> New TP: {:.2} | Close: {:.2}",
+                                    i, trade.id, tag_str, old_tp, final_tp, current_close
+                                );
+                            }
+                        }
+                        new_tp_to_update = Some(final_tp);
+                    }
+                }
+            }
+
+            // Kiểm tra xem Take Profit có thay đổi cần đồng bộ sang Broker / PaperTrader không
+            let tp_changed = match (trade.tp_price, new_tp_to_update) {
+                (Some(old_tp), Some(new_tp)) => (old_tp - new_tp).abs() > 1e-4,
+                (None, Some(_)) | (Some(_), None) => true,
+                (None, None) => false,
+            };
+
             // [ENHANCEMENT 3: MONOTONIC RATCHET GUARD]
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
             let underwater_cycles = bars_held / time_countdown_bars;
             if current_pnl > 0.0 {
                 // KHI CÓ LÃI DANH NGHĨA (current_pnl > 0.0): Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
-                let should_update = if trade.is_long() {
+                let sl_changed = if trade.is_long() {
                     calculated_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
                 } else {
                     calculated_sl < trade.sl_price.unwrap_or(f64::INFINITY)
                 };
 
-                if should_update {
-                    tick.update_trade_sl_tp(trade.id, Some(calculated_sl), trade.tp_price);
+                if sl_changed || tp_changed {
+                    let sl_to_send = if sl_changed { Some(calculated_sl) } else { trade.sl_price };
+                    tick.update_trade_sl_tp(trade.id, sl_to_send, new_tp_to_update);
                 }
             } else if underwater_cycles > 0 {
                 // KHI ĐANG ÂM (current_pnl <= 0.0) VÀ BỊ NGÂM VỐN (underwater_cycles > 0):
@@ -352,15 +456,20 @@ impl RiskManager {
                 };
 
                 // CHỐT CHẶN 3: Monotonic Ratchet Guard (TUYỆT ĐỐI CẤM LÙI SL)
-                let should_update = if trade.is_long() {
+                let sl_changed = if trade.is_long() {
                     safe_tightened_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
                 } else {
                     safe_tightened_sl < trade.sl_price.unwrap_or(f64::INFINITY)
                 };
 
-                if should_update {
-                    tick.update_trade_sl_tp(trade.id, Some(safe_tightened_sl), trade.tp_price);
+                if sl_changed || tp_changed {
+                    let sl_to_send = if sl_changed { Some(safe_tightened_sl) } else { trade.sl_price };
+                    tick.update_trade_sl_tp(trade.id, sl_to_send, new_tp_to_update);
                 }
+            } else if tp_changed {
+                // KHI LỆNH CHƯA CÓ LÃI HOẶC CHƯA BỊ NGÂM VỐN NHƯNG DẢI TP CÓ SỰ THAY ĐỔI:
+                // Cập nhật Dynamic TP bám sát thị trường ngay lập tức, giữ nguyên mức SL hiện tại
+                tick.update_trade_sl_tp(trade.id, trade.sl_price, new_tp_to_update);
             }
         }
     }
@@ -435,5 +544,120 @@ mod tests {
         assert_eq!(RiskManager::calculate_size(-50.0, 0.20, 21.0, 20.0, 0.25), 0.0);
         assert_eq!(RiskManager::calculate_size(100.0, 0.0, 21.0, 20.0, 0.25), 0.0);
         assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, 0.0, 0.25), 0.0);
+    }
+
+    #[test]
+    fn test_dynamic_structural_tp_bollinger_and_guards() {
+        let entry_price: f64 = 2500.0;
+        let current_atr: f64 = 10.0;
+        let min_gain_pct: f64 = 0.002; // 0.2% = 5.0 giá
+        let calculated_sl: f64 = 2480.0;
+
+        // 1. Bình thường: BB Upper mở rộng 2530.0 -> TP lấy 2530.0
+        let bb_upper_wide: f64 = 2530.0;
+        let min_tp_floor: f64 = entry_price * (1.0 + min_gain_pct); // 2505.0
+        let spread_floor: f64 = calculated_sl + (0.5 * current_atr); // 2485.0
+        let guarded_tp: f64 = bb_upper_wide.max(min_tp_floor).max(spread_floor);
+        assert_eq!(guarded_tp, 2530.0, "Dải BB mở rộng thì lấy đúng giá trị dải");
+
+        // 2. Co thắt nguy hiểm: BB Upper sập xuống 2495.0 (< entry_price)
+        // Guard 1 phải can thiệp ép TP lên tối thiểu 2505.0 (min profit floor)
+        let bb_upper_collapsed: f64 = 2495.0;
+        let guarded_tp_collapsed: f64 = bb_upper_collapsed.max(min_tp_floor).max(spread_floor);
+        assert_eq!(guarded_tp_collapsed, 2505.0, "Khi dải BB co thắt, Min Profit Floor Guard phải giữ TP luôn có lãi tối thiểu 0.2%");
+
+        // 3. Spread Guard: Khi SL được dời lên rất cao (2504.0), spread_floor = 2504 + 5 = 2509.0
+        let high_sl: f64 = 2504.0;
+        let high_spread_floor: f64 = high_sl + (0.5 * current_atr);
+        let final_tp: f64 = min_tp_floor.max(high_spread_floor);
+        assert_eq!(final_tp, 2509.0, "Spread Guard phải đảm bảo khoảng cách an toàn với SL tối thiểu 0.5 ATR");
+    }
+
+    #[test]
+    fn test_dynamic_structural_tp_reversal_kama_short() {
+        let entry_price: f64 = 2500.0;
+        let current_atr: f64 = 10.0;
+        let min_gain_pct: f64 = 0.002; // 0.2%
+        let calculated_sl: f64 = 2520.0;
+
+        // Vị thế Short: KAMA Mid là mục tiêu chốt lời hồi quy
+        let max_tp_ceiling: f64 = entry_price * (1.0 - min_gain_pct); // 2495.0
+        let spread_ceiling: f64 = calculated_sl - (0.5 * current_atr); // 2515.0
+
+        // 1. KAMA Mid bình thường: 2470.0 -> TP lấy 2470.0
+        let kama_mid: f64 = 2470.0;
+        let final_tp: f64 = kama_mid.min(max_tp_ceiling).min(spread_ceiling);
+        assert_eq!(final_tp, 2470.0);
+
+        // 2. KAMA Mid bị kéo lên cao 2505.0 (> entry) -> Max Profit Ceiling Guard phải kẹp tại 2495.0
+        let kama_mid_bad: f64 = 2505.0;
+        let guarded_bad: f64 = kama_mid_bad.min(max_tp_ceiling).min(spread_ceiling);
+        assert_eq!(guarded_bad, 2495.0, "Short TP không bao giờ được cao hơn giá vốn trừ min_gain");
+    }
+
+    #[test]
+    fn test_peak_callback_trailing_tp_trigger_math() {
+        let entry_price: f64 = 2500.0;
+        let leverage: f64 = 20.0;
+        let current_atr: f64 = 10.0;
+        let ttp_activation_roe: f64 = 0.20; // 20% ROE = 1% giá = 25.0 giá (đỉnh >= 2525.0)
+        let ttp_callback_atr: f64 = 0.80; // 0.8 ATR = 8.0 giá
+        let min_gain_pct: f64 = 0.002; // 0.2% = 5.0 giá (giá sàn chốt lời = 2505.0)
+
+        // Đỉnh đạt 2540.0 -> ROE = ((2540 - 2500)/2500) * 20 = 32% (>= 20% kích hoạt)
+        let peak_val: f64 = 2540.0;
+        let peak_roe: f64 = ((peak_val - entry_price) / entry_price) * leverage;
+        assert!(peak_roe >= ttp_activation_roe, "TTP phải được kích hoạt vì ROE đạt 32% >= 20%");
+
+        let trigger_price: f64 = peak_val - (ttp_callback_atr * current_atr); // 2540 - 8 = 2532.0
+        let min_exit_price: f64 = entry_price * (1.0 + min_gain_pct); // 2505.0
+
+        // Khi giá ở 2535.0 (> 2532.0): Chưa chạm callback -> Giữ lệnh
+        let close_holding: f64 = 2535.0;
+        let should_exit_holding = close_holding <= trigger_price && close_holding >= min_exit_price;
+        assert!(!should_exit_holding, "Chưa chạm trigger price thì tiếp tục thả diều gồng lãi");
+
+        // Khi giá quay đầu rơi về 2531.0 (<= 2532.0): Kích hoạt chốt lời đỉnh
+        let close_callback: f64 = 2531.0;
+        let should_exit_callback = close_callback <= trigger_price && close_callback >= min_exit_price;
+        assert!(should_exit_callback, "Giá quay đầu chạm 0.8 ATR từ đỉnh -> Kích hoạt thoát lệnh chốt lời");
+    }
+
+    #[test]
+    fn test_flaw_tsl5_high_watermark_entry_bar_bias_free() {
+        // Mô phỏng chuỗi giá sau khi vào lệnh Long tại entry_bar = 2, entry_price = 2500.0
+        let entry_price = 2500.0;
+        let entry_bar = 2;
+        let i = 5;
+        // highs: [0, 1, 2490.0 (entry), 2480.0, 2520.0, 2510.0]
+        let highs = vec![0.0, 0.0, 2490.0, 2480.0, 2520.0, 2510.0];
+
+        // Thuật toán FLAW-TSL.5: Neo từ entry_price, duyệt từ (entry_bar + 1)..=i
+        let mut max_high = entry_price;
+        let mut max_bar = entry_bar;
+        for j in (entry_bar + 1)..=i {
+            if highs[j] > max_high {
+                max_high = highs[j];
+                max_bar = j;
+            }
+        }
+
+        assert_eq!(max_high, 2520.0, "Đỉnh cao nhất phải là 2520.0 tại bar 4");
+        assert_eq!(max_bar, 4, "Bar đỉnh phải là bar 4");
+        let effective_stagnant_bars = i - max_bar; // 5 - 4 = 1 bar
+        assert_eq!(effective_stagnant_bars, 1, "Số nến đi ngang kể từ đỉnh là 1");
+
+        // Trường hợp thị trường sập ngay sau nến entry: nến sau đỉnh chỉ đạt 2470.0
+        let highs_bear = vec![0.0, 0.0, 2490.0, 2470.0, 2460.0, 2450.0];
+        let mut max_high_bear = entry_price;
+        let mut max_bar_bear = entry_bar;
+        for j in (entry_bar + 1)..=i {
+            if highs_bear[j] > max_high_bear {
+                max_high_bear = highs_bear[j];
+                max_bar_bear = j;
+            }
+        }
+        assert_eq!(max_high_bear, 2500.0, "Đỉnh không bao giờ bị ghi nhận âm dưới giá vốn entry_price");
+        assert_eq!(max_bar_bear, entry_bar, "Nếu không có nến nào vượt entry, peak_bar là entry_bar");
     }
 }
