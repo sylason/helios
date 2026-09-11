@@ -1,8 +1,8 @@
-# 🚨 MASTER TODO: 46 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
+# 🚨 MASTER TODO: 49 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
 
-> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 46 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
+> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 49 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **17/46 lỗi đã được sửa & kiểm thử thành công**, **29/46 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **19/49 lỗi đã được sửa & kiểm thử thành công**, **30/49 lỗi đang chờ xử lý**.
 
 ---
 
@@ -15,8 +15,8 @@
 | **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 11 | 3 | 8 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 6 | 0 | 6 | Thiếu Trailing TP, xung đột leverage sàn, hardcode magic numbers |
-| **TỔNG CỘNG** | **46** | **17** | **29** |  |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 4 | 5 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
+| **TỔNG CỘNG** | **49** | **19** | **30** |  |
 
 ---
 
@@ -242,13 +242,17 @@
 
 ## 🔬 NHÓM 6: KIỂM TOÁN CHUYÊN SÂU HỆ THỐNG TRAILING SL, TP, SIZING & DYNAMIC RISK (AUDIT TOÀN DIỆN V3.3) (6 LỖ HỔNG)
 
-- [ ] **FLAW-TSL.1:** **Thiếu Hoàn Toàn Cơ Chế Trailing Take Profit (Static TP hoặc None)**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:353`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L353) & [`scanners/*.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners)
+- [x] **FLAW-TSL.1:** **Thiếu Hoàn Toàn Cơ Chế Trailing Take Profit (Static TP hoặc None)** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:200-245, 340-405`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs) & [`paper_trader.rs:20, 510-530`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/paper_trader.rs)
   - *Bản chất:* 
     1. Trong 6 Tactical Scanners: Chỉ có `RangeOscScanner` (chốt lời biên Bollinger Bands) và `ReversalScanner` (chốt lời tại KAMA mid) có phát sinh `suggested_tp`. Cả 4 Scanners còn lại (`TrendPullback`, `MomentumIgnition`, `Absorption`, `Anomaly`) hoàn toàn để `suggested_tp: None`.
     2. Suốt vòng đời vị thế, `RiskManager::manage_trailing_stop` gọi `tick.update_trade_sl_tp(trade.id, Some(safe_tightened_sl), trade.tp_price);` $\rightarrow$ Mức TP nếu có thì đứng yên vĩnh viễn, không hề có cơ chế dời động (Trailing TP / Dynamic TP) theo bước sóng hoặc ATR.
     3. Khi vào siêu sóng (Mega Trend), hệ thống chỉ dựa vào việc nâng sàn Stop Loss (`mega_trend_profit_floor`). Nếu giá giật ngược bất ngờ (Flash Dump) quét chạm SL thì bị bốc hơi một phần lợi nhuận thay vì chủ động chốt lời từng phần (Partial TP / Ladder TP).
-  - *Giải pháp đề xuất:* Thiết kế cơ chế Trailing Take Profit động (co giãn theo ATR/Sóng KAMA) hoặc cho phép cấu hình Take Profit đa tầng (Multi-Tier Partial TP) trong DNA.
+  - *Đã xử lý (Phương án 3: Hybrid Trailing Take Profit):*
+    1. **Nhánh A (Dynamic Structural TP cho Range & Reversal):** Dời TP bám sát dải `bb_upper/lower` (cho `RANGE_OSC`) và `kama_mid` (cho `REVERSAL`). Tích hợp 2 chốt chặn: *Min Profit Floor Guard* ($TP \ge Entry \times (1 + \text{min\_gain})$) chống co thắt dải biến chốt lời thành chốt lỗ, và *Spread Guard* ($|TP - SL| \ge 0.5 \times ATR$) chống va chạm SL/TP.
+    2. **Nhánh B (Peak-Callback Trailing TP cho Trend/Momentum/Absorption/Anomaly):** Ban đầu để `TP: None` thả diều siêu sóng. Khi `peak_roe >= ttp_activation_roe` (mặc định 20% ROE), kích hoạt theo dõi callback. Nếu giá từ đỉnh quay đầu giảm quá `ttp_callback_atr` (mặc định 0.8 ATR) và đảm bảo có lãi $\ge \text{min\_gain}$, tự động gọi `tick.close(None)` khóa cứng đỉnh lợi nhuận.
+    3. **DNA hóa 3 tham số:** `ttp_activation_roe`, `ttp_callback_atr`, `dynamic_tp_min_gain_pct` tích hợp vào `RiskStopParams`.
+    4. **Đồng bộ Telemetry:** Bổ sung `ExitReason::TrailingTakeProfit` (ký hiệu `"TTP"`) vào `PaperTrader`. Đã pass 100% unit tests.
 
 - [x] **FLAW-TSL.2:** **Năm Hằng Số Magic Numbers Ẩn Trong Quản Trị Rủi Ro Chưa Được Tham Số Hóa** `[ĐÃ XỬ LÝ 4 HẰNG SỐ CỐT LÕI ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs)
@@ -270,8 +274,8 @@
   - *Hệ quả Edge Cases:* Đối với Altcoin có bước khối lượng lớn (ví dụ bước 1 đơn vị coin thay vì 0.001), việc làm tròn `.floor()` ở tầng dưới (`OrderExecutor` / `PaperTrader`) có thể làm sụt giảm 30-50% khối lượng thực tế so với con số tối ưu của GA, làm méo mó hoàn toàn tỷ lệ Risk/Reward đã được backtest.
   - *Giải pháp đề xuất:* Truyền metadata sàn (`MarketFilter`) vào `TickContext` hoặc tạo lớp adapter chuẩn hóa sizing trước khi phát sinh `Action::Buy` / `Action::Sell`.
 
-- [ ] **FLAW-TSL.5:** **Độ Trễ 1 Nến Của High Watermark (`peak_val`) Tại Cây Nến Mở Lệnh (`entry_bar`)**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:107`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L107)
+- [x] **FLAW-TSL.5:** **Độ Trễ 1 Nến Của High Watermark (`peak_val`) Tại Cây Nến Mở Lệnh (`entry_bar`)** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:107-135`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L107-L135)
   - *Bản chất:*
     ```rust
     let start_b = (entry_bar + 1).min(i);
@@ -279,7 +283,7 @@
     ```
     Biểu thức khởi tạo `start_b = (entry_bar + 1).min(i)` bỏ qua toàn bộ biến động giá của chính cây nến mở lệnh (`entry_bar`).
     Nếu thị trường có biến động mạnh ngay trong cây nến vừa mở vị thế (ví dụ giá bứt phá tạo râu nến cao vọt rồi hồi về trước khi đóng nến), mức đỉnh cao nhất đó bị bỏ lỡ, làm `peak_val` bị thấp giả tạo và khiến Trailing SL phản ứng chậm 1 nhịp.
-  - *Giải pháp đề xuất:* Khởi tạo `peak_val = trade.entry_price`, sau đó duyệt từ `b = entry_bar..=i` nhưng chỉ lấy phần râu nến nằm theo chiều có lợi so với `entry_price`.
+  - *Đã xử lý:* Khởi tạo neo chuẩn từ `peak_val = trade.entry_price`, duyệt từ `(entry_bar + 1)..=i`. Triệt tiêu 100% Lookahead bias của nến entry, loại bỏ hoàn toàn lỗi đỉnh bị ghi nhận âm dưới giá vốn nếu nến sau giảm, và tính toán số nến đi ngang `effective_stagnant_bars` chính xác tuyệt đối. Đã có unit test `test_flaw_tsl5_high_watermark_entry_bar_bias_free` kiểm chứng.
 
 - [ ] **FLAW-TSL.6:** **Bảo Toàn Bản Sắc Stop Loss Của Từng Playbook & Tối Ưu Dải Cấu Hình DNA**
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:297-307`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L297-L307)
@@ -288,3 +292,26 @@
     - Dù mỗi scanner đã có cấu hình trần riêng (`max_initial_sl_pct`), nhưng việc thiếu công thức tính khoảng cách SL theo râu nến hoặc cấu trúc hỗ trợ/kháng cự vi mô khiến các Playbook này đánh mất nét đặc trưng vào lệnh.
     - Cần rà soát và tinh chỉnh dải siêu tham số DNA của các biến số Stop Loss (`base_sl_atr`, `wick_sl_buffer_atr`, `tsl_atr_tight`, `tsl_atr_normal`, `tsl_atr_loose`) để đảm bảo phủ kín từ mức siêu nhạy 0.3 ATR đến mức chịu rung lắc cực đại 8.0 ATR cho mọi điều kiện thị trường.
   - *Giải pháp đề xuất:* Bổ sung logic tính `suggested_sl` theo râu nến/cản vi mô cho toàn bộ các Scanner còn lại và mở rộng dải DNA tương ứng.
+
+- [ ] **FLAW-TSL.7:** **Bẫy Alternating Whipsaw (Vào Lệnh Trả Thù So Le 2 Đầu Do Cooldown Chỉ Khóa 1 Chiều)**
+  - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs:25-35, 340-390`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L340-L390) & [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:330-360`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L330-L360)
+  - *Bản chất:* 
+    - Khi đóng vị thế thua lỗ nặng, `CooldownGuard` và `AssetActor` hiện tại chỉ khóa duy nhất hướng vừa đóng (`locked_side = Some(side)`).
+    - Trong vùng thị trường đi ngang quét râu 2 đầu (Choppy Whipsaw Market như ngày 02/09 ở Log 33), nến vừa giật quét SL Long ở đáy thì Scanner xuất hiện tín hiệu Short ngay lập tức. Bot nhảy vào Short ở đáy, rồi giá bật lên quét SL Short ở đỉnh, bot lại nhảy vào Long ở đỉnh.
+    - Chỉ trong 1 ngày, tài khoản bị vả liên tiếp 4 lệnh cả 2 đầu (#0004, #0005, #0007, #0008), bốc hơi 16% tổng tài sản.
+  - *Giải pháp đề xuất:* Khi gặp khoản lỗ nặng ($ROE \le -10\%$) hoặc khi thị trường đang ở trạng thái Choppy/Noise: Kích hoạt **Bidirectional Cooldown (Khóa cả 2 chiều Long & Short)** trong ít nhất 15-30 phút để bot không vào bất kỳ lệnh nào. Tích hợp cơ chế Exponential Backoff giãn cách thời gian nếu thua liên tiếp.
+
+- [ ] **FLAW-TSL.8:** **Hardcode `0.80 / lev` Trong `clamp_sl_price` Cho Phép Lệnh Thua Tới -80% ROE (Thiếu Hard Max Loss Cap Theo ROE)**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:29-44`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L29-L44)
+  - *Bản chất:* 
+    - Biểu thức `max_sl_by_lev = 0.80 / lev` là hằng số cứng (magic number), cho phép Initial Stop Loss mở rộng tới 4.0% giá trên đòn bẩy 20x (-80% ROE).
+    - Khi `base_sl_atr` rơi vào 4-5 ATR lúc thị trường biến động, lệnh đặt SL cách xa 60-75 giá ETH (như Lệnh `#0011` trong Log 33 thua tới **-$5.05, -51.6% ROE**). Một lệnh thua làm bốc hơi hơn một nửa tiền ký quỹ, xóa sạch thành quả của 5-7 lệnh thắng trước đó.
+  - *Giải pháp đề xuất:* Tham số hóa và hạ trần cứng `max_sl_by_lev` từ `0.80 / lev` xuống tối đa **`0.30 / lev` (tương đương tối đa -30% ROE, hoặc 1.5% giá trên đòn bẩy 20x)**. Đưa `max_loss_roe_cap` vào struct cấu hình.
+
+- [ ] **FLAW-TSL.9:** **Playbook `ABSORPTION` Bị Bội Thực Tín Hiệu (Over-Trading / Churn) Trong Vùng Choppy Market**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs) & [`arbiter.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs)
+  - *Bản chất:* 
+    - Trong Log 31 và Log 33, riêng `ABSORPTION` chiếm từ 50% đến 70% tổng số lệnh của toàn hệ thống (17/24 lệnh ở Log 31, 17/34 lệnh ở Log 33) với tỷ lệ thua cao (10/17 lệnh thua ở Log 33).
+    - Scanner liên tục thắng thầu trong Arbiter khi thị trường đi ngang có khối lượng ảo, khiến bot bị ngâm lệnh rồi bị Stagnant Decay cắt lỗ liên miên.
+  - *Giải pháp đề xuất:* Bổ sung bộ lọc trạng thái thị trường không xu hướng (Choppiness Index / ADX / Efficiency Ratio) cho Scanner `ABSORPTION`, hoặc siết điều kiện auction confidence của `ABSORPTION` khi thị trường đang ở regime đi ngang (Range / Squeeze).
+

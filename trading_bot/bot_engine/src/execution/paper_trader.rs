@@ -17,7 +17,9 @@ pub enum ExitReason {
     StagnantDecay,
     /// 5. Đóng lệnh giải phóng vốn vì ngâm quá 4 chu kỳ (Zombie Trade Timeout)
     ZombieTimeout,
-    /// 6. Chiến lược chủ động phát tín hiệu đóng lệnh
+    /// 6. Chốt Lời Động Theo Đỉnh Siêu Sóng (Trailing Take Profit Callback)
+    TrailingTakeProfit,
+    /// 7. Chiến lược chủ động phát tín hiệu đóng lệnh
     StrategySignalClose,
 }
 
@@ -29,6 +31,7 @@ impl ExitReason {
             ExitReason::TakeProfit => "TP",
             ExitReason::StagnantDecay => "STAGNANT_DECAY",
             ExitReason::ZombieTimeout => "ZOMBIE_TIMEOUT",
+            ExitReason::TrailingTakeProfit => "TTP",
             ExitReason::StrategySignalClose => "STRATEGY_CLOSE",
         }
     }
@@ -509,14 +512,25 @@ impl PaperTrader {
                     bar_diff
                 } else if duration >= 60_000 {
                     (duration / 60_000) as usize
+                } else if duration >= 60 {
+                    (duration / 60) as usize
                 } else {
                     1
                 };
-                info!(
-                    "🚨 [STAGNANT TELEMETRY] Strategy signaled ClosePosition! Held: {} bars | Entry: {:.2} | Current: {:.2} | uPnL: ${:+.2}",
-                    bars_held, self.entry_price, current_price, pnl
-                );
-                self.close_position(current_price, ExitReason::StagnantDecay, timestamp, bar_index, account_tx);
+                let exit_reason = if pnl > 0.0 {
+                    info!(
+                        "🏆 [TTP TELEMETRY] Strategy signaled ClosePosition with Profit! Held: {} bars | Entry: {:.2} | Current: {:.2} | uPnL: ${:+.2} -> Trailing Take Profit locked",
+                        bars_held, self.entry_price, current_price, pnl
+                    );
+                    ExitReason::TrailingTakeProfit
+                } else {
+                    info!(
+                        "🚨 [STAGNANT TELEMETRY] Strategy signaled ClosePosition! Held: {} bars | Entry: {:.2} | Current: {:.2} | uPnL: ${:+.2}",
+                        bars_held, self.entry_price, current_price, pnl
+                    );
+                    ExitReason::StagnantDecay
+                };
+                self.close_position(current_price, exit_reason, timestamp, bar_index, account_tx);
             }
             Action::UpdateTradeSlTp { new_sl_price, new_tp_price, .. } => {
                 if new_sl_price.is_some() || new_tp_price.is_some() || self.current_sl_price.is_some() || self.current_tp_price.is_some() {
