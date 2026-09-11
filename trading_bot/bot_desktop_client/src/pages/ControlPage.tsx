@@ -7,16 +7,26 @@ import { AssetLogPanel } from '../components/control/AssetLogPanel';
 
 interface ControlPageProps {
   assets: AssetState[];
-  onActivate: (symbol: string) => void;
-  onGracefulTerminate: (symbol: string) => void;
-  onImmediateTerminate: (symbol: string) => void;
+  onStart: (symbol: string) => void;
+  onCancelStart: (symbol: string) => void;
+  onPause: (symbol: string) => void;
+  onResume: (symbol: string) => void;
+  onGracefulStop: (symbol: string) => void;
+  onCancelGracefulStop: (symbol: string) => void;
+  onForceStop: (symbol: string) => void;
+  onOpenRebalance?: (symbol: string) => void;
 }
 
 export const ControlPage: React.FC<ControlPageProps> = ({
   assets,
-  onActivate,
-  onGracefulTerminate,
-  onImmediateTerminate,
+  onStart,
+  onCancelStart,
+  onPause,
+  onResume,
+  onGracefulStop,
+  onCancelGracefulStop,
+  onForceStop,
+  onOpenRebalance,
 }) => {
   const [selectedSymbol, setSelectedSymbol] = useState<string>(
     assets.length > 0 ? assets[0].symbol : 'ETHUSDT'
@@ -31,9 +41,14 @@ export const ControlPage: React.FC<ControlPageProps> = ({
         assets={assets}
         selectedSymbol={selectedSymbol}
         onSelectAsset={(symbol) => setSelectedSymbol(symbol)}
-        onActivate={onActivate}
-        onGracefulTerminate={onGracefulTerminate}
-        onImmediateTerminate={onImmediateTerminate}
+        onStart={onStart}
+        onCancelStart={onCancelStart}
+        onPause={onPause}
+        onResume={onResume}
+        onGracefulStop={onGracefulStop}
+        onCancelGracefulStop={onCancelGracefulStop}
+        onForceStop={onForceStop}
+        onOpenRebalance={onOpenRebalance}
       />
 
       {/* Asset Log Stream Component */}

@@ -18,9 +18,14 @@ function App() {
   const [account, setAccount] = useState<AccountState>(INITIAL_MOCK_ACCOUNT);
   const [health] = useState<SystemHealth>(INITIAL_MOCK_HEALTH);
 
-  // Tính số lượng Asset đang Active
+  // Tính số lượng Asset đang Active (RUNNING_ACTIVE, STARTING, GRACEFUL_STOPPING, PAUSED)
   const activeCount = useMemo(() => {
-    return assets.filter(a => a.status !== 'INACTIVE' && a.status !== 'ERROR').length;
+    return assets.filter(a => 
+      a.status === 'RUNNING_ACTIVE' || 
+      a.status === 'STARTING' || 
+      a.status === 'GRACEFUL_STOPPING' || 
+      a.status === 'PAUSED'
+    ).length;
   }, [assets]);
 
   // Cập nhật state Account khi activeCount thay đổi
@@ -32,10 +37,9 @@ function App() {
   }, [account, activeCount]);
 
   /**
-   * Kích hoạt Bot cho một Cặp tiền (STARTING Sync -> GA Optimize -> RUNNING_ACTIVE)
+   * 1. Kích hoạt Bot cho một Cặp tiền (START_ASSET: STARTING Sync -> JIT GA Optimize -> RUNNING_ACTIVE)
    */
-  const handleActivate = async (symbol: string) => {
-    // 1. Chuyển sang STARTING (SYNCING)
+  const handleStart = async (symbol: string) => {
     setAssets(prev => prev.map(a => {
       if (a.symbol === symbol) {
         return {
@@ -50,7 +54,7 @@ function App() {
 
     await BotService.startAsset(symbol);
 
-    // 2. Giả lập sau 1.5s chuyển sang STARTING (OPTIMIZING)
+    // Giả lập sau 1.5s chuyển sang JIT GA
     setTimeout(() => {
       setAssets(prev => prev.map(a => {
         if (a.symbol === symbol) {
@@ -64,7 +68,7 @@ function App() {
         return a;
       }));
 
-      // 3. Giả lập sau 1.5s nữa chuyển sang RUNNING_ACTIVE
+      // Giả lập sau 1.5s nữa chuyển sang RUNNING_ACTIVE
       setTimeout(() => {
         setAssets(prev => prev.map(a => {
           if (a.symbol === symbol) {
@@ -100,15 +104,70 @@ function App() {
   };
 
   /**
-   * Dừng an toàn (GRACEFUL_STOPPING)
+   * 2. Hủy tiến trình khởi động (CANCEL_START)
    */
-  const handleGracefulTerminate = async (symbol: string) => {
+  const handleCancelStart = async (symbol: string) => {
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === symbol) {
+        return {
+          ...a,
+          status: 'INACTIVE',
+          startingPhase: undefined,
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] ✕ Cancel start requested. State returned to INACTIVE.`],
+        };
+      }
+      return a;
+    }));
+
+    await BotService.cancelStart(symbol);
+  };
+
+  /**
+   * 3. Tạm dừng tìm entry (PAUSE_ASSET)
+   */
+  const handlePause = async (symbol: string) => {
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === symbol) {
+        return {
+          ...a,
+          status: 'PAUSED',
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] ⏸️ Bot paused. Holding existing positions with Trailing SL.`],
+        };
+      }
+      return a;
+    }));
+
+    await BotService.pauseAsset(symbol);
+  };
+
+  /**
+   * 4. Tiếp tục giao dịch (RESUME_ASSET)
+   */
+  const handleResume = async (symbol: string) => {
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === symbol) {
+        return {
+          ...a,
+          status: 'RUNNING_ACTIVE',
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] ▶️ Bot resumed. Scanning live candles for entries.`],
+        };
+      }
+      return a;
+    }));
+
+    await BotService.resumeAsset(symbol);
+  };
+
+  /**
+   * 5. Dừng an toàn (GRACEFUL_STOP)
+   */
+  const handleGracefulStop = async (symbol: string) => {
     setAssets(prev => prev.map(a => {
       if (a.symbol === symbol) {
         return {
           ...a,
           status: 'GRACEFUL_STOPPING',
-          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🟡 Graceful termination requested. Waiting for Trailing SL execution...`],
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🟡 Graceful stop requested. Waiting for Trailing SL execution...`],
         };
       }
       return a;
@@ -133,16 +192,34 @@ function App() {
   };
 
   /**
-   * Ngắt khẩn cấp (FORCE_STOP_ASSET)
+   * 6. Hủy dừng an toàn (CANCEL_GRACEFUL_STOP)
    */
-  const handleImmediateTerminate = async (symbol: string) => {
+  const handleCancelGracefulStop = async (symbol: string) => {
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === symbol) {
+        return {
+          ...a,
+          status: 'RUNNING_ACTIVE',
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] ↩️ Graceful stop cancelled. Resumed active trading.`],
+        };
+      }
+      return a;
+    }));
+
+    await BotService.cancelGracefulStop(symbol);
+  };
+
+  /**
+   * 7. Ngắt khẩn cấp đóng Market ngay (FORCE_STOP_ASSET)
+   */
+  const handleForceStop = async (symbol: string) => {
     setAssets(prev => prev.map(a => {
       if (a.symbol === symbol) {
         return {
           ...a,
           status: 'INACTIVE',
           position: { side: 'FLAT', qty: 0, entryPrice: 0, unrealizedPnl: 0, unrealizedPnlPct: 0 },
-          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🔴 Immediate termination executed. Algo orders cancelled. Position reset.`],
+          recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] 🔴 Immediate force stop executed. Algo orders cancelled. Position reset.`],
         };
       }
       return a;
@@ -152,7 +229,14 @@ function App() {
   };
 
   /**
-   * Dừng khẩn cấp Toàn cục (EMERGENCY_STOP_ALL)
+   * 8. Mở Modal Điều Chuyển Vốn
+   */
+  const handleOpenRebalance = (symbol: string) => {
+    console.log(`[Rebalance Trigger] Open rebalance modal for ${symbol}`);
+  };
+
+  /**
+   * 9. Dừng khẩn cấp Toàn cục (EMERGENCY_STOP_ALL)
    */
   const handleEmergencyStopAll = async () => {
     setAssets(prev => prev.map(a => ({
@@ -186,9 +270,14 @@ function App() {
           {activePage === 'control' && (
             <ControlPage 
               assets={assets}
-              onActivate={handleActivate}
-              onGracefulTerminate={handleGracefulTerminate}
-              onImmediateTerminate={handleImmediateTerminate}
+              onStart={handleStart}
+              onCancelStart={handleCancelStart}
+              onPause={handlePause}
+              onResume={handleResume}
+              onGracefulStop={handleGracefulStop}
+              onCancelGracefulStop={handleCancelGracefulStop}
+              onForceStop={handleForceStop}
+              onOpenRebalance={handleOpenRebalance}
             />
           )}
 
