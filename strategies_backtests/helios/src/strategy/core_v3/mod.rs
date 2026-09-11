@@ -281,14 +281,16 @@ impl Strategy for HeliosStrategyV3 {
                 
                 let is_long = signal == SignalType::Long;
                 
-                let playbook_max_sl_pct = match decision.winning_scanner {
+                // [FLAW-TSL.8: FALLBACK HIERARCHY]
+                // Đọc trần ROE của Playbook chiến thắng, fallback về default_sl_roe_cap nếu không có tag
+                let playbook_max_sl_roe = match decision.winning_scanner {
                     Some(ScannerId::TrendPullback) => self.config.tactical_sniper.pullback.max_initial_sl_pct,
                     Some(ScannerId::MomentumIgnition) => self.config.tactical_sniper.momentum.max_initial_sl_pct,
                     Some(ScannerId::RangeOscillator) => self.config.tactical_sniper.range.max_initial_sl_pct,
                     Some(ScannerId::ClimaxReversal) => self.config.tactical_sniper.reversal.max_initial_sl_pct,
                     Some(ScannerId::AnomalyFade) => self.config.tactical_sniper.anomaly.max_initial_sl_pct,
                     Some(ScannerId::AbsorptionScout) => self.config.tactical_sniper.absorption.max_initial_sl_pct,
-                    None => 0.05,
+                    None => self.config.risk_management.stop_management.default_sl_roe_cap,
                 };
 
                 let min_initial_sl_pct = self.config.risk_management.stop_management.min_initial_sl_pct;
@@ -299,14 +301,14 @@ impl Strategy for HeliosStrategyV3 {
                         &self.sensors,
                         is_long,
                         self.config.risk_management.stop_management.base_sl_atr,
-                        playbook_max_sl_pct,
+                        playbook_max_sl_roe,
                         min_initial_sl_pct,
                         leverage,
                     )
                 });
                 
                 let price = tick.closes()[tick.i];
-                let initial_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, playbook_max_sl_pct, min_initial_sl_pct, leverage);
+                let initial_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, playbook_max_sl_roe, min_initial_sl_pct, leverage);
                 
                 let tag = decision.winning_scanner.map(|s| s.as_str().to_string());
 
@@ -645,7 +647,7 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 111, "DNA_WIDTH phải là chính xác 111 chiều sau khi tích hợp 3 tham số Hybrid TTP (FLAW-TSL.1)!");
+        assert_eq!(width, 112, "DNA_WIDTH phải là chính xác 112 chiều sau khi tích hợp default_sl_roe_cap (FLAW-TSL.8)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         assert!(!has_macd, "defs không được chứa macd!");

@@ -323,8 +323,8 @@ pub struct TacticalSniperConfig {
 /// 🏹 1. CHIẾN ĐỘI TREND PULLBACK (Săn nhịp hồi trong xu hướng mạnh)
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct TacticalPullbackParams {
-    /// Kẹp trần SL ban đầu (0.5% -> 10.0% giá, Step 0.3% -> 32 nấc)
-    #[dna(min = 0.005, max = 0.100, step = 0.003)]
+    /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
+    #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
     /// RSI Vùng Hồi Quy (Universal 1.0 -> 99.0, Step 3.0 -> 33 nấc)
@@ -347,8 +347,8 @@ pub struct TacticalPullbackParams {
 /// ⚡ 2. CHIẾN ĐỘI MOMENTUM IGNITION (Săn các cú bùng nổ xung lực Volume & Momentum)
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct TacticalMomentumParams {
-    /// Kẹp trần SL ban đầu (0.5% -> 10.0% giá, Step 0.3% -> 32 nấc)
-    #[dna(min = 0.005, max = 0.100, step = 0.003)]
+    /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
+    #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
     /// RSI Xung Lực Bùng Nổ (Universal 1.0 -> 99.0, Step 3.0 -> 33 nấc)
@@ -367,8 +367,8 @@ pub struct TacticalMomentumParams {
 /// 🌊 3. CHIẾN ĐỘI RANGE OSCILLATOR (Bắt đỉnh/đáy biên độ thị trường đi ngang)
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct TacticalRangeParams {
-    /// Kẹp trần SL ban đầu (0.5% -> 10.0% giá, Step 0.3% -> 32 nấc)
-    #[dna(min = 0.005, max = 0.100, step = 0.003)]
+    /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
+    #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
     /// Khoảng cách tiệm cận biên Bollinger (0.1% -> 5.0% giá, Step 0.2% -> 25 nấc)
@@ -409,8 +409,8 @@ pub struct TacticalRangeParams {
 /// 🔄 4. CHIẾN ĐỘI CLIMAX REVERSAL (Bắt đỉnh/đáy kiệt sức Parabol)
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct TacticalReversalParams {
-    /// Kẹp trần SL ban đầu (0.5% -> 10.0% giá, Step 0.3% -> 32 nấc)
-    #[dna(min = 0.005, max = 0.100, step = 0.003)]
+    /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
+    #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
     /// Độ lệch chuẩn giá cực đại Z-Score (0.5 -> 5.0 sigma, Step 0.2 -> 23 nấc)
@@ -437,8 +437,8 @@ pub struct TacticalReversalParams {
 /// 💥 5. CHIẾN ĐỘI ANOMALY FADE (Săn các râu nến quét thanh khoản dị thường)
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct TacticalAnomalyParams {
-    /// Kẹp trần SL ban đầu (0.5% -> 10.0% giá, Step 0.3% -> 32 nấc)
-    #[dna(min = 0.005, max = 0.100, step = 0.003)]
+    /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
+    #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
     /// Độ dài râu nến quét thanh khoản (0.5 -> 6.0 ATR, Step 0.2 -> 28 nấc)
@@ -461,8 +461,8 @@ pub struct TacticalAnomalyParams {
 /// 🧲 6. CHIẾN ĐỘI ABSORPTION SCOUT (Phát hiện dòng tiền cá mập gom/xả hàng trong vùng nén)
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct TacticalAbsorptionParams {
-    /// Kẹp trần SL ban đầu (0.5% -> 10.0% giá, Step 0.3% -> 32 nấc)
-    #[dna(min = 0.005, max = 0.100, step = 0.003)]
+    /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
+    #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
     /// Độ nén dải Bollinger/Keltner (Universal 1% -> 99%, Step 3% -> 33 nấc)
@@ -553,9 +553,14 @@ pub struct RiskStopParams {
     #[serde(default = "default_tsl_buffer_floor_atr")]
     pub tsl_buffer_floor_atr: f64,
 
-    /// 1. Sàn Cắt Lỗ Khởi Tạo Tối Thiểu (0.1% -> 3.0% giá, tương đương 2% -> 60% ROE trên 20x, Step 0.1% -> 30 nấc)
-    #[dna(min = 0.001, max = 0.030, step = 0.001)]
+    /// 1. Sàn Cắt Lỗ Khởi Tạo Tối Thiểu (0.15% -> 4.0% giá, Step 0.05% -> 78 nấc)
+    #[dna(min = 0.0015, max = 0.040, step = 0.0005)]
     pub min_initial_sl_pct: f64,
+
+    /// 1.1 Trần Cắt Lỗ ROE Mặc Định Cho Lệnh Untagged / Adopted (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
+    #[dna(min = 0.04, max = 0.40, step = 0.015)]
+    #[serde(default = "default_sl_roe_cap")]
+    pub default_sl_roe_cap: f64,
     
     /// 2. Chu Kỳ Đếm Nến Đi Ngang Kể Từ Đỉnh Lợi Nhuận (15 nến -> 720 nến / 12 tiếng, Step 30 nến -> 24 nấc)
     #[dna(min = 15.0, max = 360.0, step = 15.0)]
@@ -673,6 +678,10 @@ pub struct RiskStopParams {
     #[dna(min = 0.001, max = 0.008, step = 0.0005)]
     #[serde(default = "default_dynamic_tp_min_gain_pct")]
     pub dynamic_tp_min_gain_pct: f64,
+}
+
+fn default_sl_roe_cap() -> f64 {
+    0.20
 }
 
 fn default_ttp_activation_roe() -> f64 {
