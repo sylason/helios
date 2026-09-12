@@ -44,20 +44,34 @@ impl TacticalScanner for MomentumIgnitionScanner {
 
         let min_score = mom_cfg.min_activation_score;
 
+        let low = tick.lows()[i];
+        let high = tick.highs()[i];
+        let buffer = atr * mom_cfg.struct_sl_buffer_atr.max(0.05);
+
         if score_long >= min_score && score_long > score_short {
+            // 🛡️ FLAW-TSL.6: Structural SL neo dưới đáy nến bùng nổ xung lực (Low[i] - buffer)
+            let mut sl = low - buffer;
+            if sl >= close {
+                sl = close - buffer.max(close * 0.002);
+            }
             Some(Proposal {
                 signal_type: SignalType::Long,
                 raw_score: score_long.min(1.0),
                 scanner_id: self.id(),
-                suggested_sl: None,
+                suggested_sl: Some(sl),
                 suggested_tp: None,
             })
         } else if score_short >= min_score && score_short > score_long {
+            // 🛡️ FLAW-TSL.6: Structural SL neo trên đỉnh nến bùng nổ xung lực (High[i] + buffer)
+            let mut sl = high + buffer;
+            if sl <= close {
+                sl = close + buffer.max(close * 0.002);
+            }
             Some(Proposal {
                 signal_type: SignalType::Short,
                 raw_score: score_short.min(1.0),
                 scanner_id: self.id(),
-                suggested_sl: None,
+                suggested_sl: Some(sl),
                 suggested_tp: None,
             })
         } else {

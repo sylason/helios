@@ -738,13 +738,16 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 113, "DNA_WIDTH phải là chính xác 113 chiều sau khi tích hợp cooldown_breakout_atr_mult (FLAW-TSL.7)!");
+        assert_eq!(width, 117, "DNA_WIDTH phải là chính xác 117 chiều sau khi tích hợp 4 gene struct_sl_buffer_atr (FLAW-TSL.6)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
         assert!(!has_macd, "defs không được chứa macd!");
         assert!(!has_vol_ma, "defs không được chứa vol_ma!");
         assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
+
+        let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
+        assert_eq!(count_struct_sl, 4, "defs phải chứa chính xác 4 gene struct_sl_buffer_atr cho 4 Scanners!");
 
         // Thử cập nhật với vector toàn 0.0 (giả sử GA sinh số 0)
         let zeros = vec![0.0; width];
@@ -760,6 +763,156 @@ mod tests {
         assert!(ind.adx.period > 0, "adx.period must be > 0");
         assert!(ind.bbands.period > 0, "bbands.period must be > 0");
         assert!(ind.atr.period > 0, "atr.period must be > 0");
+    }
+
+    #[test]
+    fn test_structural_sl_per_playbook_integrity() {
+        use crate::strategy::core_v3::scanners::trend_pb::TrendPBScanner;
+        use crate::strategy::core_v3::scanners::momentum_ignition::MomentumIgnitionScanner;
+        use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let opens = vec![2000.0; len];
+        let highs = vec![2010.0; len];
+        let lows = vec![1990.0; len];
+        let closes = vec![2000.0; len];
+        let volumes = vec![1000.0; len];
+        let datetimes = vec![0i64; len];
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(volumes),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 30.0;
+        config.tactical_sniper.pullback.rsi_buy_thresh = 50.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.1;
+        config.tactical_sniper.pullback.struct_sl_buffer_atr = 0.5;
+
+        config.tactical_sniper.momentum.rsi_threshold = 60.0;
+        config.tactical_sniper.momentum.vol_z_threshold = 0.5;
+        config.tactical_sniper.momentum.min_activation_score = 0.1;
+        config.tactical_sniper.momentum.struct_sl_buffer_atr = 0.3;
+
+        config.tactical_sniper.range.min_width_pct = 0.01;
+        config.tactical_sniper.range.volume_max_threshold = 0.8;
+        config.tactical_sniper.range.bb_proximity_pct = 0.02;
+        config.tactical_sniper.range.stoch_oversold = 30.0;
+        config.tactical_sniper.range.stoch_overbought = 70.0;
+        config.tactical_sniper.range.max_trend_strength = 0.6;
+        config.tactical_sniper.range.max_adverse_slope = 0.2;
+        config.tactical_sniper.range.min_activation_score = 0.1;
+        config.tactical_sniper.range.struct_sl_buffer_atr = 0.3;
+
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
+
+        // 1. Kiểm tra TrendPBScanner (Long & Short)
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.highs = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.lows = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.volumes = std::sync::Arc::new(vec![1000.0; len]);
+        sensors.natr = std::sync::Arc::new(vec![1.5; len]);
+        sensors.z_score = std::sync::Arc::new(vec![0.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![50.0; len]);
+        sensors.chaos_ratio = std::sync::Arc::new(vec![0.5; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.5; len]);
+        sensors.adx = std::sync::Arc::new(vec![30.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.15; len]); // Slope dương -> Long
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![20.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![40.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.kc_upper = std::sync::Arc::new(vec![2025.0; len]);
+        sensors.kc_lower = std::sync::Arc::new(vec![1975.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        let pb_prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(pb_prop.is_some(), "TrendPBScanner phải sinh Proposal Long!");
+        let pb_p = pb_prop.unwrap();
+        assert!(pb_p.suggested_sl.is_some(), "TrendPullback Proposal phải có suggested_sl!");
+        let pb_sl = pb_p.suggested_sl.unwrap();
+        assert!(pb_sl < 2000.0, "Long SL {} phải < Close 2000.0", pb_sl);
+
+        // 2. Kiểm tra MomentumIgnitionScanner
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.closes = std::sync::Arc::new(vec![2025.0; len]); // Phá vỡ BB Upper
+        let mut matrix_mom = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix_mom.volume_force = std::sync::Arc::new(vec![1.5; len]);
+        let mom_prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix_mom, &config);
+        assert!(mom_prop.is_some(), "MomentumIgnitionScanner phải sinh Proposal Long!");
+        let mom_p = mom_prop.unwrap();
+        assert!(mom_p.suggested_sl.is_some(), "MomentumIgnition Proposal phải có suggested_sl!");
+        let mom_sl = mom_p.suggested_sl.unwrap();
+        assert!(mom_sl < 2000.0, "Momentum Long SL {} phải < Close 2000.0", mom_sl);
+
+        // 3. Kiểm tra RangeOscScanner
+        sensors.closes = std::sync::Arc::new(vec![1981.0; len]); // Gần BB Lower (1980)
+        sensors.stoch_range_k = std::sync::Arc::new(vec![15.0; len]);
+        sensors.stoch_range_d = std::sync::Arc::new(vec![10.0; len]);
+        let mut matrix_range = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix_range.trend_strength = std::sync::Arc::new(vec![0.2; len]);
+        matrix_range.bb_width_norm = std::sync::Arc::new(vec![0.04; len]);
+        matrix_range.volume_force = std::sync::Arc::new(vec![0.2; len]);
+        matrix_range.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        let range_prop = RangeOscScanner.scan(&tick, &sensors, &matrix_range, &config);
+        assert!(range_prop.is_some(), "RangeOscScanner phải sinh Proposal Long!");
+        let rng_p = range_prop.unwrap();
+        assert!(rng_p.suggested_sl.is_some(), "RangeOsc Proposal phải có suggested_sl!");
+        let rng_sl = rng_p.suggested_sl.unwrap();
+        assert!(rng_sl < 1981.0, "RangeOsc Long SL {} phải < Close 1981.0", rng_sl);
+        assert!(rng_p.suggested_tp.is_some(), "RangeOsc Proposal phải có suggested_tp!");
+
+        // 4. Kiểm tra AbsorptionScanner
+        sensors.vwma = std::sync::Arc::new(vec![2005.0; len]); // vwma > bb_middle -> Long
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        let mut matrix_abs = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix_abs.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix_abs.volume_force = std::sync::Arc::new(vec![1.2; len]);
+        let abs_prop = AbsorptionScanner.scan(&tick, &sensors, &matrix_abs, &config);
+        assert!(abs_prop.is_some(), "AbsorptionScanner phải sinh Proposal Long!");
+        let abs_p = abs_prop.unwrap();
+        assert!(abs_p.suggested_sl.is_some(), "Absorption Proposal phải có suggested_sl!");
+        let abs_sl = abs_p.suggested_sl.unwrap();
+        assert!(abs_sl < 2000.0, "Absorption Long SL {} phải < Close 2000.0", abs_sl);
     }
 }
 

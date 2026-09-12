@@ -33,6 +33,13 @@ impl TacticalScanner for TrendPBScanner {
 
         let min_score = pb_cfg.min_activation_score;
 
+        let close = tick.closes()[i];
+        let low = tick.lows()[i];
+        let high = tick.highs()[i];
+        let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+        let kama_mid = sensors.kama_mid.get(i).copied().unwrap_or(close);
+        let buffer = current_atr * pb_cfg.struct_sl_buffer_atr.max(0.05);
+
         // 1. Chấm điểm Mềm Mẫu Hình LONG (KAMA Slope Dương + Stoch Pullback + RSI Safe)
         if slope_adj > 0.0 {
             let f_stoch_long = 1.0 / (1.0 + (-0.1 * (stoch_pb_thresh - stoch_k)).exp());
@@ -40,11 +47,18 @@ impl TacticalScanner for TrendPBScanner {
             let score_long = 0.40 * f_slope + 0.40 * f_stoch_long + 0.20 * f_rsi_long;
 
             if score_long >= min_score {
+                // 🛡️ FLAW-TSL.6: Structural SL neo dưới đáy nến nhịp hồi hoặc đường hỗ trợ KAMA
+                let base_support = low.min(kama_mid);
+                let mut sl = base_support - buffer;
+                if sl >= close {
+                    sl = close - buffer.max(close * 0.002);
+                }
+
                 return Some(Proposal {
                     signal_type: SignalType::Long,
                     raw_score: score_long.min(1.0),
                     scanner_id: self.id(),
-                    suggested_sl: None,
+                    suggested_sl: Some(sl),
                     suggested_tp: None,
                 });
             }
@@ -56,11 +70,18 @@ impl TacticalScanner for TrendPBScanner {
             let score_short = 0.40 * f_slope + 0.40 * f_stoch_short + 0.20 * f_rsi_short;
 
             if score_short >= min_score {
+                // 🛡️ FLAW-TSL.6: Structural SL neo trên đỉnh nến nhịp hồi hoặc đường kháng cự KAMA
+                let base_resistance = high.max(kama_mid);
+                let mut sl = base_resistance + buffer;
+                if sl <= close {
+                    sl = close + buffer.max(close * 0.002);
+                }
+
                 return Some(Proposal {
                     signal_type: SignalType::Short,
                     raw_score: score_short.min(1.0),
                     scanner_id: self.id(),
-                    suggested_sl: None,
+                    suggested_sl: Some(sl),
                     suggested_tp: None,
                 });
             }

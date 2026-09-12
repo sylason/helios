@@ -44,11 +44,37 @@ impl TacticalScanner for AbsorptionScanner {
                 SignalType::Short
             };
 
+            let close = tick.closes()[i];
+            let low = tick.lows()[i];
+            let high = tick.highs()[i];
+            let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+            let buffer = current_atr * abs_cfg.struct_sl_buffer_atr.max(0.05);
+
+            // 🛡️ FLAW-TSL.6: Structural SL neo dưới/trên vùng nén hấp thụ thanh khoản (BB Middle)
+            let sl = match signal_type {
+                SignalType::Long => {
+                    let base_support = low.min(bb_middle);
+                    let mut s = base_support - buffer;
+                    if s >= close {
+                        s = close - buffer.max(close * 0.002);
+                    }
+                    s
+                }
+                SignalType::Short => {
+                    let base_resistance = high.max(bb_middle);
+                    let mut s = base_resistance + buffer;
+                    if s <= close {
+                        s = close + buffer.max(close * 0.002);
+                    }
+                    s
+                }
+            };
+
             return Some(Proposal {
                 signal_type,
                 raw_score,
                 scanner_id: self.id(),
-                suggested_sl: None,
+                suggested_sl: Some(sl),
                 suggested_tp: None,
             });
         }

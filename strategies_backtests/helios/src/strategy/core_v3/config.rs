@@ -342,6 +342,11 @@ pub struct TacticalPullbackParams {
     /// Ngưỡng kích hoạt mềm Trend Pullback (Universal 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
+
+    /// Đệm ATR bảo vệ qua KAMA / đáy nhịp hồi (0.10 -> 4.00 ATR, Step 0.15 -> 27 nấc)
+    #[dna(min = 0.10, max = 4.00, step = 0.15)]
+    #[serde(default = "default_pullback_sl_buffer_atr")]
+    pub struct_sl_buffer_atr: f64,
 }
 
 /// ⚡ 2. CHIẾN ĐỘI MOMENTUM IGNITION (Săn các cú bùng nổ xung lực Volume & Momentum)
@@ -362,6 +367,11 @@ pub struct TacticalMomentumParams {
     /// Ngưỡng kích hoạt mềm Momentum Ignition (Universal 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
+
+    /// Đệm ATR dưới đáy nến bùng nổ xung lực (0.10 -> 3.00 ATR, Step 0.15 -> 20 nấc)
+    #[dna(min = 0.10, max = 3.00, step = 0.15)]
+    #[serde(default = "default_momentum_sl_buffer_atr")]
+    pub struct_sl_buffer_atr: f64,
 }
 
 /// 🌊 3. CHIẾN ĐỘI RANGE OSCILLATOR (Bắt đỉnh/đáy biên độ thị trường đi ngang)
@@ -404,6 +414,11 @@ pub struct TacticalRangeParams {
     /// Ngăn chặn bắt dao rơi: Nếu Trend dốc xuống vượt ngưỡng này -> Cấm Long!
     #[dna(min = 0.05, max = 0.50, step = 0.05)]
     pub max_adverse_slope: f64,
+
+    /// Đệm ATR ngoài biên dải Bollinger Bands (0.10 -> 3.00 ATR, Step 0.15 -> 20 nấc)
+    #[dna(min = 0.10, max = 3.00, step = 0.15)]
+    #[serde(default = "default_range_sl_buffer_atr")]
+    pub struct_sl_buffer_atr: f64,
 }
 
 /// 🔄 4. CHIẾN ĐỘI CLIMAX REVERSAL (Bắt đỉnh/đáy kiệt sức Parabol)
@@ -476,6 +491,11 @@ pub struct TacticalAbsorptionParams {
     /// Ngưỡng kích hoạt mềm Absorption Scout (Universal 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
+
+    /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.10 -> 4.00 ATR, Step 0.15 -> 27 nấc)
+    #[dna(min = 0.10, max = 4.00, step = 0.15)]
+    #[serde(default = "default_absorption_sl_buffer_atr")]
+    pub struct_sl_buffer_atr: f64,
 }
 
 /// ============================================================================
@@ -715,6 +735,22 @@ fn default_mega_trend_max_cycles() -> usize {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_pullback_sl_buffer_atr() -> f64 {
+    0.5
+}
+
+fn default_momentum_sl_buffer_atr() -> f64 {
+    0.3
+}
+
+fn default_range_sl_buffer_atr() -> f64 {
+    0.3
+}
+
+fn default_absorption_sl_buffer_atr() -> f64 {
+    0.5
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]

@@ -66,6 +66,11 @@ impl TacticalScanner for RangeOscScanner {
         let max_slope = if range_cfg.max_adverse_slope > 0.0 { range_cfg.max_adverse_slope } else { 0.20 };
         let trend_dir = matrix.trend_dir[i];
 
+        let low = tick.lows()[i];
+        let high = tick.highs()[i];
+        let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+        let buffer = current_atr * range_cfg.struct_sl_buffer_atr.max(0.05);
+
         if score_long >= min_score && score_long > score_short {
             // 🛡️ CHỐNG BẮT DAO RƠI: Nếu Trend đang đổ dốc mạnh (trend_dir < -max_slope) -> Cấm Long!
             if trend_dir < -max_slope {
@@ -73,11 +78,19 @@ impl TacticalScanner for RangeOscScanner {
             }
             // 🎯 SỬA FLAW-4.2: Take Profit của Long bắt buộc phải cao hơn giá Close ít nhất 0.2%
             let valid_tp = bb_u.max(close * 1.002);
+
+            // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên dưới dải Bollinger Bands (min(Low, BB_Lower) - buffer)
+            let base_support = low.min(bb_l);
+            let mut sl = base_support - buffer;
+            if sl >= close {
+                sl = close - buffer.max(close * 0.002);
+            }
+
             Some(Proposal {
                 signal_type: SignalType::Long,
                 raw_score: score_long.min(1.0),
                 scanner_id: self.id(),
-                suggested_sl: None,
+                suggested_sl: Some(sl),
                 suggested_tp: Some(valid_tp),
             })
         } else if score_short >= min_score && score_short > score_long {
@@ -87,11 +100,19 @@ impl TacticalScanner for RangeOscScanner {
             }
             // 🎯 SỬA FLAW-4.2: Take Profit của Short bắt buộc phải thấp hơn giá Close ít nhất 0.2%
             let valid_tp = bb_l.min(close * 0.998);
+
+            // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên trên dải Bollinger Bands (max(High, BB_Upper) + buffer)
+            let base_resistance = high.max(bb_u);
+            let mut sl = base_resistance + buffer;
+            if sl <= close {
+                sl = close + buffer.max(close * 0.002);
+            }
+
             Some(Proposal {
                 signal_type: SignalType::Short,
                 raw_score: score_short.min(1.0),
                 scanner_id: self.id(),
-                suggested_sl: None,
+                suggested_sl: Some(sl),
                 suggested_tp: Some(valid_tp),
             })
         } else {
