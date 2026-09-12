@@ -1,13 +1,17 @@
 // trading_bot/bot_desktop_client/src/components/layout/Topbar.tsx
 import React from 'react';
-import { Navbar, Container, Badge } from 'react-bootstrap';
+import { Navbar, Container, Badge, Button } from 'react-bootstrap';
 import { isTauriEnvironment } from '../../services/botService';
 
 interface TopbarProps {
   wsConnected?: boolean;
+  onTriggerExit?: () => void;
 }
 
-export const Topbar: React.FC<TopbarProps> = ({ wsConnected = true }) => {
+export const Topbar: React.FC<TopbarProps> = ({ 
+  wsConnected = true,
+  onTriggerExit,
+}) => {
   const isTauri = isTauriEnvironment();
 
   return (
@@ -20,7 +24,7 @@ export const Topbar: React.FC<TopbarProps> = ({ wsConnected = true }) => {
           <small className="text-secondary fs-6 fw-normal ms-2">v1.0</small>
         </Navbar.Brand>
 
-        {/* Status Indicators Group */}
+        {/* Status Indicators & Action Group */}
         <div className="d-flex align-items-center gap-3">
           {/* Demo Mode Badge */}
           <Badge bg="warning" text="dark" className="px-3 py-2 fw-semibold border border-warning">
@@ -39,6 +43,19 @@ export const Topbar: React.FC<TopbarProps> = ({ wsConnected = true }) => {
                 : 'BROWSER MOCK MODE'}
             </span>
           </div>
+
+          {/* Nút Thoát Ứng Dụng (Kích hoạt Unified Exit) */}
+          {onTriggerExit && (
+            <Button
+              variant="outline-danger"
+              size="sm"
+              className="fw-bold px-3 py-1"
+              title="Thoát hoàn toàn ứng dụng (Unified Exit)"
+              onClick={onTriggerExit}
+            >
+              ✕ Thoát App
+            </Button>
+          )}
         </div>
       </Container>
     </Navbar>

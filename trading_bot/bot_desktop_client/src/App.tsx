@@ -1,6 +1,6 @@
 // trading_bot/bot_desktop_client/src/App.tsx
 import { useState, useMemo } from 'react';
-import { PageId, AssetState, AccountState, SystemHealth, RebalanceOption } from './types/bot';
+import { PageId, AssetState, AccountState, SystemHealth, RebalanceOption, UnifiedExitAction } from './types/bot';
 import { 
   INITIAL_MOCK_ASSETS, 
   INITIAL_MOCK_ACCOUNT, 
@@ -9,6 +9,7 @@ import {
 } from './services/botService';
 import { Topbar } from './components/layout/Topbar';
 import { Sidebar } from './components/layout/Sidebar';
+import { UnifiedExitModal } from './components/layout/UnifiedExitModal';
 import { ControlPage } from './pages/ControlPage';
 import { DashboardPage } from './pages/DashboardPage';
 
@@ -288,10 +289,51 @@ function App() {
     await BotService.emergencyStopAll();
   };
 
+  const [isExitModalOpen, setIsExitModalOpen] = useState<boolean>(false);
+
+  // Danh sách các cặp tiền đang có vị thế mở (không phải FLAT)
+  const openPositions = useMemo(() => {
+    return assets.filter(a => a.position.side !== 'FLAT');
+  }, [assets]);
+
+  /**
+   * 10. Kích hoạt quy trình Thoát Ứng Dụng (Trigger Exit)
+   * - Nếu không có vị thế mở (FLAT) -> Thoát nhanh (Fast Exit)
+   * - Nếu có vị thế mở -> Bật Unified Exit Modal
+   */
+  const handleTriggerExit = async () => {
+    if (openPositions.length === 0) {
+      console.log('[Fast Exit] Không có vị thế mở, đóng ứng dụng tức thì.');
+      await BotService.unifiedExit('FLAT_ALL');
+    } else {
+      setIsExitModalOpen(true);
+    }
+  };
+
+  /**
+   * 11. Thực thi lựa chọn từ Bảng Thoát Tổng Hợp
+   */
+  const handleExecuteExit = async (action: UnifiedExitAction) => {
+    if (action === 'FLAT_ALL') {
+      // Đóng sạch Market toàn bộ vị thế
+      setAssets(prev => prev.map(a => ({
+        ...a,
+        status: 'INACTIVE',
+        position: { side: 'FLAT', qty: 0, entryPrice: 0, unrealizedPnl: 0, unrealizedPnlPct: 0 },
+        recentLogs: [...a.recentLogs, `[${new Date().toLocaleTimeString()}] ⚡ Flat All & Exit: Position closed via Market.`],
+      })));
+    }
+
+    await BotService.unifiedExit(action);
+  };
+
   return (
     <div className="bg-dark min-vh-100 text-light d-flex flex-column">
       {/* Topbar Component */}
-      <Topbar wsConnected={health.wsConnected} />
+      <Topbar 
+        wsConnected={health.wsConnected} 
+        onTriggerExit={handleTriggerExit}
+      />
 
       {/* Main Content Layout (Sidebar + Active Page) */}
       <div className="d-flex flex-grow-1">
@@ -325,6 +367,14 @@ function App() {
           )}
         </main>
       </div>
+
+      {/* Bảng Thoát Tổng Hợp (Unified Exit Modal) */}
+      <UnifiedExitModal
+        show={isExitModalOpen}
+        onHide={() => setIsExitModalOpen(false)}
+        openPositions={openPositions}
+        onExecuteExit={handleExecuteExit}
+      />
     </div>
   );
 }

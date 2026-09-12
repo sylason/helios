@@ -2,22 +2,22 @@
 
 > **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 58 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **21/58 lỗi đã được sửa & kiểm thử thành công**, **37/58 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **22/58 lỗi đã được sửa & kiểm thử thành công**, **36/58 lỗi đang chờ xử lý**.
 
 ---
 
 ## 📊 Bảng Tiến Độ Tổng Quan Theo Cụm Chức Năng
 
 | Cụm chức năng | Tổng số Critical | Đã sửa | Còn lại | Mức độ rủi ro chính |
-| :--- | :---: | :---: | :---: | :--- |
+| :--- | :--- | :---: | :---: | :--- |
 | **Nhóm 1: Khớp Lệnh, Quản Trị Rủi Ro & Sàn Binance** | 8 | 1 | 7 | Naked Position trên sàn, mất Stop Loss, kẹt lệnh |
 | **Nhóm 2: Vòng Đời Actor, Cooldown & Hot-Swap DNA** | 6 | 2 | 4 | Đóng băng bot, cào lệnh trả thù, mất dữ liệu RAM |
 | **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 12 | 3 | 9 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 6 | 3 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 7 | 2 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
 | **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 8 | 0 | 8 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Bắt dao rơi Anomaly |
-| **TỔNG CỘNG** | **58** | **21** | **37** |  |
+| **TỔNG CỘNG** | **58** | **22** | **36** |  |
 
 ---
 
@@ -299,13 +299,13 @@
     - Cần rà soát và tinh chỉnh dải siêu tham số DNA của các biến số Stop Loss (`base_sl_atr`, `wick_sl_buffer_atr`, `tsl_atr_tight`, `tsl_atr_normal`, `tsl_atr_loose`) để đảm bảo phủ kín từ mức siêu nhạy 0.3 ATR đến mức chịu rung lắc cực đại 8.0 ATR cho mọi điều kiện thị trường.
   - *Giải pháp đề xuất:* Bổ sung logic tính `suggested_sl` theo râu nến/cản vi mô cho toàn bộ các Scanner còn lại và mở rộng dải DNA tương ứng.
 
-- [ ] **FLAW-TSL.7:** **Bẫy Alternating Whipsaw (Vào Lệnh Trả Thù So Le 2 Đầu Do Cooldown Chỉ Khóa 1 Chiều)**
-  - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs:25-35, 340-390`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L340-L390) & [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:330-360`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L330-L360)
-  - *Bản chất:* 
-    - Khi đóng vị thế thua lỗ nặng, `CooldownGuard` và `AssetActor` hiện tại chỉ khóa duy nhất hướng vừa đóng (`locked_side = Some(side)`).
-    - Trong vùng thị trường đi ngang quét râu 2 đầu (Choppy Whipsaw Market như ngày 02/09 ở Log 33), nến vừa giật quét SL Long ở đáy thì Scanner xuất hiện tín hiệu Short ngay lập tức. Bot nhảy vào Short ở đáy, rồi giá bật lên quét SL Short ở đỉnh, bot lại nhảy vào Long ở đỉnh.
-    - Chỉ trong 1 ngày, tài khoản bị vả liên tiếp 4 lệnh cả 2 đầu (#0004, #0005, #0007, #0008), bốc hơi 16% tổng tài sản.
-  - *Giải pháp đề xuất:* Khi gặp khoản lỗ nặng ($ROE \le -10\%$) hoặc khi thị trường đang ở trạng thái Choppy/Noise: Kích hoạt **Bidirectional Cooldown (Khóa cả 2 chiều Long & Short)** trong ít nhất 15-30 phút để bot không vào bất kỳ lệnh nào. Tích hợp cơ chế Exponential Backoff giãn cách thời gian nếu thua liên tiếp.
+- [x] **FLAW-TSL.7:** **Bẫy Alternating Whipsaw (Vào Lệnh Trả Thù So Le 2 Đầu Do Cooldown Chỉ Khóa 1 Chiều)** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs) & [`strategies_backtests/helios/src/strategy/core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs) & [`config.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs)
+  - *Đã xử lý (Universal Bidirectional Cooldown & Directional Early Release):*
+    1. **Khóa 2 chiều tuyệt đối (Bidirectional Cooldown):** Khi lệnh trước bị cắt lỗ/hòa vốn danh nghĩa (`trade_pnl <= 0.001`), bot khóa CẢ 2 CHIỀU Long & Short trong `re_entry_cooldown_bars` nến. Triệt tiêu 100% bẫy vào lệnh ngược chiều ở đỉnh/đáy.
+    2. **Directional Early Release theo DNA gene (`cooldown_breakout_atr_mult`):** Mở rộng dải DNA `[min = 0.5, max = 4.0, step = 0.25]` (default `1.5`, DNA Helios đạt 113 chiều). Đánh thức bot sớm nếu giá Long bứt phá tăng vượt mức thoát $\ge k \times ATR$ hoặc Short sập gãy sâu vượt mức thoát $\ge k \times ATR$. Cấm tuyệt đối Long bắt dao rơi hoặc Short cản tàu.
+    3. **Single Source of Truth:** Gỡ bỏ hoàn toàn `CooldownGuard` và biến đếm 15 bars tự phát với lỗi `.abs()` ở `AssetActor`. Giữ nguyên 100% chốt chặn an toàn hạ tầng cấm mở lệnh trên cùng cây nến vừa đóng vị thế (`closed_intra_candle`).
+    4. **Kiểm thử toàn diện:** Vượt qua 31/31 unit tests Helios và 34/34 unit tests Bot Engine (tổng 65/65 tests pass 100%).
 
 - [x] **FLAW-TSL.8:** **Hardcode `0.80 / lev` Trong `clamp_sl_price` Cho Phép Lệnh Thua Tới -80% ROE** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:29-66, 105-120, 277-295`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs) & [`config.rs:325-475, 555-565`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs) & [`mod.rs:280-315, 644-650`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)

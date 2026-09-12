@@ -451,8 +451,6 @@ impl AssetActor {
                 for action in actions {
                     match &action {
                         Action::Buy { .. } | Action::Sell { .. } => {
-                            let order_side = if matches!(action, Action::Buy { .. }) { "LONG" } else { "SHORT" };
-
                             // TẦNG 1: CẤM TUYỆT ĐỐI MỞ LỆNH TRÊN CÙNG CÂY NẾN VỪA ĐÓNG VỊ THẾ (No Same-Bar Re-entry)
                             if closed_intra_candle {
                                 let prev_side = pos_before.as_ref().map(|p| if p.position_amt > 0.0 { "LONG" } else { "SHORT" }).unwrap_or("UNKNOWN");
