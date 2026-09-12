@@ -2,7 +2,7 @@
 
 > **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 58 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **22/58 lỗi đã được sửa & kiểm thử thành công**, **36/58 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **23/58 lỗi đã được sửa & kiểm thử thành công**, **35/58 lỗi đang chờ xử lý**.
 
 ---
 
@@ -15,9 +15,9 @@
 | **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 12 | 3 | 9 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 7 | 2 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 8 | 1 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
 | **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 8 | 0 | 8 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Bắt dao rơi Anomaly |
-| **TỔNG CỘNG** | **58** | **22** | **36** |  |
+| **TỔNG CỘNG** | **58** | **23** | **35** |  |
 
 ---
 
@@ -291,13 +291,21 @@
     Nếu thị trường có biến động mạnh ngay trong cây nến vừa mở vị thế (ví dụ giá bứt phá tạo râu nến cao vọt rồi hồi về trước khi đóng nến), mức đỉnh cao nhất đó bị bỏ lỡ, làm `peak_val` bị thấp giả tạo và khiến Trailing SL phản ứng chậm 1 nhịp.
   - *Đã xử lý:* Khởi tạo neo chuẩn từ `peak_val = trade.entry_price`, duyệt từ `(entry_bar + 1)..=i`. Triệt tiêu 100% Lookahead bias của nến entry, loại bỏ hoàn toàn lỗi đỉnh bị ghi nhận âm dưới giá vốn nếu nến sau giảm, và tính toán số nến đi ngang `effective_stagnant_bars` chính xác tuyệt đối. Đã có unit test `test_flaw_tsl5_high_watermark_entry_bar_bias_free` kiểm chứng.
 
-- [ ] **FLAW-TSL.6:** **Bảo Toàn Bản Sắc Stop Loss Của Từng Playbook & Tối Ưu Dải Cấu Hình DNA**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:297-307`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L297-L307)
-  - *Bản chất:* 
-    - Các Scanners như `TrendPullback`, `MomentumIgnition`, `Absorption` hiện đang trả về `suggested_sl: None`, buộc hệ thống phải fallback về dùng chung `base_sl_atr`.
-    - Dù mỗi scanner đã có cấu hình trần riêng (`max_initial_sl_pct`), nhưng việc thiếu công thức tính khoảng cách SL theo râu nến hoặc cấu trúc hỗ trợ/kháng cự vi mô khiến các Playbook này đánh mất nét đặc trưng vào lệnh.
-    - Cần rà soát và tinh chỉnh dải siêu tham số DNA của các biến số Stop Loss (`base_sl_atr`, `wick_sl_buffer_atr`, `tsl_atr_tight`, `tsl_atr_normal`, `tsl_atr_loose`) để đảm bảo phủ kín từ mức siêu nhạy 0.3 ATR đến mức chịu rung lắc cực đại 8.0 ATR cho mọi điều kiện thị trường.
-  - *Giải pháp đề xuất:* Bổ sung logic tính `suggested_sl` theo râu nến/cản vi mô cho toàn bộ các Scanner còn lại và mở rộng dải DNA tương ứng.
+- [x] **FLAW-TSL.6:** **Bảo Toàn Bản Sắc Stop Loss Của Từng Playbook & Tối Ưu Dải Cấu Hình DNA** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/config.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs), [`scanners/trend_pb.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs), [`scanners/momentum_ignition.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs), [`scanners/range_osc.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs), [`scanners/absorption.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs), [`mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)
+  - *Đã xử lý (Structural Stop Loss Per-Playbook & Dynamic DNA Expansion):*
+    1. **Mở rộng không gian DNA 117 chiều:** Bổ sung 4 gene `struct_sl_buffer_atr` độc lập cho 4 Scanners trong `config.rs`:
+       - `TacticalPullbackParams`: `[0.10 -> 4.00, step = 0.15]`, default `0.5`.
+       - `TacticalMomentumParams`: `[0.10 -> 3.00, step = 0.15]`, default `0.3`.
+       - `TacticalRangeParams`: `[0.10 -> 3.00, step = 0.15]`, default `0.3`.
+       - `TacticalAbsorptionParams`: `[0.10 -> 4.00, step = 0.15]`, default `0.5`.
+    2. **Bảo toàn bản sắc Stop Loss vi mô theo cấu trúc Price Action:**
+       - `TrendPullback`: Neo SL dưới `min(Low, KAMA) - buffer` (Long) / trên `max(High, KAMA) + buffer` (Short).
+       - `MomentumIgnition`: Neo SL dưới đáy nến bùng nổ `Low - buffer` (Long) / trên đỉnh nến `High + buffer` (Short).
+       - `RangeOscillator`: Neo SL ngoài biên dải Bollinger Bands `min(Low, BB_Lower) - buffer` (Long) / `max(High, BB_Upper) + buffer` (Short).
+       - `AbsorptionScout`: Neo SL dưới/trên vùng nén hấp thụ thanh khoản `min(Low, BB_Middle) - buffer` (Long) / `max(High, BB_Middle) + buffer` (Short).
+    3. **Sanity Guard hình học:** Đảm bảo SL luôn nằm đúng phía của giá (Long ở dưới, Short ở trên) và cách giá ít nhất `max(buffer, close * 0.002)`.
+    4. **Kiểm thử toàn diện 100% Pass:** Cập nhật test DNA_WIDTH = 117 và bổ sung unit test `test_structural_sl_per_playbook_integrity` kiểm chứng cả 4 Scanners (32/32 helios + 34/34 bot_engine = 66/66 unit tests pass).
 
 - [x] **FLAW-TSL.7:** **Bẫy Alternating Whipsaw (Vào Lệnh Trả Thù So Le 2 Đầu Do Cooldown Chỉ Khóa 1 Chiều)** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs) & [`strategies_backtests/helios/src/strategy/core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs) & [`config.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs)
