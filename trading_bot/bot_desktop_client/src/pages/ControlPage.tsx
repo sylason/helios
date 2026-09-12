@@ -1,9 +1,10 @@
 // trading_bot/bot_desktop_client/src/pages/ControlPage.tsx
 import React, { useState } from 'react';
 import { Container } from 'react-bootstrap';
-import { AssetState } from '../types/bot';
+import { AssetState, RebalanceOption } from '../types/bot';
 import { WatchlistTable } from '../components/control/WatchlistTable';
 import { AssetLogPanel } from '../components/control/AssetLogPanel';
+import { RebalanceModal } from '../components/control/RebalanceModal';
 
 interface ControlPageProps {
   assets: AssetState[];
@@ -14,7 +15,12 @@ interface ControlPageProps {
   onGracefulStop: (symbol: string) => void;
   onCancelGracefulStop: (symbol: string) => void;
   onForceStop: (symbol: string) => void;
-  onOpenRebalance?: (symbol: string) => void;
+  onConfirmRebalance: (
+    fromSymbol: string,
+    toSymbol: string,
+    amount: number,
+    option: RebalanceOption
+  ) => Promise<void>;
 }
 
 export const ControlPage: React.FC<ControlPageProps> = ({
@@ -26,17 +32,21 @@ export const ControlPage: React.FC<ControlPageProps> = ({
   onGracefulStop,
   onCancelGracefulStop,
   onForceStop,
-  onOpenRebalance,
+  onConfirmRebalance,
 }) => {
   const [selectedSymbol, setSelectedSymbol] = useState<string>(
     assets.length > 0 ? assets[0].symbol : 'ETHUSDT'
   );
 
+  // State quản lý mở Modal Điều Chuyển Vốn
+  const [rebalanceSourceSymbol, setRebalanceSourceSymbol] = useState<string | null>(null);
+
   const selectedAsset = assets.find((a) => a.symbol === selectedSymbol) || assets[0];
+  const rebalanceSourceAsset = assets.find((a) => a.symbol === rebalanceSourceSymbol) || null;
 
   return (
     <Container fluid className="p-4">
-      {/* Table Component */}
+      {/* 1. Bảng Quản Trị Cặp Tiền (Watchlist Table) */}
       <WatchlistTable
         assets={assets}
         selectedSymbol={selectedSymbol}
@@ -48,16 +58,25 @@ export const ControlPage: React.FC<ControlPageProps> = ({
         onGracefulStop={onGracefulStop}
         onCancelGracefulStop={onCancelGracefulStop}
         onForceStop={onForceStop}
-        onOpenRebalance={onOpenRebalance}
+        onOpenRebalance={(symbol) => setRebalanceSourceSymbol(symbol)}
       />
 
-      {/* Asset Log Stream Component */}
+      {/* 2. Bảng Event Log Thu Nhỏ của Cặp Được Chọn */}
       {selectedAsset && (
         <AssetLogPanel 
           symbol={selectedAsset.symbol} 
           logs={selectedAsset.recentLogs} 
         />
       )}
+
+      {/* 3. Hộp Thoại Điều Chuyển Vốn An Toàn (Rebalance Modal) */}
+      <RebalanceModal
+        show={rebalanceSourceSymbol !== null}
+        onHide={() => setRebalanceSourceSymbol(null)}
+        sourceAsset={rebalanceSourceAsset}
+        allAssets={assets}
+        onConfirmRebalance={onConfirmRebalance}
+      />
     </Container>
   );
 };

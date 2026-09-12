@@ -1,8 +1,8 @@
-# 🚨 MASTER TODO: 49 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
+# 🚨 MASTER TODO: 58 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
 
-> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 49 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
+> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 58 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **20/49 lỗi đã được sửa & kiểm thử thành công**, **29/49 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **21/58 lỗi đã được sửa & kiểm thử thành công**, **37/58 lỗi đang chờ xử lý**.
 
 ---
 
@@ -14,9 +14,10 @@
 | **Nhóm 2: Vòng Đời Actor, Cooldown & Hot-Swap DNA** | 6 | 2 | 4 | Đóng băng bot, cào lệnh trả thù, mất dữ liệu RAM |
 | **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
-| **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 11 | 3 | 8 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 5 | 4 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
-| **TỔNG CỘNG** | **49** | **20** | **29** |  |
+| **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 12 | 3 | 9 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 6 | 3 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
+| **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 8 | 0 | 8 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Bắt dao rơi Anomaly |
+| **TỔNG CỘNG** | **58** | **21** | **37** |  |
 
 ---
 
@@ -218,6 +219,11 @@
   - *Bản chất:* Hiện tượng Overfit trong thuật toán di truyền là chắc chắn sẽ xảy ra (không thể tránh khỏi khi tối ưu trên chuỗi thời gian tài chính có độ nhiễu cao). Dù WFE Gate đã chặn được các cá thể âm OOS, nhưng khi tỷ lệ Overfit cao (như 10 lần bị REJECT trong Log 26), hệ thống phải giữ lại DNA cũ thay vì tiến hóa thích ứng kịp thời với bối cảnh thị trường mới.
   - *Giải pháp đề xuất (Sẽ nghiên cứu & giải quyết sau):* Áp dụng các kỹ thuật từ Machine Learning vào GA Optimizer: Time-Series K-Fold Cross Validation, Phạt độ phức tạp và độ nhạy của DNA (Regularization Penalty vào hàm Fitness), Đánh giá Fitness đa cụm thời gian (Multi-Window Walk-Forward Fitness Objective), hoặc Early Stopping dựa trên Validation Loss.
 
+- [ ] **FLAW-6.6:** **Tình Trạng Đóng Băng Cập Nhật DNA Khi Liên Tục Bị WFE Gate Reject (Stale DNA Risk)**
+  - *Vị trí:* [`trading_bot/bot_engine/src/optimizer/prospector_runner.rs:280-320`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/prospector_runner.rs#L280-L320)
+  - *Bản chất:* Khi thị trường chuyển pha đột ngột (từ Trend sang Range hoặc biến động cực hạn), GA Optimizer có thể bị trượt 2-3 chu kỳ liên tiếp (8-12 giờ) không tìm ra cá thể OOS dương. Bot bị buộc phải giữ lại DNA cũ của pha thị trường trước đó. Dù "Lock DNA on Active Trade" bảo vệ vị thế đang mở rất tốt, nhưng các lệnh mở mới sau đó có nguy cơ sử dụng DNA lỗi thời.
+  - *Giải pháp đề xuất (Sẽ nghiên cứu & giải quyết sau):* Thiết kế cơ chế Stale DNA De-risking: Tự động thu hẹp quy mô vị thế (De-leverage / Half-size) hoặc kích hoạt chế độ phòng thủ (Defensive Filter) khi DNA hiện tại đã quá 12 giờ chưa được làm mới.
+
 - [ ] **FLAW-8.1:** **WebSocket Rơi Vào Vòng Lặp `sleep(60)` Vô Tận Khi Đứt Mạng**
   - *Vị trí:* [`trading_bot/bot_engine/src/execution/ws_manager.rs:139-151`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/ws_manager.rs#L139-L151)
   - *Bản chất:* Callback SDK chạy ngầm, sau đó luồng rơi vào `loop { sleep(60) }`. Khi sàn ngắt kết nối, vòng lặp sleep chạy mãi mãi, khối reconnect phía dưới không bao giờ chạm tới được. Bot rơi vào trạng thái chết lâm sàng.
@@ -317,4 +323,61 @@
     - Trong Log 31 và Log 33, riêng `ABSORPTION` chiếm từ 50% đến 70% tổng số lệnh của toàn hệ thống (17/24 lệnh ở Log 31, 17/34 lệnh ở Log 33) với tỷ lệ thua cao (10/17 lệnh thua ở Log 33).
     - Scanner liên tục thắng thầu trong Arbiter khi thị trường đi ngang có khối lượng ảo, khiến bot bị ngâm lệnh rồi bị Stagnant Decay cắt lỗ liên miên.
   - *Giải pháp đề xuất:* Bổ sung bộ lọc trạng thái thị trường không xu hướng (Choppiness Index / ADX / Efficiency Ratio) cho Scanner `ABSORPTION`, hoặc siết điều kiện auction confidence của `ABSORPTION` khi thị trường đang ở regime đi ngang (Range / Squeeze).
+
+---
+
+## 🌪️ NHÓM 7: KIỂM TOÁN CÁC TRẠNG THÁI THỊ TRƯỜNG KHÔNG THỂ PHÂN TÍCH (UNTRADABLE REGIMES & DEFENSIVE GUARDS AUDIT) (8 LỖ HỔNG)
+
+### 📊 Bảng Đối Chiếu Trạng Thái Thị Trường: Helios V3 Đã Có Gì & Đang Bị "Mù" Ở Đâu?
+
+| Mẫu Thị Trường Cực Đoan | Đặc Điểm Nhận Dạng Vi Mô | Helios V3 Hiện Đã Implement | Điểm Mù (Blind Spot) & Lỗ Hổng Thực Tế | Mức Độ Nguy Cấp |
+| :--- | :--- | :--- | :--- | :---: |
+| **REG-1: Bão Whipsaw Quét Râu 2 Đầu** | Nến đổi màu liên tục, râu nến chiếm $>70\%$, bước đi ngẫu nhiên ($Hurst \approx 0.50$). | `chaos_ratio`, `efficiency_ratio`, `adx_centered`. | 🚨 **Bị mù:** Simplex tính $w_r = 1.0 - \max(w_t, w_v)$. Nhầm Whipsaw thành **Tradable Range 89%**, kích hoạt `RangeOsc` bắt đỉnh/đáy để bị nướng! | 🔴 **Cực cao** |
+| **REG-2: Thanh Khoản Zombie** | $Volume \to 0$, sổ lệnh rỗng, nến dẹp như sợi chỉ. | `vol_z_score`, `squeeze_intensity`. | 🚨 **Tử huyệt Fallback:** Khi Volume $\to 0$, $Z_{\text{vol}}$ bị `NaN`. Code tại `matrix.rs:137` fallback `volume_force = 0.50`! Kích hoạt `Absorption` bắn lệnh vào sổ lệnh rỗng! | 🔴 **Cực cao** |
+| **REG-3: Fat-Tail Kurtosis Spike** | Tin tức shock, nến quét 5-8% 2 đầu, Kurtosis $\kappa \gg 10$. | `z_score`, `anomaly_multiplier`, đẩy $w_v$ lên cao. | 🚨 **Thiếu Cầu Chì:** Arbiter không dừng lại mà lại cấp ưu tiên cao nhất cho `AnomalyFade` cản tàu trước sóng thanh lý! | 🔴 **Cực cao** |
+| **REG-4: Tranh Chấp Tử Thần** | Cả Long và Short cùng bùng nổ điểm cao trên 1 nến. | Đấu thầu điểm tự tin `confidence`. | 🚨 **Cờ bạc:** Long 0.850 và Short 0.849, Arbiter chọn bừa Long thay vì hủy cả hai lệnh để đứng ngoài. | 🔴 **Nghiêm trọng** |
+
+---
+
+### 📝 Chi Tiết 8 Lỗ Hổng Thuộc Nhóm 7:
+
+- [ ] **FLAW-REG.1:** **Simplex Range Bù Trừ Bị Mù Hoàn Toàn Trước Bão Whipsaw**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:142-165`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L142-L165)
+  - *Bản chất:* Simplex tính $w_{\text{range}} = 1.0 - \max(w_{\text{trend}}, w_{\text{volatile}})$. Khi bão Whipsaw quét râu 2 đầu xảy ra, ADX $< 20 \implies w_t = 0$. $w_v$ thấp vì NATR tiệm cận SMA(NATR, 50). Ma trận ngộ nhận Whipsaw thành **Ranging hoàn hảo ($w_r \approx 89\%$)**, khiến `RangeOscScanner` nhảy vào bắt đỉnh/đáy Bollinger Bands và bị nướng Stop Loss liên tục.
+  - *Giải pháp đề xuất:* Bổ sung Choppiness Index (CHOP) và Wick Ratio vào `sensors.rs`. Chuyển sang 4-State Simplex Vector: $w_{\text{trend}} + w_{\text{clean\_range}} + w_{\text{volatile}} + w_{\text{chaos\_noise}} \equiv 1.00$. Phạt triệt để trọng số giao dịch khi $w_{\text{chaos\_noise}}$ cao.
+
+- [ ] **FLAW-REG.2:** **Tử Huyệt Fallback `volume_force = 0.50` Khi Sổ Lệnh Zombie (Cạn Kiệt Thanh Khoản)**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:137`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L137) & [`scanners/absorption.rs:35`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L35)
+  - *Bản chất:* Khi thị trường đóng băng ($Volume \to 0$), phép tính $Z_{\text{vol}}$ bị chia cho 0 ra `NaN`. Dòng 137 tự động gán `if volume_force.is_nan() { 0.5 }`. Kết hợp với Bollinger Bands bóp nghẹt khiến Squeeze Intensity đạt $1.0$, `AbsorptionScanner` đạt điểm tuyệt đối $1.0$ và bắn lệnh vào thị trường chết, gây kẹt thanh khoản và trượt giá Gap khổng lồ.
+  - *Giải pháp đề xuất:* Thiết lập cơ chế Fallback Zero (`volume_force = 0.0` khi NaN); bổ sung Absolute Quote Volume Floor Filter: cấm mở lệnh nếu khối lượng 1h $< \text{MinThreshold}$.
+
+- [ ] **FLAW-REG.3:** **Signal Arbiter Thiếu Hoàn Toàn Cơ Chế "Cash is King / Flat Guard" & Veto Toàn Cục**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:127-187`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L127-L187)
+  - *Bản chất:* Arbiter luôn cố gắng tìm người chiến thắng. Khi thị trường rơi vào siêu bão hỗn loạn hoặc nhiễu ngẫu nhiên, không có dòng code nào tuyên bố: `"Thị trường Untradable -> Giữ tiền mặt!"`. Đồng thời, công thức `(raw_score)^W * (context_score)^(1-W)` với $W$ cao ($0.85$) cho phép một scanner tự chấm khống điểm $0.95$ đè bẹp bối cảnh vĩ mô xấu và ép bot mở lệnh.
+  - *Giải pháp đề xuất:* Bổ sung Flat Guard Veto: Nếu Simplex Entropy cao (không rõ ràng chế độ) hoặc `chaos_ratio > max_safe_chaos` $\implies$ Ép buộc trả về `Action::None` (giữ tiền mặt).
+
+- [ ] **FLAW-REG.4:** **Conflict Deadlock Cờ Bạc Khi Long & Short Cùng Bùng Nổ Điểm Cao**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:168`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L168)
+  - *Bản chất:* Khi cả Best Long (ví dụ `TrendPullback` 0.850) và Best Short (ví dụ `ClimaxReversal` 0.849) cùng xuất hiện trên 1 cây nến (vùng tranh chấp dữ dội), Arbiter chỉ đơn thuần so sánh `confidence > max_confidence` và chọn bên hơn $0.001$. Đây là hành vi cờ bạc trong vùng nguy hiểm.
+  - *Giải pháp đề xuất:* Bổ sung Deadlock Cancellation: Nếu điểm của Best Long và Best Short đều $> 0.60$ và hiệu số điểm $< 0.15 \implies$ Hủy cả 2 lệnh, đứng ngoài quan sát.
+
+- [ ] **FLAW-REG.5:** **Bẫy Bắt Dao Rơi Của `anomaly.rs`: Coi Nến Xả Marubozu Thành Pinbar Long**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/anomaly.rs:32-45`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/anomaly.rs#L32-L45)
+  - *Bản chất:* Công thức chấm điểm chỉ dựa vào độ dài râu nến dưới tuyệt đối và Z-Score. Một cây nến đỏ đặc xả hàng 18 giá có râu dưới 2 giá vẫn được chấm **0.976 điểm Long**! Scanner liên tục bắt dao rơi ngay giữa các con sóng xả hàng thanh lý cưỡng bức.
+  - *Giải pháp đề xuất:* Bắt buộc kiểm tra hình thái nến: Râu nến $\ge 2.0 \times$ Thân nến và Giá đóng cửa phải nằm ở nửa trên của cây nến (`Close > (High + Low) / 2`).
+
+- [ ] **FLAW-REG.6:** **Méo Mó Lực Khối Lượng Bất Đối Xứng Của `volume_force` Do MFI**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:98-102`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L98-L102)
+  - *Bản chất:* Dùng trực tiếp $0.5 \cdot |\tanh| + 0.5 \cdot (\text{MFI} / 100)$. MFI là chỉ báo dao động hướng tâm. Khi xả hàng tháo chạy cực đại (Panic Sell), MFI rơi về $10$, khiến `volume_force` chỉ đạt $0.55$ (bị ngộ nhận là volume trung bình). Ngược lại nến xanh nhẹ không có volume đột biến nhưng MFI cao lại bị thổi phồng.
+  - *Giải pháp đề xuất:* Chuẩn hóa MFI theo độ lệch tâm $|\text{MFI} - 50.0| / 50.0$ hoặc dùng trực tiếp tích chuẩn hóa Khối lượng $\times$ Biên độ nến True Range.
+
+- [ ] **FLAW-REG.7:** **Cooldown "Mất Trí Nhớ" - Thiếu Losing Streak, Exponential Backoff & Daily Circuit Breaker**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:26-31, 196`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L26-L31) & [`asset_actor.rs:458`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L458)
+  - *Bản chất:* Cooldown cào bằng mọi mức lỗ (lỗ $0.001$ hay lỗ $50\%$ ROE đều chỉ cách ly 15 nến). Thua 1 lệnh hay thua 4 lệnh liên tiếp đều chỉ cách ly bằng nhau, không có cơ chế tăng thời gian cách ly lũy tiến. Đồng thời thiếu hoàn toàn bộ ngắt mạch khẩn cấp khi lỗ ngày chạm ngưỡng (Daily Circuit Breaker).
+  - *Giải pháp đề xuất:* Bổ sung `consecutive_losses` và cơ chế Exponential Backoff: $T = T_{\text{base}} \times 2^{\min(streak - 1, 3)}$ ($15\text{m} \to 30\text{m} \to 60\text{m} \to 120\text{m}$). Ngắt mạch tài khoản nghỉ giao dịch đến hôm sau nếu Drawdown trong ngày $\ge 5\%$.
+
+- [ ] **FLAW-REG.8:** **Lỗi Trị Tuyệt Đối `.abs()` Trong `asset_actor.rs:521` Bắt Dao Rơi Khi Giá Sập Sâu**
+  - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs:521-536`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L521-L536)
+  - *Bản chất:* Trong khi `core_v3/mod.rs` đã sửa kiểm tra bứt phá có lợi, `asset_actor.rs` vẫn giữ `price_diff = (current_close - last_exit_price).abs() >= 1.5%`. Nếu lệnh Long vừa cắt lỗ mà giá tiếp tục lao dốc thêm $> 1.5\%$, bot tưởng là bứt phá và lập tức xóa Cooldown, nhảy vào Long bắt dao rơi tiếp!
+  - *Giải pháp đề xuất:* Đồng bộ 100% logic kiểm tra bứt phá định hướng: Chỉ mở khóa Long nếu giá tăng ngược lên $\ge 1.5 \times \text{ATR}$ (và Short nếu giá giảm sâu $\ge 1.5 \times \text{ATR}$).
 

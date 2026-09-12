@@ -26,19 +26,6 @@ pub struct LivePositionState {
     pub opening_playbook_tag: Option<String>,
 }
 
-/// Trạng thái Cooldown chống cào lệnh trả thù (Revenge Re-entry Guard)
-#[derive(Debug, Clone)]
-pub struct CooldownGuard {
-    /// Mốc timestamp mà Cooldown sẽ hết hạn (ms)
-    pub locked_until_ts: i64,
-    /// Mốc bar index mà Cooldown sẽ hết hạn
-    pub locked_until_bar: usize,
-    /// Chiều bị khóa ("LONG" hoặc "SHORT")
-    pub locked_side: String,
-    /// Giá thoát lệnh của vị thế vừa đóng
-    pub last_exit_price: f64,
-}
-
 /// Actor quản lý một Tài sản Giao dịch (AssetActor)
 /// Đóng vai trò Bộ não Điều phối (Orchestrator), tích hợp Strategy và ủy quyền thực thi sang ExecutionEngine.
 pub struct AssetActor {
@@ -61,10 +48,6 @@ pub struct AssetActor {
     pub initial_sync_until: Option<i64>,
     /// Bộ DNA mới đang chờ nạp khi vị thế hiện tại đóng hoàn toàn (Lock DNA on Active Trade)
     pub pending_dna: Option<crate::models::models::OptimizedDna>,
-    /// Bộ đệm theo dõi Cooldown chống cào lệnh trả thù sau khi cắt lỗ / đóng lệnh
-    pub cooldown_guard: Option<CooldownGuard>,
-    /// Số lượng nến giãn cách Cooldown mặc định (mặc định: 15 nến = 15 phút)
-    pub cooldown_bars: usize,
 }
 
 impl AssetActor {
@@ -100,15 +83,7 @@ impl AssetActor {
             config,
             initial_sync_until: None,
             pending_dna: None,
-            cooldown_guard: None,
-            cooldown_bars: 15,
         }
-    }
-
-    /// Thiết lập số nến giãn cách Cooldown sau khi đóng lệnh (mặc định: 15 nến)
-    pub fn with_cooldown_bars(mut self, bars: usize) -> Self {
-        self.cooldown_bars = bars;
-        self
     }
 
     /// Thiết lập kênh nến đồng bộ có Backpressure (dành cho mô phỏng Walk-Forward)
@@ -404,17 +379,6 @@ impl AssetActor {
             let full_buffer = self.asset.get_candles_vec();
             let live_position = self.execution_engine.get_position();
             let current_bar_idx = full_buffer.len().saturating_sub(1);
-
-            // Kiểm tra giải phóng Cooldown nếu đã hết thời gian khóa
-            if let Some(ref guard) = self.cooldown_guard {
-                if candle.timestamp >= guard.locked_until_ts || current_bar_idx >= guard.locked_until_bar {
-                    info!(
-                        "🟢 [COOLDOWN EXPIRED] Symbol: {} | Side {} cooldown released at bar {} (ts: {}). System ready for new trades.",
-                        self.symbol, guard.locked_side, current_bar_idx, candle.timestamp
-                    );
-                    self.cooldown_guard = None;
-                }
-            }
             
             // Cắt nến bộ nhớ: Đảm bảo cửa sổ luôn chứa nến mở vị thế (live_entry_bar) và padding an toàn
             let max_mem = if let Some(ref pos) = live_position {
@@ -452,22 +416,6 @@ impl AssetActor {
                         "⚡ [INTRA-CANDLE EXIT] Symbol: {} | Position {} entry {:.2} was CLOSED during candle {} (bar_idx: {}) at est. {:.2} (Est PnL: {:+.2})",
                         self.symbol, side_str, p.entry_price, candle.timestamp, current_bar_idx, exit_price, trade_pnl
                     );
-
-                    // 🛑 KÍCH HOẠT COOLDOWN GUARD: Nếu cắt lỗ hoặc hòa vốn danh nghĩa (PnL <= 0.001)
-                    if self.cooldown_bars > 0 && trade_pnl <= 0.001 {
-                        let locked_until_ts = candle.timestamp + (self.cooldown_bars as i64 * 60_000);
-                        let locked_until_bar = current_bar_idx + self.cooldown_bars;
-                        self.cooldown_guard = Some(CooldownGuard {
-                            locked_until_ts,
-                            locked_until_bar,
-                            locked_side: side_str.to_string(),
-                            last_exit_price: exit_price,
-                        });
-                        warn!(
-                            "🛑 [COOLDOWN ARMED] Symbol: {} | Side: {} | Entry: {:.2} -> Exit: {:.2} (Est PnL: {:+.2}) | Locked until bar {} (ts: {}, {} bars / {}m)",
-                            self.symbol, side_str, p.entry_price, exit_price, trade_pnl, locked_until_bar, locked_until_ts, self.cooldown_bars, self.cooldown_bars
-                        );
-                    }
                 }
 
                 // 🔄 LOCK DNA ON ACTIVE TRADE: Kích hoạt ngay Pending DNA nếu vị thế vừa đóng bởi Trailing SL/TP
@@ -515,28 +463,8 @@ impl AssetActor {
                                 continue;
                             }
 
-                            // TẦNG 2: KIỂM TRA COOLDOWN LIÊN NẾN (Inter-Candle Cooldown)
-                            if let Some(ref guard) = self.cooldown_guard {
-                                if guard.locked_side == order_side {
-                                    let price_diff = (current_close - guard.last_exit_price).abs();
-                                    let breakout_threshold = guard.last_exit_price * 0.015; // 1.5% breakout
-                                    if price_diff < breakout_threshold {
-                                        warn!(
-                                            "🛡️ [COOLDOWN BLOCKED] Symbol: {} | Order {:?} BLOCKED by Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2}, Current Close: {:.2}, Diff: {:.2} < {:.2} (1.5%)",
-                                            self.symbol, action, guard.locked_until_bar, guard.locked_until_bar.saturating_sub(current_bar_idx),
-                                            guard.last_exit_price, current_close, price_diff, breakout_threshold
-                                        );
-                                        continue;
-                                    } else {
-                                        info!(
-                                            "⚡ [COOLDOWN VOLATILITY OVERRIDE] Symbol: {} | Price moved {:.2} >= {:.2} from last exit {:.2} -> Early release Cooldown!",
-                                            self.symbol, price_diff, breakout_threshold, guard.last_exit_price
-                                        );
-                                        self.cooldown_guard = None;
-                                    }
-                                }
-                            }
-
+                            // Lưu ý: Toàn bộ cơ chế Cooldown liên nến (Inter-Candle Cooldown & Directional Early Release)
+                            // đã được ủy quyền 100% cho HeliosStrategyV3 (Single Source of Truth), loại bỏ hoàn toàn lệch pha.
                             valid_actions.push(action);
                         }
                         _ => {
@@ -562,34 +490,8 @@ impl AssetActor {
                 self.execution_engine.on_account_event(&acc_evt).await;
             }
 
-            // Kích hoạt Cooldown nếu vị thế vừa đóng bởi Action ở Bước 3.4 (ví dụ ClosePosition / Stagnant Decay)
-            let pos_post_action = self.execution_engine.get_position();
-            if pos_after.is_some() && pos_post_action.is_none() {
-                if let Some(ref p) = pos_after {
-                    let side_str = if p.position_amt > 0.0 { "LONG" } else { "SHORT" };
-                    let trade_pnl = if p.position_amt > 0.0 {
-                        current_close - p.entry_price
-                    } else {
-                        p.entry_price - current_close
-                    };
-                    if self.cooldown_bars > 0 && trade_pnl <= 0.001 {
-                        let locked_until_ts = candle.timestamp + (self.cooldown_bars as i64 * 60_000);
-                        let locked_until_bar = current_bar_idx + self.cooldown_bars;
-                        self.cooldown_guard = Some(CooldownGuard {
-                            locked_until_ts,
-                            locked_until_bar,
-                            locked_side: side_str.to_string(),
-                            last_exit_price: current_close,
-                        });
-                        warn!(
-                            "🛑 [COOLDOWN ARMED (ACTION EXIT)] Symbol: {} | Side: {} | Entry: {:.2} -> Exit: {:.2} (PnL: {:+.2}) | Locked until bar {} (ts: {}, {} bars / {}m)",
-                            self.symbol, side_str, p.entry_price, current_close, trade_pnl, locked_until_bar, locked_until_ts, self.cooldown_bars, self.cooldown_bars
-                        );
-                    }
-                }
-            }
-
             // 🔄 LOCK DNA ON ACTIVE TRADE: Kích hoạt Pending DNA nếu vị thế đã đóng hoàn toàn (Flat) sau khi thực thi Action
+            let pos_post_action = self.execution_engine.get_position();
             if pos_post_action.is_none() {
                 if let Some(pending) = self.pending_dna.take() {
                     if let Some(ref mut strategy) = self.strategy {

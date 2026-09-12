@@ -1,6 +1,6 @@
 // trading_bot/bot_desktop_client/src/App.tsx
 import { useState, useMemo } from 'react';
-import { PageId, AssetState, AccountState, SystemHealth } from './types/bot';
+import { PageId, AssetState, AccountState, SystemHealth, RebalanceOption } from './types/bot';
 import { 
   INITIAL_MOCK_ASSETS, 
   INITIAL_MOCK_ACCOUNT, 
@@ -229,10 +229,44 @@ function App() {
   };
 
   /**
-   * 8. Mở Modal Điều Chuyển Vốn
+   * 8. Thực hiện Điều chuyển vốn (REBALANCE_CAPITAL)
    */
-  const handleOpenRebalance = (symbol: string) => {
-    console.log(`[Rebalance Trigger] Open rebalance modal for ${symbol}`);
+  const handleConfirmRebalance = async (
+    fromSymbol: string,
+    toSymbol: string,
+    amount: number,
+    option: RebalanceOption
+  ) => {
+    setAssets(prev => prev.map(a => {
+      if (a.symbol === fromSymbol) {
+        const isClosingNow = option === 'CLOSE_IMMEDIATELY';
+        return {
+          ...a,
+          allocatedCapital: Math.max(10.0, a.allocatedCapital - amount),
+          status: isClosingNow ? 'INACTIVE' : a.status,
+          position: isClosingNow 
+            ? { side: 'FLAT', qty: 0, entryPrice: 0, unrealizedPnl: 0, unrealizedPnlPct: 0 }
+            : a.position,
+          recentLogs: [
+            ...a.recentLogs,
+            `[${new Date().toLocaleTimeString()}] ⚙️ Rebalance: Transferred -$${amount} to ${toSymbol} (${option === 'APPLY_NEXT_TRADE' ? 'Applied on Next Trade' : 'Closed Immediately'}).`,
+          ],
+        };
+      }
+      if (a.symbol === toSymbol) {
+        return {
+          ...a,
+          allocatedCapital: a.allocatedCapital + amount,
+          recentLogs: [
+            ...a.recentLogs,
+            `[${new Date().toLocaleTimeString()}] ⚙️ Rebalance: Received +$${amount} from ${fromSymbol}. New capital: $${(a.allocatedCapital + amount).toFixed(2)}.`,
+          ],
+        };
+      }
+      return a;
+    }));
+
+    await BotService.rebalanceCapital(fromSymbol, toSymbol, amount, option);
   };
 
   /**
@@ -277,7 +311,7 @@ function App() {
               onGracefulStop={handleGracefulStop}
               onCancelGracefulStop={handleCancelGracefulStop}
               onForceStop={handleForceStop}
-              onOpenRebalance={handleOpenRebalance}
+              onConfirmRebalance={handleConfirmRebalance}
             />
           )}
 
