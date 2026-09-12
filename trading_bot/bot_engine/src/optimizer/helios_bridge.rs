@@ -235,19 +235,6 @@ impl HeliosBridge {
                     pos.live_entry_bar.saturating_sub(slice_start)
                 };
 
-                // 🔒 SENSOR PROBE: Bắt hiện tượng Take Profit Tĩnh bị đóng băng (Static TP Lock)
-                if let (Some(tp), Some(tag)) = (pos.current_tp_price, &pos.opening_playbook_tag) {
-                    if tag == "RANGE_OSC" {
-                        let current_close = candles[last_idx].close;
-                        let diff = (current_close - tp).abs();
-                        warn!(
-                            "🔒 [STATIC TP FROZEN SENSOR] Symbol: {} | Playbook: RANGE_OSC | Locked TP: {:.2} | Current Close: {:.2} (Diff: {:.2}) \
-                            | Strategy preserves static trade.tp_price without trailing to dynamic bands!",
-                            _symbol, tp, current_close, diff
-                        );
-                    }
-                }
-
                 let mut trade = ferro_trade::broker::trade::Trade::new(
                     1,
                     pos.position_amt,
