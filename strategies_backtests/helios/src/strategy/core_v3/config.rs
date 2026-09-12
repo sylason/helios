@@ -661,6 +661,11 @@ pub struct RiskStopParams {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub re_entry_cooldown_bars: usize,
 
+    /// Hệ Số ATR Bứt Phá Định Hướng Để Giải Phóng Sớm Khỏi Cooldown (0.5 -> 4.0 ATR, Step 0.25 -> 15 nấc)
+    #[dna(min = 0.5, max = 4.0, step = 0.25)]
+    #[serde(default = "default_cooldown_breakout_atr_mult")]
+    pub cooldown_breakout_atr_mult: f64,
+
     // =========================================================================
     // 8. CƠ CHẾ CHỐT LỜI ĐỘNG LAI (HYBRID TRAILING TAKE PROFIT - FLAW-TSL.1)
     // =========================================================================
@@ -678,6 +683,10 @@ pub struct RiskStopParams {
     #[dna(min = 0.001, max = 0.008, step = 0.0005)]
     #[serde(default = "default_dynamic_tp_min_gain_pct")]
     pub dynamic_tp_min_gain_pct: f64,
+}
+
+fn default_cooldown_breakout_atr_mult() -> f64 {
+    1.5
 }
 
 fn default_sl_roe_cap() -> f64 {

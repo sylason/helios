@@ -235,38 +235,37 @@ impl Strategy for HeliosStrategyV3 {
 
         if decision.is_approved {
             if let Some(signal) = decision.final_signal {
-                // 4. KIỂM TRA BỘ LỌC RE-ENTRY COOLDOWN
+                // 4. KIỂM TRA BỘ LỌC RE-ENTRY COOLDOWN (FLAW-TSL.7: UNIVERSAL BIDIRECTIONAL COOLDOWN & DIRECTIONAL EARLY RELEASE)
                 let stop_cfg = &self.config.risk_management.stop_management;
                 if stop_cfg.enable_re_entry_cooldown && i < self.cooldown_tracker.locked_until_bar {
-                    if self.cooldown_tracker.locked_side == Some(signal) {
-                        let current_price = tick.closes()[i];
-                        let current_atr = self.sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
-                        
-                        // 🎯 SỬA FLAW-4.3: Kiểm tra bứt phá định hướng (Directional Breakout) thay vì dùng .abs()
-                        // Với Long: Chỉ mở khóa nếu giá HỒI PHỤC TĂNG NGƯỢC LÊN (current_price - last_exit >= 1.5 * ATR)
-                        // Với Short: Chỉ mở khóa nếu giá TIẾP TỤC GIẢM SÂU HƠN (last_exit - current_price >= 1.5 * ATR)
-                        let is_favorable_breakout = if signal == SignalType::Long {
-                            (current_price - self.cooldown_tracker.last_exit_price) >= 1.5 * current_atr
-                        } else {
-                            (self.cooldown_tracker.last_exit_price - current_price) >= 1.5 * current_atr
-                        };
+                    let current_price = tick.closes()[i];
+                    let current_atr = self.sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+                    let mult = if stop_cfg.cooldown_breakout_atr_mult <= 0.0 { 1.5 } else { stop_cfg.cooldown_breakout_atr_mult };
+                    let threshold = mult * current_atr;
+                    
+                    // 🎯 SỬA FLAW-TSL.7: Khóa 2 chiều chống bẫy Alternating Whipsaw ở đỉnh/đáy.
+                    // Với Long: Chỉ mở khóa sớm nếu giá HỒI PHỤC TĂNG VƯỢT LÊN (current_price - last_exit >= mult * ATR)
+                    // Với Short: Chỉ mở khóa sớm nếu giá SẬP GÃY GIẢM SÂU XUỐNG (last_exit - current_price >= mult * ATR)
+                    let is_favorable_breakout = if signal == SignalType::Long {
+                        (current_price - self.cooldown_tracker.last_exit_price) >= threshold
+                    } else {
+                        (self.cooldown_tracker.last_exit_price - current_price) >= threshold
+                    };
 
-                        if !is_favorable_breakout {
-                            if self.debug_mode {
-                                let diff = if signal == SignalType::Long {
-                                    current_price - self.cooldown_tracker.last_exit_price
-                                } else {
-                                    self.cooldown_tracker.last_exit_price - current_price
-                                };
-                                warn!(
-                                    "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | FavorableDiff: {:+.2} < 1.5*ATR ({:.2})",
-                                    i, signal, self.cooldown_tracker.locked_until_bar, self.cooldown_tracker.locked_until_bar.saturating_sub(i),
-                                    self.cooldown_tracker.last_exit_price, current_price, diff, 1.5 * current_atr
-                                );
-                            }
-                            // Chưa đủ bứt phá biến động có lợi -> CHẶN BẮT DAO RƠI & CÀO LỆNH RÁC!
-                            return;
+                    if !is_favorable_breakout {
+                        if self.debug_mode {
+                            let diff = if signal == SignalType::Long {
+                                current_price - self.cooldown_tracker.last_exit_price
+                            } else {
+                                self.cooldown_tracker.last_exit_price - current_price
+                            };
+                            warn!(
+                                "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Bidirectional Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | FavorableDiff: {:+.2} < {:.2}*ATR ({:.2})",
+                                i, signal, self.cooldown_tracker.locked_until_bar, self.cooldown_tracker.locked_until_bar.saturating_sub(i),
+                                self.cooldown_tracker.last_exit_price, current_price, diff, mult, threshold
+                            );
                         }
+                        return;
                     }
                 }
                 let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
@@ -341,26 +340,26 @@ mod tests {
         enable_cooldown: bool,
         current_bar: usize,
         locked_until_bar: usize,
-        locked_side: Option<SignalType>,
         signal: SignalType,
         current_price: f64,
         last_exit_price: f64,
         atr: f64,
+        atr_mult: f64,
     ) -> bool {
         if !enable_cooldown {
             return false;
         }
         if current_bar < locked_until_bar {
-            if locked_side == Some(signal) {
-                // 🎯 SỬA FLAW-4.3: Kiểm tra bứt phá định hướng có lợi
-                let is_favorable_breakout = if signal == SignalType::Long {
-                    (current_price - last_exit_price) >= 1.5 * atr
-                } else {
-                    (last_exit_price - current_price) >= 1.5 * atr
-                };
-                if !is_favorable_breakout {
-                    return true; // Bị chặn bởi Cooldown (chống bắt dao rơi / cào lệnh rác)
-                }
+            let mult = if atr_mult <= 0.0 { 1.5 } else { atr_mult };
+            let threshold = mult * atr.max(1e-5);
+            // 🎯 SỬA FLAW-TSL.7: Khóa 2 chiều chống bẫy Alternating Whipsaw
+            let is_favorable_breakout = if signal == SignalType::Long {
+                (current_price - last_exit_price) >= threshold
+            } else {
+                (last_exit_price - current_price) >= threshold
+            };
+            if !is_favorable_breakout {
+                return true; // Bị chặn bởi Cooldown 2 chiều
             }
         }
         false
@@ -373,11 +372,11 @@ mod tests {
             false,
             10,
             20,
-            Some(SignalType::Long),
             SignalType::Long,
             1760.0,
             1760.5,
             5.0,
+            1.5,
         );
         assert!(!blocked, "Khi tắt Cooldown, không được chặn lệnh");
     }
@@ -389,61 +388,77 @@ mod tests {
             true,
             10,
             25,
-            Some(SignalType::Long),
             SignalType::Long,
             1760.0,
             1760.5,
             5.0, // 1.5 * ATR = 7.5; diff = 0.5 < 7.5
+            1.5,
         );
         assert!(blocked, "Cùng chiều trong vùng nén phải bị chặn");
     }
 
     #[test]
-    fn test_cooldown_opposite_side_allowed() {
-        // Khi BẬT, nhưng tín hiệu ngược chiều (Short) -> KHÔNG ĐƯỢC CHẶN
+    fn test_cooldown_opposite_side_in_range_blocked() {
+        // 🎯 SỬA FLAW-TSL.7: Khi BẬT, tín hiệu ngược chiều (Short) nhưng giá lình xình trong vùng nhiễu -> PHẢI BỊ CHẶN!
+        // Chống tuyệt đối bẫy Alternating Whipsaw vừa cắt lỗ Long ở đáy lại Short ở đáy.
         let blocked = should_block_by_cooldown(
             true,
             10,
             25,
-            Some(SignalType::Long),
-            SignalType::Short, // Tín hiệu đảo chiều
+            SignalType::Short, // Tín hiệu ngược chiều
             1760.0,
+            1760.5, // diff = 1760.5 - 1760.0 = 0.5 < 7.5
+            5.0,
+            1.5,
+        );
+        assert!(blocked, "Ngược chiều trong vùng nhiễu đáy PHẢI BỊ CHẶN để chống Whipsaw 2 đầu!");
+    }
+
+    #[test]
+    fn test_cooldown_opposite_side_breakout_allowed() {
+        // 🎯 SỬA FLAW-TSL.7: Tín hiệu ngược chiều (Short) khi thị trường thực sự sập gãy mạnh -> MỞ KHÓA SỚM!
+        let blocked = should_block_by_cooldown(
+            true,
+            10,
+            25,
+            SignalType::Short,
+            1750.0, // Giá sập từ 1760.5 xuống 1750.0 (diff = 10.5 >= 1.5 * 5.0 = 7.5)
             1760.5,
             5.0,
+            1.5,
         );
-        assert!(!blocked, "Ngược chiều không được chặn Cooldown");
+        assert!(!blocked, "Ngược chiều nhưng sập gãy vượt k*ATR phải được giải phóng sớm!");
     }
 
     #[test]
     fn test_cooldown_volatility_breakout_override() {
-        // Khi BẬT, cùng chiều, nhưng giá bứt phá TĂNG NGƯỢC LÊN >= 1.5*ATR -> MỞ KHÓA SỚM
+        // Khi BẬT, cùng chiều, nhưng giá bứt phá TĂNG NGƯỢC LÊN >= k*ATR -> MỞ KHÓA SỚM
         let blocked = should_block_by_cooldown(
             true,
             10,
             25,
-            Some(SignalType::Long),
             SignalType::Long,
             1770.0, // diff = 1770.0 - 1760.0 = +10.0 >= 1.5*5.0 (7.5) -> Tăng có lợi
             1760.0,
             5.0,
+            1.5,
         );
         assert!(!blocked, "Bứt phá biến động tăng mạnh phải mở khóa Cooldown sớm");
     }
 
     #[test]
     fn test_cooldown_falling_knife_blocked() {
-        // 🎯 KIỂM CHỨNG FLAW-4.3: Giá tiếp tục sập hầm giảm sâu 10 USD (1750 < 1760)
-        // Code cũ dùng .abs() sẽ tính |1750 - 1760| = 10 > 7.5 và mở khóa bậy bạ!
-        // Code mới phát hiện giá đang rơi tự do -> TIẾP TỤC CHẶN COOLDOWN!
+        // 🎯 KIỂM CHỨNG FLAW-4.3 & FLAW-TSL.7: Giá sập hầm giảm sâu 10 USD (1750 < 1760)
+        // Nếu phát tín hiệu Long bắt dao rơi -> TIẾP TỤC CHẶN COOLDOWN!
         let blocked = should_block_by_cooldown(
             true,
             10,
             25,
-            Some(SignalType::Long),
             SignalType::Long,
             1750.0, // Giá sập hầm từ 1760 về 1750
             1760.0,
             5.0,
+            1.5,
         );
         assert!(blocked, "Giá sập hầm rơi tự do PHẢI BỊ CHẶN COOLDOWN, cấm bắt dao rơi!");
     }
@@ -455,13 +470,89 @@ mod tests {
             true,
             26,
             25,
-            Some(SignalType::Long),
             SignalType::Long,
             1760.0,
             1760.5,
             5.0,
+            1.5,
         );
         assert!(!blocked, "Hết thời gian nghỉ phải cho phép vào lệnh");
+    }
+
+    #[test]
+    fn test_cooldown_dynamic_dna_multiplier() {
+        // 🎯 KIỂM CHỨNG DẢI DNA ĐỘNG: atr_mult = 2.5 (threshold = 2.5 * 5.0 = 12.5)
+        // Khi diff = +10.0 (1770 - 1760): Trước đây 1.5 thì mở khóa, nhưng với 2.5 thì VẪN BỊ CHẶN!
+        let blocked_at_2_5 = should_block_by_cooldown(
+            true,
+            10,
+            25,
+            SignalType::Long,
+            1770.0,
+            1760.0,
+            5.0,
+            2.5, // Ngưỡng bứt phá cao hơn
+        );
+        assert!(blocked_at_2_5, "Với atr_mult = 2.5, bứt phá +10.0 < 12.5 vẫn phải bị chặn");
+
+        // Khi diff = +13.0 (1773 - 1760 >= 12.5) -> ĐƯỢC MỞ KHÓA!
+        let unlocked_at_2_5 = should_block_by_cooldown(
+            true,
+            10,
+            25,
+            SignalType::Long,
+            1773.0,
+            1760.0,
+            5.0,
+            2.5,
+        );
+        assert!(!unlocked_at_2_5, "Bứt phá +13.0 >= 12.5 phải được mở khóa");
+    }
+
+    #[test]
+    fn test_bidirectional_cooldown_blocks_both_sides() {
+        // 🎯 KIỂM CHỨNG FLAW-TSL.7 (BƯỚC 1): Sau khi cắt lỗ/hòa vốn, cả Long và Short đều bị khóa nếu trong vùng nhiễu
+        let exit_p = 2500.0;
+        let atr = 10.0;
+        let k = 1.5; // Ngưỡng bứt phá = 15.0 USD (vùng nhiễu: [2485.0, 2515.0])
+
+        // Giá lình xình tại 2505.0 (+5.0):
+        // Long bị chặn (diff = +5.0 < 15.0)
+        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Long, 2505.0, exit_p, atr, k), "Long trong vùng nhiễu phải bị chặn");
+        // Short bị chặn (diff = -5.0 < 15.0)
+        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Short, 2505.0, exit_p, atr, k), "Short trong vùng nhiễu phải bị chặn");
+
+        // Giá lình xình tại 2495.0 (-5.0):
+        // Long bị chặn (diff = -5.0 < 15.0)
+        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Long, 2495.0, exit_p, atr, k), "Long lình xình dưới đáy phải bị chặn");
+        // Short bị chặn (diff = +5.0 < 15.0)
+        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Short, 2495.0, exit_p, atr, k), "Short lình xình dưới đáy phải bị chặn");
+    }
+
+    #[test]
+    fn test_directional_early_release_long_breakout() {
+        // 🎯 KIỂM CHỨNG FLAW-TSL.7 (BƯỚC 2): Giá bốc đầu tăng mạnh >= k*ATR (2520.0 - 2500.0 = +20.0 >= 15.0)
+        let exit_p = 2500.0;
+        let atr = 10.0;
+        let k = 1.5;
+
+        // Long được mở khóa sớm
+        assert!(!should_block_by_cooldown(true, 5, 20, SignalType::Long, 2520.0, exit_p, atr, k), "Long bứt phá tăng mạnh phải được giải phóng sớm");
+        // Short bị chặn triệt để (chống cản tàu khi giá đang bốc đầu: diff = 2500 - 2520 = -20 < 15)
+        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Short, 2520.0, exit_p, atr, k), "Cấm tuyệt đối Short cản tàu khi giá đang bốc đầu");
+    }
+
+    #[test]
+    fn test_directional_early_release_short_breakout() {
+        // 🎯 KIỂM CHỨNG FLAW-TSL.7 (BƯỚC 3): Giá sập gãy mạnh >= k*ATR (2500.0 - 2480.0 = +20.0 >= 15.0)
+        let exit_p = 2500.0;
+        let atr = 10.0;
+        let k = 1.5;
+
+        // Short được mở khóa sớm
+        assert!(!should_block_by_cooldown(true, 5, 20, SignalType::Short, 2480.0, exit_p, atr, k), "Short bứt phá sập gãy phải được giải phóng sớm");
+        // Long bị chặn triệt để (chống bắt dao rơi khi giá đang rơi tự do: diff = 2480 - 2500 = -20 < 15)
+        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Long, 2480.0, exit_p, atr, k), "Cấm tuyệt đối Long bắt dao rơi khi giá đang sập hầm");
     }
 
     #[test]
@@ -647,11 +738,13 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 112, "DNA_WIDTH phải là chính xác 112 chiều sau khi tích hợp default_sl_roe_cap (FLAW-TSL.8)!");
+        assert_eq!(width, 113, "DNA_WIDTH phải là chính xác 113 chiều sau khi tích hợp cooldown_breakout_atr_mult (FLAW-TSL.7)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
+        let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
         assert!(!has_macd, "defs không được chứa macd!");
         assert!(!has_vol_ma, "defs không được chứa vol_ma!");
+        assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
 
         // Thử cập nhật với vector toàn 0.0 (giả sử GA sinh số 0)
         let zeros = vec![0.0; width];
