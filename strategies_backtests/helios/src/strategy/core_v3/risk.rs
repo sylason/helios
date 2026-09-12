@@ -40,18 +40,22 @@ impl RiskManager {
         let roe_cap = if max_sl_roe_cap <= 0.0 { 0.20 } else { max_sl_roe_cap };
         let min_pct = if min_initial_sl_pct <= 0.0 { 0.0015 } else { min_initial_sl_pct };
 
-        // Quy đổi trần ROE thành khoảng cách giá theo đòn bẩy thực tế
+        // 1. Trần khoảng cách giá tối đa theo đòn bẩy thực tế (RÀNG BUỘC CỨNG BẤT KHẢ XÂM PHẠM)
         let cap_price_pct = roe_cap / lev;
-        // Min Distance Floor Guard: Bảo đảm trần không bao giờ nhỏ hơn sàn an toàn (chống kẹp ngược)
-        let effective_cap = cap_price_pct.max(min_pct);
+
+        // 2. Sàn khoảng cách tối thiểu chống quét spread/noise (PHẢI LUÔN NẰM DƯỚI TRẦN)
+        // Áp dụng tỷ lệ an toàn 50% trần: Sàn tối đa chỉ được chiếm 50% khoảng cách của Trần ROE.
+        // Đảm bảo không bao giờ có nghịch lý Sàn >= Trần, mở ra khoảng [effective_min_pct, cap_price_pct] linh hoạt.
+        let effective_min_pct = min_pct.min(cap_price_pct * 0.50);
+        let effective_cap = cap_price_pct;
 
         if is_long {
-            let max_allowed_sl = price * (1.0 - min_pct);       // SL gần nhất (chống cắn spread)
-            let min_allowed_sl = price * (1.0 - effective_cap); // SL xa nhất (khống chế lỗ tối đa)
+            let max_allowed_sl = price * (1.0 - effective_min_pct); // SL gần nhất (chống cắn spread)
+            let min_allowed_sl = price * (1.0 - effective_cap);     // SL xa nhất (khống chế lỗ tối đa)
             sl_price.min(max_allowed_sl).max(min_allowed_sl)
         } else {
-            let min_allowed_sl = price * (1.0 + min_pct);       // SL gần nhất
-            let max_allowed_sl = price * (1.0 + effective_cap); // SL xa nhất
+            let min_allowed_sl = price * (1.0 + effective_min_pct); // SL gần nhất
+            let max_allowed_sl = price * (1.0 + effective_cap);     // SL xa nhất
             sl_price.max(min_allowed_sl).min(max_allowed_sl)
         }
     }
@@ -277,10 +281,10 @@ impl RiskManager {
                 }
             }
 
-            // [FLAW-TSL.8: DYNAMIC LEVERAGE ROE CAP & FLOOR GUARD]
+            // [FLAW-TSL.8: DYNAMIC LEVERAGE ROE CAP & UNIVERSAL FLOOR GUARD]
             // Xóa bỏ vĩnh viễn magic number 0.80 / leverage (-80% ROE)
             let cap_price_pct = playbook_max_sl_roe / leverage;
-            let effective_cap = cap_price_pct.max(risk_cfg.min_initial_sl_pct);
+            let effective_cap = cap_price_pct;
 
             let mut calculated_sl = if trade.is_long() {
                 let raw_sl = peak_val - (current_atr * current_multiplier);
@@ -515,12 +519,13 @@ mod tests {
         let expected_max_sl = price * (1.0 - min_initial_sl_pct); // 2495.0
         assert_eq!(clamped_close, expected_max_sl, "SL quá gần phải bị kẹp bởi sàn min_pct");
 
-        // 3. Min Distance Floor Guard khi đòn bẩy cao (50x, ROE Cap 4% -> 0.08% giá < 0.2% sàn)
+        // 3. Universal Floor Guard khi đòn bẩy cao (50x, ROE Cap 4% -> 0.08% giá = 2 giá)
+        // Trần ROE 4% (0.08% giá) luôn được bảo toàn tuyệt đối, Sàn co lại còn 50% trần (0.04% giá = 1 giá)
         let nuke_leverage = 50.0;
-        let small_roe_cap = 0.04; // 4% ROE / 50x = 0.08% giá
+        let small_roe_cap = 0.04; // 4% ROE / 50x = 0.08% giá (2.0 giá)
         let clamped_nuke = RiskManager::clamp_sl_price(price, too_far_sl, is_long, small_roe_cap, min_initial_sl_pct, nuke_leverage);
-        let expected_floor_sl = price * (1.0 - min_initial_sl_pct); // Floor Guard nâng trần lên bằng sàn 0.2% = 2495.0
-        assert_eq!(clamped_nuke, expected_floor_sl, "Floor Guard phải bảo vệ không bị kẹp ngược khi cap < floor");
+        let expected_nuke_sl = price * (1.0 - 0.0008); // 2500 - 2 = 2498.0
+        assert_eq!(clamped_nuke, expected_nuke_sl, "Universal Floor Guard bảo vệ trần ROE 4% (2498.0) tuyệt đối không bị đè bẹp thành 2495.0");
     }
 
     #[test]
@@ -728,9 +733,33 @@ mod tests {
 
         let too_far_sl = 40000.0;
         let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, small_roe_cap, min_initial_sl_pct, leverage);
-        // Floor Guard: cap_price_pct (0.0004) < min_pct (0.0015) -> effective_cap = 0.0015
-        let expected_sl = price * (1.0 - 0.0015); // 50000 * 0.9985 = 49925.0
-        assert_eq!(clamped, expected_sl, "Đòn bẩy 100x cực đoan: Floor Guard phải bảo vệ không bị crash kẹp ngược");
+        // Universal Adaptive Floor Guard:
+        // cap_price_pct = 0.0004 (20 giá = 4% ROE)
+        // effective_min_pct = min(0.0015, 0.0004 * 0.5) = 0.0002 (10 giá = 2% ROE)
+        // effective_cap = 0.0004 (20 giá = 4% ROE)
+        let expected_sl = price * (1.0 - 0.0004); // 50000 * 0.9996 = 49980.0
+        assert_eq!(clamped, expected_sl, "Đòn bẩy 100x cực đoan: Trần ROE 4% phải được bảo toàn tuyệt đối không bị đè bẹp");
+    }
+
+    #[test]
+    fn test_clamp_sl_price_floor_guard_never_exceeds_roe_cap() {
+        // Tái hiện chính xác tình huống Log 34 (Lệnh #003 RANGE_OSC)
+        let price = 2447.37;
+        let is_long = true;
+        let range_roe_cap = 0.20; // 20% ROE trần cho Range
+        let min_initial_sl_pct = 0.0355; // GA Optimizer chọn sàn spread 3.55% giá
+        let leverage = 20.0;
+
+        let raw_sl = 2360.49; // SL cách tới 3.55% giá (71% ROE)
+        let clamped = RiskManager::clamp_sl_price(price, raw_sl, is_long, range_roe_cap, min_initial_sl_pct, leverage);
+        
+        // cap_price_pct = 0.20 / 20.0 = 0.010 (1.0% giá)
+        // effective_cap = 0.010 -> SL xa nhất cho phép: 2447.37 * (1 - 0.01) = 2422.8963
+        let expected_sl = price * (1.0 - 0.010);
+        assert!((clamped - expected_sl).abs() < 1e-4, "SL bắt buộc phải bị chặn tại trần 20% ROE (2422.90), không được dạt ra 2360.49 (71% ROE)");
+        
+        let roe_loss = ((price - clamped) / price) * leverage;
+        assert!((roe_loss - 0.20).abs() < 1e-4, "Mức lỗ tối đa ROE phải đúng bằng 20%");
     }
 
     #[test]
