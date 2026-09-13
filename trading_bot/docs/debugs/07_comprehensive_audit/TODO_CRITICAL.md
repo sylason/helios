@@ -298,22 +298,24 @@
        - `TacticalPullbackParams`: `[0.10 -> 4.00, step = 0.15]`, default `0.5`.
        - `TacticalMomentumParams`: `[0.10 -> 3.00, step = 0.15]`, default `0.3`.
        - `TacticalRangeParams`: `[0.10 -> 3.00, step = 0.15]`, default `0.3`.
-       - `TacticalAbsorptionParams`: `[0.10 -> 4.00, step = 0.15]`, default `0.5`.
+       - `TacticalAbsorptionParams`: `[0.25 -> 10.00, step = 0.25]`, default `2.0` (40 nấc, tối ưu cho GA thích ứng mọi biên độ).
     2. **Bảo toàn bản sắc Stop Loss vi mô theo cấu trúc Price Action:**
        - `TrendPullback`: Neo SL dưới `min(Low, KAMA) - buffer` (Long) / trên `max(High, KAMA) + buffer` (Short).
        - `MomentumIgnition`: Neo SL dưới đáy nến bùng nổ `Low - buffer` (Long) / trên đỉnh nến `High + buffer` (Short).
        - `RangeOscillator`: Neo SL ngoài biên dải Bollinger Bands `min(Low, BB_Lower) - buffer` (Long) / `max(High, BB_Upper) + buffer` (Short).
-       - `AbsorptionScout`: Neo SL dưới/trên vùng nén hấp thụ thanh khoản `min(Low, BB_Middle) - buffer` (Long) / `max(High, BB_Middle) + buffer` (Short).
+       - `AbsorptionScout`: Neo SL ngoài biên hộp nén Squeeze `min(Low, BB_Lower) - buffer` (Long) / `max(High, BB_Upper) + buffer` (Short), triệt tiêu hoàn toàn bẫy kẹp SL quá chặt ở `BB_Middle`.
     3. **Sanity Guard hình học:** Đảm bảo SL luôn nằm đúng phía của giá (Long ở dưới, Short ở trên) và cách giá ít nhất `max(buffer, close * 0.002)`.
-    4. **Kiểm thử toàn diện 100% Pass:** Cập nhật test DNA_WIDTH = 117 và bổ sung unit test `test_structural_sl_per_playbook_integrity` kiểm chứng cả 4 Scanners (32/32 helios + 34/34 bot_engine = 66/66 unit tests pass).
+    4. **Kiểm thử toàn diện 100% Pass:** Đã có bộ unit test `test_structural_sl_per_playbook_integrity` kiểm chứng cả 4 Scanners.
 
-- [x] **FLAW-TSL.7:** **Bẫy Alternating Whipsaw (Vào Lệnh Trả Thù So Le 2 Đầu Do Cooldown Chỉ Khóa 1 Chiều)** `[ĐÃ SỬA ✅]`
+- [x] **FLAW-TSL.7:** **Bẫy Alternating Whipsaw & Lệch Pha Cooldown Giữa Strategy Và Real-Time Engine** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs) & [`strategies_backtests/helios/src/strategy/core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs) & [`config.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs)
-  - *Đã xử lý (Universal Bidirectional Cooldown & Directional Early Release):*
-    1. **Khóa 2 chiều tuyệt đối (Bidirectional Cooldown):** Khi lệnh trước bị cắt lỗ/hòa vốn danh nghĩa (`trade_pnl <= 0.001`), bot khóa CẢ 2 CHIỀU Long & Short trong `re_entry_cooldown_bars` nến. Triệt tiêu 100% bẫy vào lệnh ngược chiều ở đỉnh/đáy.
-    2. **Directional Early Release theo DNA gene (`cooldown_breakout_atr_mult`):** Mở rộng dải DNA `[min = 0.5, max = 4.0, step = 0.25]` (default `1.5`, DNA Helios đạt 113 chiều). Đánh thức bot sớm nếu giá Long bứt phá tăng vượt mức thoát $\ge k \times ATR$ hoặc Short sập gãy sâu vượt mức thoát $\ge k \times ATR$. Cấm tuyệt đối Long bắt dao rơi hoặc Short cản tàu.
-    3. **Single Source of Truth:** Gỡ bỏ hoàn toàn `CooldownGuard` và biến đếm 15 bars tự phát với lỗi `.abs()` ở `AssetActor`. Giữ nguyên 100% chốt chặn an toàn hạ tầng cấm mở lệnh trên cùng cây nến vừa đóng vị thế (`closed_intra_candle`).
-    4. **Kiểm thử toàn diện:** Vượt qua 31/31 unit tests Helios và 34/34 unit tests Bot Engine (tổng 65/65 tests pass 100%).
+  - *Đã xử lý (Dual Sentinels - Universal Bidirectional Cooldown & Directional Early Release):*
+    1. **Mô hình Phòng Ngự Kép (Dual Sentinels - Zero Desync):**
+       - `HeliosStrategyV3`: Quản lý `CooldownTracker` cho Backtest & GA Optimizer (Single Source of Truth cho quá trình tối ưu).
+       - `AssetActor`: Do `evaluate_live_tick` chạy trên Dummy Broker nên Strategy không nhận thức được lệnh thật vừa bị cắt lỗ. `AssetActor` được trang bị `EngineCooldownGuard` tại cổng thực thi, đọc trực tiếp tham số DNA từ `self.helios_config` (`re_entry_cooldown_bars`, `cooldown_breakout_atr_mult`).
+    2. **Khóa 2 chiều tuyệt đối (Bidirectional Cooldown):** Khi lệnh thật bị cắt lỗ hoặc hòa vốn danh nghĩa (`trade_pnl <= 0.001`), bot khóa CẢ 2 CHIỀU Long & Short trong `re_entry_cooldown_bars` nến. Triệt tiêu 100% bẫy vào lệnh ngược chiều ở đỉnh/đáy.
+    3. **Directional Early Release theo DNA gene (`cooldown_breakout_atr_mult`):** Mở khóa sớm nếu giá Long bứt phá tăng vượt mức thoát $\ge k \times ATR$ hoặc Short sập gãy sâu vượt mức thoát $\ge k \times ATR$. Cấm tuyệt đối Long bắt dao rơi hoặc Short cản tàu.
+    4. **Kiểm thử toàn diện:** Vượt qua 32/32 unit tests Helios và 38/38 unit tests Bot Engine (tổng 70/70 tests pass 100%).
 
 - [x] **FLAW-TSL.8:** **Hardcode `0.80 / lev` Trong `clamp_sl_price` Cho Phép Lệnh Thua Tới -80% ROE** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:29-66, 105-120, 277-295`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs) & [`config.rs:325-475, 555-565`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs) & [`mod.rs:280-315, 644-650`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)

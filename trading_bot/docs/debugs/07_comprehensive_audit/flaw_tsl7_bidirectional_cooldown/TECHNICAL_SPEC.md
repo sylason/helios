@@ -1,4 +1,4 @@
-﻿# 📑 TÀI LIỆU KỸ THUẬT: FLAW-TSL.7 - UNIVERSAL BIDIRECTIONAL COOLDOWN & DIRECTIONAL EARLY RELEASE
+# 📑 TÀI LIỆU KỸ THUẬT: FLAW-TSL.7 - UNIVERSAL BIDIRECTIONAL COOLDOWN & DIRECTIONAL EARLY RELEASE
 
 > **Mã lỗi:** FLAW-TSL.7  
 > **Dự án liên quan:** strategies_backtests/helios & 	rading_bot/bot_engine  
@@ -41,14 +41,19 @@ Thay vì dựng lên cỗ máy phân tầng phức tạp, hệ thống áp dụn
    - Tín hiệu mới là **LONG**: Chỉ mở khóa sớm nếu giá đã bứt phá tăng vượt lên: Close - ExitPrice >= 1.5 * ATR. (Nếu giá tiếp tục sập sâu thì cấm tuyệt đối Long bắt dao rơi!).
    - Tín hiệu mới là **SHORT**: Chỉ mở khóa sớm nếu giá đã bứt phá sập sâu xuống: ExitPrice - Close >= 1.5 * ATR. (Nếu giá giật tăng tiếp thì cấm tuyệt đối Short cản tàu!).
    - Nếu biến động nhỏ (< 1.5 ATR): Tiếp tục ngủ đủ N nến, bảo vệ vốn tuyệt đối!
-3. **Thống nhất Single Source of Truth:**
-   - Strategy quản lý 100% logic Cooldown.
-   - AssetActor gỡ bỏ bộ đếm 15 bars tự phát, chỉ giữ đúng chốt chặn an toàn hạ tầng: Cấm mở lệnh trên cùng cây nến vừa đóng vị thế (closed_intra_candle).
+3. **Mô Hình Phòng Ngự Kép (Dual Sentinels - Zero Desync):**
+   - **Tầng Chiến Lược (`HeliosStrategyV3`):** Quản lý `CooldownTracker` cho Backtest & GA Optimizer (Single Source of Truth cho quá trình tiến hóa).
+   - **Tầng Thực Thi (`AssetActor`):** Do `evaluate_live_tick` chạy trên Dummy Broker nên Strategy không nhận thức được lệnh thật vừa bị cắt lỗ. Vì vậy, `AssetActor` trang bị `EngineCooldownGuard` tại cổng ra:
+     + Đọc trực tiếp tham số `re_entry_cooldown_bars` và `cooldown_breakout_atr_mult` từ DNA của chiến lược (hoàn toàn Dynamic, loại bỏ hoàn toàn các hằng số cứng tự phát).
+     + Tự động kích hoạt khóa 2 chiều khi phát hiện vị thế thật (PaperTrader/Binance) bị đóng lỗ hoặc hòa vốn danh nghĩa (`trade_pnl <= 0.001`).
+     + Áp dụng chốt chặn kép: Cấm mở lệnh cùng cây nến vừa đóng vị thế (Intra-candle) VÀ cấm mở lệnh nếu chưa thỏa mãn điều kiện Directional Early Release ($\ge k \times ATR$).
 
 ---
 
 ## 3. DANH MỤC FILE THAY ĐỔI & KIỂM THỬ
 
-1. strategies_backtests/helios/src/strategy/core_v3/mod.rs (Cập nhật CooldownTracker & logic Bidirectional Sleep).
-2. 	rading_bot/bot_engine/src/controller/asset_actor.rs (Xóa bỏ cooldown_guard tự phát).
-3. strategies_backtests/helios/src/strategy/core_v3/tests.rs (Cập nhật và thêm bộ test cases Bidirectional Cooldown).
+1. `strategies_backtests/helios/src/strategy/core_v3/mod.rs` (Cập nhật CooldownTracker & logic Bidirectional Sleep trong Strategy).
+2. `strategies_backtests/helios/src/strategy/core_v3/config.rs` (Thêm gene `cooldown_breakout_atr_mult`).
+3. `trading_bot/bot_engine/src/controller/asset_actor.rs` (Triển khai `EngineCooldownGuard` tại cổng thực thi, đọc tham số từ Strategy DNA).
+4. `trading_bot/bot_engine/src/controller/asset_actor.rs` (Thêm unit tests kiểm chứng Engine Cooldown Guard Veto và Directional Early Release).
+5. `strategies_backtests/helios/src/strategy/core_v3/tests.rs` (Bộ unit test Bidirectional Cooldown trong Helios).

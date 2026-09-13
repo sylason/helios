@@ -50,8 +50,8 @@ Mỗi Scanner được trang bị một hệ số đệm biến động ATR đ�
    ```
 4. **`TacticalAbsorptionParams` (`absorption`):**
    ```rust
-   /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.10 -> 4.00 ATR, Step 0.15 -> 27 nấc)
-   #[dna(min = 0.10, max = 4.00, step = 0.15)]
+   /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.25 -> 10.00 ATR, Step 0.25 -> 40 nấc)
+   #[dna(min = 0.25, max = 10.00, step = 0.25)]
    #[serde(default = "default_absorption_sl_buffer_atr")]
    pub struct_sl_buffer_atr: f64,
    ```
@@ -70,9 +70,9 @@ Mỗi Scanner tính toán `suggested_sl` bám sát cản vi mô của mẫu hìn
 3. **`RangeOscillator`:**
    - Long: $\text{SL} = \min(\text{Low}[i], \text{BB\_Lower}[i]) - (\text{current\_atr} \times \text{struct\_sl\_buffer\_atr})$
    - Short: $\text{SL} = \max(\text{High}[i], \text{BB\_Upper}[i]) + (\text{current\_atr} \times \text{struct\_sl\_buffer\_atr})$
-4. **`AbsorptionScout`:**
-   - Long: $\text{SL} = \min(\text{Low}[i], \text{BB\_Middle}[i]) - (\text{current\_atr} \times \text{struct\_sl\_buffer\_atr})$
-   - Short: $\text{SL} = \max(\text{High}[i], \text{BB\_Middle}[i]) + (\text{current\_atr} \times \text{struct\_sl\_buffer\_atr})$
+4. **`AbsorptionScout` (Neo biên hộp nén Squeeze - BB Lower/Upper):**
+   - Long: $\text{SL} = \min(\text{Low}[i], \text{BB\_Lower}[i]) - (\text{current\_atr} \times \text{struct\_sl\_buffer\_atr})$
+   - Short: $\text{SL} = \max(\text{High}[i], \text{BB\_Upper}[i]) + (\text{current\_atr} \times \text{struct\_sl\_buffer\_atr})$
 
 ### 2.3. Chốt Chặn An Toàn (Sanity Guard & Twin Sentinels)
 1. **Sanity Guard Trong Scanner:**
