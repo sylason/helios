@@ -21,8 +21,10 @@ impl TacticalScanner for AbsorptionScanner {
         let squeeze = matrix.squeeze_intensity[i];
         let vwma = sensors.vwma[i];
         let bb_middle = sensors.bb_middle[i];
+        let bb_lower = sensors.bb_lower[i];
+        let bb_upper = sensors.bb_upper[i];
 
-        if vwma.is_nan() || bb_middle.is_nan() {
+        if vwma.is_nan() || bb_middle.is_nan() || bb_lower.is_nan() || bb_upper.is_nan() {
             return None;
         }
 
@@ -50,10 +52,10 @@ impl TacticalScanner for AbsorptionScanner {
             let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
             let buffer = current_atr * abs_cfg.struct_sl_buffer_atr.max(0.05);
 
-            // 🛡️ FLAW-TSL.6: Structural SL neo dưới/trên vùng nén hấp thụ thanh khoản (BB Middle)
+            // 🛡️ FLAW-TSL.6: Structural SL neo dưới dải BB Lower (Long) hoặc trên dải BB Upper (Short) vùng nén
             let sl = match signal_type {
                 SignalType::Long => {
-                    let base_support = low.min(bb_middle);
+                    let base_support = low.min(bb_lower);
                     let mut s = base_support - buffer;
                     if s >= close {
                         s = close - buffer.max(close * 0.002);
@@ -61,7 +63,7 @@ impl TacticalScanner for AbsorptionScanner {
                     s
                 }
                 SignalType::Short => {
-                    let base_resistance = high.max(bb_middle);
+                    let base_resistance = high.max(bb_upper);
                     let mut s = base_resistance + buffer;
                     if s <= close {
                         s = close + buffer.max(close * 0.002);

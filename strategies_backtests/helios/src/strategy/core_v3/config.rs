@@ -492,8 +492,8 @@ pub struct TacticalAbsorptionParams {
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
 
-    /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.10 -> 4.00 ATR, Step 0.15 -> 27 nấc)
-    #[dna(min = 0.10, max = 4.00, step = 0.15)]
+    /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.25 -> 10.00 ATR, Step 0.25 -> 40 nấc)
+    #[dna(min = 0.25, max = 10.00, step = 0.25)]
     #[serde(default = "default_absorption_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
 }
@@ -750,7 +750,7 @@ fn default_range_sl_buffer_atr() -> f64 {
 }
 
 fn default_absorption_sl_buffer_atr() -> f64 {
-    0.5
+    2.0
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
