@@ -2,7 +2,7 @@
 
 > **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 58 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **23/58 lỗi đã được sửa & kiểm thử thành công**, **35/58 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **25/58 lỗi đã được sửa & kiểm thử thành công**, **33/58 lỗi đang chờ xử lý**.
 
 ---
 
@@ -15,9 +15,9 @@
 | **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 12 | 3 | 9 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 8 | 1 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
-| **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 8 | 0 | 8 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Bắt dao rơi Anomaly |
-| **TỔNG CỘNG** | **58** | **23** | **35** |  |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 9 | 0 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
+| **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 8 | 1 | 7 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Bắt dao rơi Anomaly |
+| **TỔNG CỘNG** | **58** | **25** | **33** |  |
 
 ---
 
@@ -327,12 +327,15 @@
     5. **Mở rộng DNA 112 chiều:** Tích hợp `default_sl_roe_cap` vào `RiskStopParams`, bảo toàn 100% tính đơn điệu Monotonic Ratchet. Đã có 5 unit tests chuyên sâu kiểm chứng Spot 1x, Short 20x, Nuke 50x/100x và Untagged Fallback (25/25 Helios + 34/34 Bot Engine = 59/59 tests pass 100%).
 
 
-- [ ] **FLAW-TSL.9:** **Playbook `ABSORPTION` Bị Bội Thực Tín Hiệu (Over-Trading / Churn) Trong Vùng Choppy Market**
+- [x] **FLAW-TSL.9:** **Playbook `ABSORPTION` Bị Bội Thực Tín Hiệu (Over-Trading / Churn) Trong Vùng Choppy Market** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs) & [`arbiter.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs)
   - *Bản chất:* 
     - Trong Log 31 và Log 33, riêng `ABSORPTION` chiếm từ 50% đến 70% tổng số lệnh của toàn hệ thống (17/24 lệnh ở Log 31, 17/34 lệnh ở Log 33) với tỷ lệ thua cao (10/17 lệnh thua ở Log 33).
     - Scanner liên tục thắng thầu trong Arbiter khi thị trường đi ngang có khối lượng ảo, khiến bot bị ngâm lệnh rồi bị Stagnant Decay cắt lỗ liên miên.
-  - *Giải pháp đề xuất:* Bổ sung bộ lọc trạng thái thị trường không xu hướng (Choppiness Index / ADX / Efficiency Ratio) cho Scanner `ABSORPTION`, hoặc siết điều kiện auction confidence của `ABSORPTION` khi thị trường đang ở regime đi ngang (Range / Squeeze).
+  - *Đã xử lý (Tách Regime Compression & Đấu Thầu Động Phân Quyền):*
+    1. **Tách biệt Squeeze khỏi Range:** Không còn gộp chung Nén (Compression) vào Range khiến Absorption hưởng sái điểm cao trong vùng cưa chân bàn.
+    2. **Định lượng 4 trạng thái độc lập:** Absorption được gán trọng số bối cảnh riêng `w_comp_norm` ($w_c = squeeze \times (1 - chaos)$), tách biệt với Clean Range (`w_clean_range_norm`).
+    3. **Ngưỡng phê duyệt động:** `required_confidence = w_t * trend + w_r * range + w_c * comp + w_ch * chaos`. Đưa `min_confidence_compression` vào DNA (118 chiều), giúp GA Optimizer tự nâng trần phê duyệt khi thị trường nhiễu, chấm dứt tình trạng Absorption độc tôn tín hiệu.
 
 ---
 
@@ -341,7 +344,7 @@
 ### 📊 Bảng Đối Chiếu Trạng Thái Thị Trường: Helios V3 Đã Có Gì & Đang Bị "Mù" Ở Đâu?
 
 | Mẫu Thị Trường Cực Đoan | Đặc Điểm Nhận Dạng Vi Mô | Helios V3 Hiện Đã Implement | Điểm Mù (Blind Spot) & Lỗ Hổng Thực Tế | Mức Độ Nguy Cấp |
-| :--- | :--- | :--- | :--- | :---: |
+| :--- | :--- | :--- | :--- | :--- | :---: |
 | **REG-1: Bão Whipsaw Quét Râu 2 Đầu** | Nến đổi màu liên tục, râu nến chiếm $>70\%$, bước đi ngẫu nhiên ($Hurst \approx 0.50$). | `chaos_ratio`, `efficiency_ratio`, `adx_centered`. | 🚨 **Bị mù:** Simplex tính $w_r = 1.0 - \max(w_t, w_v)$. Nhầm Whipsaw thành **Tradable Range 89%**, kích hoạt `RangeOsc` bắt đỉnh/đáy để bị nướng! | 🔴 **Cực cao** |
 | **REG-2: Thanh Khoản Zombie** | $Volume \to 0$, sổ lệnh rỗng, nến dẹp như sợi chỉ. | `vol_z_score`, `squeeze_intensity`. | 🚨 **Tử huyệt Fallback:** Khi Volume $\to 0$, $Z_{\text{vol}}$ bị `NaN`. Code tại `matrix.rs:137` fallback `volume_force = 0.50`! Kích hoạt `Absorption` bắn lệnh vào sổ lệnh rỗng! | 🔴 **Cực cao** |
 | **REG-3: Fat-Tail Kurtosis Spike** | Tin tức shock, nến quét 5-8% 2 đầu, Kurtosis $\kappa \gg 10$. | `z_score`, `anomaly_multiplier`, đẩy $w_v$ lên cao. | 🚨 **Thiếu Cầu Chì:** Arbiter không dừng lại mà lại cấp ưu tiên cao nhất cho `AnomalyFade` cản tàu trước sóng thanh lý! | 🔴 **Cực cao** |
@@ -351,10 +354,14 @@
 
 ### 📝 Chi Tiết 8 Lỗ Hổng Thuộc Nhóm 7:
 
-- [ ] **FLAW-REG.1:** **Simplex Range Bù Trừ Bị Mù Hoàn Toàn Trước Bão Whipsaw**
+- [x] **FLAW-REG.1:** **Simplex Range Bù Trừ Bị Mù Hoàn Toàn Trước Bão Whipsaw** `[ĐÃ SỬA ✅]`
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:142-165`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L142-L165)
   - *Bản chất:* Simplex tính $w_{\text{range}} = 1.0 - \max(w_{\text{trend}}, w_{\text{volatile}})$. Khi bão Whipsaw quét râu 2 đầu xảy ra, ADX $< 20 \implies w_t = 0$. $w_v$ thấp vì NATR tiệm cận SMA(NATR, 50). Ma trận ngộ nhận Whipsaw thành **Ranging hoàn hảo ($w_r \approx 89\%$)**, khiến `RangeOscScanner` nhảy vào bắt đỉnh/đáy Bollinger Bands và bị nướng Stop Loss liên tục.
-  - *Giải pháp đề xuất:* Bổ sung Choppiness Index (CHOP) và Wick Ratio vào `sensors.rs`. Chuyển sang 4-State Simplex Vector: $w_{\text{trend}} + w_{\text{clean\_range}} + w_{\text{volatile}} + w_{\text{chaos\_noise}} \equiv 1.00$. Phạt triệt để trọng số giao dịch khi $w_{\text{chaos\_noise}}$ cao.
+  - *Đã xử lý (4-State Continuous Simplex Vector Decomposition):*
+    1. **Xóa bỏ Range bù trừ mù:** Thay vì $1.0 - \max(w_t, w_v)$, bóc tách 4 trạng thái độc lập: Trend, Clean Range, Compression, Chaos/Whipsaw.
+    2. **Nhận diện Bão Whipsaw chính xác:** $w_{\text{chaos\_raw}} = 0.70 \times \text{chaos\_ratio} + 0.30 \times \text{z\_clipped}$. Khi bão Whipsaw quét 2 đầu, $w_{\text{chaos}}$ vọt lên $81.35\%$ trong khi $w_{\text{clean\_range}}$ bị dìm xuống $9.33\%$, triệt tiêu hoàn toàn điểm mù ngộ nhận Whipsaw thành Tradable Range.
+    3. **Continuous Simplex Normalization:** Luôn bảo đảm tổng $\sum \equiv 1.0000$ (kèm fallback $0.25$ chia đều khi nến warmup gặp NaN).
+    4. **Kiểm thử toàn diện:** Đã kiểm chứng 34/34 unit tests Helios và 38/38 unit tests Bot Engine (tổng 72/72 tests pass 100%).
 
 - [ ] **FLAW-REG.2:** **Tử Huyệt Fallback `volume_force = 0.50` Khi Sổ Lệnh Zombie (Cạn Kiệt Thanh Khoản)**
   - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:137`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L137) & [`scanners/absorption.rs:35`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L35)
