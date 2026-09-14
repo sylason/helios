@@ -738,13 +738,15 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 117, "DNA_WIDTH phải là chính xác 117 chiều sau khi tích hợp 4 gene struct_sl_buffer_atr (FLAW-TSL.6)!");
+        assert_eq!(width, 118, "DNA_WIDTH phải là chính xác 118 chiều sau khi tích hợp min_confidence_compression (FLAW-REG.1 & FLAW-TSL.9)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
+        let has_comp_conf = defs.iter().any(|(name, _)| name.contains("min_confidence_compression"));
         assert!(!has_macd, "defs không được chứa macd!");
         assert!(!has_vol_ma, "defs không được chứa vol_ma!");
         assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
+        assert!(has_comp_conf, "defs phải chứa min_confidence_compression!");
 
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
         assert_eq!(count_struct_sl, 4, "defs phải chứa chính xác 4 gene struct_sl_buffer_atr cho 4 Scanners!");

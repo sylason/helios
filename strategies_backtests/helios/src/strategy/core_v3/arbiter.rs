@@ -114,14 +114,16 @@ impl HeliosArbiter {
     pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, _debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
         
-        // 1. TÍNH NGƯỠNG PHÊ DUYỆT ĐỘNG CONTINUOUS (DYNAMIC APPROVAL THRESHOLD)
+        // 1. TÍNH NGƯỠNG PHÊ DUYỆT ĐỘNG CONTINUOUS (DYNAMIC APPROVAL THRESHOLD 4 TRẠNG THÁI)
         let w_t = matrix.w_trend_norm[i];
         let w_r = matrix.w_range_norm[i];
-        let w_v = matrix.w_volatile_norm[i];
+        let w_c = matrix.w_comp_norm[i];
+        let w_ch = matrix.w_chaos_norm[i];
 
         let required_confidence = w_t * config.arbiter.min_confidence_trending
                                 + w_r * config.arbiter.min_confidence_ranging
-                                + w_v * config.arbiter.min_confidence_volatile;
+                                + w_c * config.arbiter.min_confidence_compression
+                                + w_ch * config.arbiter.min_confidence_chaos;
 
         let mut best_proposal: Option<(Proposal, f64)> = None;
         let mut max_confidence = 0.0;
@@ -132,11 +134,12 @@ impl HeliosArbiter {
             let id = scanner.id();
 
             if let Some(proposal) = scanner.scan(tick, sensors, matrix, config) {
-                // Tra cứu Trọng số Bối cảnh Simplex Đội Nhà (O(1))
+                // Tra cứu Trọng số Bối cảnh Simplex Đội Nhà (O(1)) 4 Trạng Thái
                 let regime_weight = match id {
                     ScannerId::TrendPullback | ScannerId::MomentumIgnition => w_t,
-                    ScannerId::RangeOscillator | ScannerId::ClimaxReversal => w_r,
-                    ScannerId::AnomalyFade | ScannerId::AbsorptionScout   => w_v,
+                    ScannerId::RangeOscillator                             => w_r,
+                    ScannerId::AbsorptionScout                             => w_c,
+                    ScannerId::AnomalyFade | ScannerId::ClimaxReversal     => w_ch,
                 };
 
                 // Tra cứu Multiplier vi mô của Matrix
@@ -250,5 +253,29 @@ mod tests {
             conf_scanner_heavy,
             conf_context_heavy
         );
+    }
+
+    #[test]
+    fn test_fair_auction_balance_scanners() {
+        // Kiểm chứng tính công bằng của 4-State Simplex trong Đấu thầu Arbiter (FLAW-TSL.9):
+        // Khi thị trường có Trend rõ rệt (w_t = 0.65, w_c = 0.10):
+        let w_t = 0.65;
+        let w_c = 0.10;
+        let trend_mul = 0.80;
+        let abs_mul = 0.50;
+        let scanner_weight = 0.50;
+
+        // Giả sử Absorption có raw_score rất cao (0.90), còn TrendPullback là 0.85
+        let conf_trend = HeliosArbiter::compute_confidence(0.85, w_t, trend_mul, scanner_weight);
+        let conf_abs = HeliosArbiter::compute_confidence(0.90, w_c, abs_mul, scanner_weight);
+
+        // TrendPullback phải chiến thắng hoàn toàn nhờ bối cảnh Đội Nhà (w_t) vượt trội
+        assert!(
+            conf_trend > conf_abs,
+            "TrendPullback ({:.4}) phải thắng thầu áp đảo Absorption ({:.4}) khi thị trường có Trend!",
+            conf_trend, conf_abs
+        );
+        assert!(conf_trend > 0.70, "Điểm tự tin của Trend ({:.4}) phải > 0.70", conf_trend);
+        assert!(conf_abs < 0.50, "Điểm tự tin của Absorption ({:.4}) phải bị kiềm chế < 0.50", conf_abs);
     }
 }

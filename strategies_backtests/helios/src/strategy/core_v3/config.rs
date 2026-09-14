@@ -294,9 +294,14 @@ pub struct ArbiterConfig {
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_confidence_ranging: f64,
     
-    /// 5. Ngưỡng Phê Duyệt Tự Tin Khi Thị Trường Biến Động Mạnh (Volatile: 1% -> 99%, Step 3% -> 33 nấc)
+    /// 5. Ngưỡng Phê Duyệt Tự Tin Khi Thị Trường Nén Tích Lũy (Compression: 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
-    pub min_confidence_volatile: f64,
+    pub min_confidence_compression: f64,
+
+    /// 6. Ngưỡng Phê Duyệt Tự Tin Khi Thị Trường Bão Hỗn Loạn (Chaos / Whipsaw: 1% -> 99%, Step 3% -> 33 nấc)
+    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    #[serde(alias = "min_confidence_volatile")]
+    pub min_confidence_chaos: f64,
 }
 
 /// ============================================================================
