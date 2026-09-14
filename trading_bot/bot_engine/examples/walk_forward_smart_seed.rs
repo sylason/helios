@@ -33,11 +33,12 @@ mod common;
 // ⚙️ BẢNG ĐIỀU KHIỂN & CẤU HÌNH TRUNG TÂM (CENTRAL TEST HARNESS CONFIG)
 // ============================================================================
 // 1. Nhận diện & Mục tiêu
-const SYMBOL: &str = "ETHUSDT";
+const SYMBOL: &str = "SOLUSDT";
+// const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
 // 2. Dữ liệu & Cửa sổ thời gian
-const TOTAL_FETCH_DAYS: i64 = 19;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
+const TOTAL_FETCH_DAYS: i64 = 18;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
 const TRAIN_WINDOW_DAYS: i64 = 14;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
 
 // 3. Chu kỳ Vòng lặp Tịnh tiến

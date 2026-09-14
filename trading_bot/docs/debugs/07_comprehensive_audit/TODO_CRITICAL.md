@@ -1,8 +1,8 @@
-# 🚨 MASTER TODO: 58 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
+# 🚨 MASTER TODO: 62 LỖ HỔNG CRITICAL (NGUY KỊCH) TOÀN HỆ SINH THÁI
 
-> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 58 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
+> **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 62 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **25/58 lỗi đã được sửa & kiểm thử thành công**, **33/58 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **25/62 lỗi đã được sửa & kiểm thử thành công**, **37/62 lỗi đang chờ xử lý**.
 
 ---
 
@@ -15,9 +15,9 @@
 | **Nhóm 3: Chiến Lược Helios V3, Scanners & Arbiter** | 9 | 8 | 1 | Hardcode min order & ép trần size |
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 12 | 3 | 9 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
-| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 9 | 9 | 0 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Churn |
-| **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 8 | 1 | 7 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Bắt dao rơi Anomaly |
-| **TỔNG CỘNG** | **58** | **25** | **33** |  |
+| **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 10 | 9 | 1 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Inverted R:R |
+| **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 11 | 2 | 9 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Absorption Bắt Dao Rơi |
+| **TỔNG CỘNG** | **62** | **26** | **36** |  |
 
 ---
 
@@ -337,6 +337,16 @@
     2. **Định lượng 4 trạng thái độc lập:** Absorption được gán trọng số bối cảnh riêng `w_comp_norm` ($w_c = squeeze \times (1 - chaos)$), tách biệt với Clean Range (`w_clean_range_norm`).
     3. **Ngưỡng phê duyệt động:** `required_confidence = w_t * trend + w_r * range + w_c * comp + w_ch * chaos`. Đưa `min_confidence_compression` vào DNA (118 chiều), giúp GA Optimizer tự nâng trần phê duyệt khi thị trường nhiễu, chấm dứt tình trạng Absorption độc tôn tín hiệu.
 
+- [ ] **FLAW-TSL.10:** **Bất Cân Xứng Tỷ Lệ Lãi/Lỗ & Thiếu Dynamic Structural Take Profit Của Playbook Absorption (R:R = 1 : 0.35)**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:80`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L80) & [`risk.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs)
+  - *Bản chất:* 
+    - Trong Log ETH, lệnh thắng của Absorption bình quân chỉ lãi **+$1.09** sau khi gồng tối đa 630 nến (10.5 tiếng), trong khi lệnh thua dập thẳng vào Hard SL kịch trần bình quân **-$3.07** sau 35-172 nến. Tỷ lệ R:R nghịch đảo 1 : 0.35 (Lỗ gấp 3 lần Lãi).
+    - Nguyên nhân vế Lỗ: Do FLAW-REG.9 bắt dao rơi khi xả lũ.
+    - Nguyên nhân vế Lãi: `suggested_tp: None`, Absorption hoàn toàn không có Take Profit theo cấu trúc biên nén, chỉ biết chờ Trailing TP hoặc ngâm lệnh tới Stagnant Decay rồi chốt non.
+  - *Giải pháp đề xuất:*
+    1. Triệt tiêu vế Lỗ bằng FLAW-REG.9 (cấm bắt dao rơi).
+    2. Thiết kế Dynamic Structural Take Profit cho Absorption khi giá bứt phá ra khỏi hộp nén (Squeeze Breakout Target), nâng R:R kỳ vọng lên $\ge 1 : 1.5$.
+
 ---
 
 ## 🌪️ NHÓM 7: KIỂM TOÁN CÁC TRẠNG THÁI THỊ TRƯỜNG KHÔNG THỂ PHÂN TÍCH (UNTRADABLE REGIMES & DEFENSIVE GUARDS AUDIT) (8 LỖ HỔNG)
@@ -397,4 +407,31 @@
   - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs:521-536`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L521-L536)
   - *Bản chất:* Trong khi `core_v3/mod.rs` đã sửa kiểm tra bứt phá có lợi, `asset_actor.rs` vẫn giữ `price_diff = (current_close - last_exit_price).abs() >= 1.5%`. Nếu lệnh Long vừa cắt lỗ mà giá tiếp tục lao dốc thêm $> 1.5\%$, bot tưởng là bứt phá và lập tức xóa Cooldown, nhảy vào Long bắt dao rơi tiếp!
   - *Giải pháp đề xuất:* Đồng bộ 100% logic kiểm tra bứt phá định hướng: Chỉ mở khóa Long nếu giá tăng ngược lên $\ge 1.5 \times \text{ATR}$ (và Short nếu giá giảm sâu $\ge 1.5 \times \text{ATR}$).
+
+- [x] **FLAW-REG.9:** **`Absorption` Bắt Dao Rơi Ngược Sóng Do Đoán Hướng Bằng VWMA Lag & Thiếu Macro Trend Filter** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:39-65`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L39-L65) & [`config.rs:505-510`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L505-L510)
+  - *Bản chất:* Xác định hướng bùng nổ chỉ bằng `vwma >= bb_middle`. Khi giá sập hầm với volume lớn (như ETH xả từ 2625 về 2470), quán tính volume nến cao khiến VWMA vẫn nằm trên SMA, Absorption ngộ nhận là Accumulation và mở Long bắt dao rơi, dính liên tiếp 4 Hard SL (-26.6% ROE).
+  - *Đã xử lý (Dual-Layer Confirmation & Dynamic Macro Trend Veto):*
+    1. **Tầng 1 (Price Action / Mean Alignment):** Yêu cầu đồng thuận 100% giữa dòng tiền và hành động giá: Long đòi hỏi cả `vwma >= bb_middle` VÀ `close >= bb_middle`; Short đòi hỏi cả `vwma < bb_middle` VÀ `close <= bb_middle`. Triệt tiêu hoàn toàn trường hợp nến đỏ đặc cắm đầu bán xả nhưng gom râu làm VWMA lag.
+    2. **Tầng 2 (Macro Trend Direction Guard - 100% Dynamic qua DNA):** Bổ sung gene `max_adverse_slope: f64` (dải `0.05 -> 0.50`, step `0.05`, nâng DNA lên 119 chiều). Nếu `trend_dir < -max_adverse_slope` $\implies$ VETO cấm Long bắt dao rơi; nếu `trend_dir > max_adverse_slope` $\implies$ VETO cấm Short cản tàu.
+    3. **Kiểm thử hoàn tất:** 36/36 tests Helios pass, 38/38 tests Bot Engine pass 100%. Triệt tiêu hoàn toàn 4 cú bắt dao rơi sập hầm.
+
+- [ ] **FLAW-REG.10:** **`RangeOsc` Bắt Đáy Ngược Sóng Trong Xu Hướng Giảm Trôi Dốc (Band-Walking Trap)**
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs:52-78`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs#L52-L78)
+  - *Bản chất:* Khi thị trường trôi dốc từ từ (Drifting Down), độ dốc trend không vượt ngưỡng `-max_slope` nên không kích hoạt cấm Long. Nến bám sát dải BB Lower khiến Gaussian proximity `f_price_long` đạt 1.0, Stoch oversold đạt 1.0 $\to$ RangeOsc liên tục bắt đáy Long và bị nướng 5/6 lệnh trên SOL.
+  - *Giải pháp đề xuất:* Kiểm tra độ dốc của chính dải Bollinger Bands (`bb_middle` slope hoặc `bb_lower` slope). Nếu dải đang dốc cắm xuống, cấm bắt đáy Long.
+
+- [ ] **FLAW-REG.11:** **Vào Lệnh Cưỡng Bức Ngay Cây Nến Kế Tiếp (Compulsive Next-Candle Re-Entry)**
+  - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs) & [`strategies_backtests/helios/src/strategy/core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)
+  - *Bản chất:* Bộ lọc `REVENGE RE-ENTRY BLOCKED` chỉ chặn vào lệnh trên cùng một cây nến vừa đóng. Sang đúng cây nến 1 phút tiếp theo, bot lập tức mở lệnh mới (In-market exposure > 95%), không cho tài khoản khoảng đệm nghỉ ngơi (Inter-trade Rest Gap) để cấu trúc thị trường ổn định.
+  - *Giải pháp đề xuất:* Thêm tham số đệm tối thiểu sau mọi lệnh thoát (ví dụ nghỉ tối thiểu 5-10 nến) để triệt tiêu hiện tượng đảo vị thế cào lệnh liên tục.
+
+---
+
+## 💡 ĐỀ XUẤT KIẾN TRÚC MỞ RỘNG (FUTURE ARCHITECTURAL ENHANCEMENTS)
+
+- [ ] **ENHANCE-ARCH.1:** **Projected Simplex & User Whitelist Modular Toggle (Phương Án 3)**
+  - *Mục tiêu:* Cho phép người dùng tùy chọn danh sách Playbooks hoạt động (`enabled_scanners: Vec<ScannerId>`) trong cấu hình bot để chủ động tắt các scanner không mong muốn theo đặc thù tài sản.
+  - *Cơ chế toán học:* Áp dụng Chiếu Simplex Tác Chiến (Projected Simplex): $\widetilde{w}_k = w_k / \sum_{j \in \mathcal{A}} w_j$ và $\widetilde{C}_{\text{thresh}} = \sum_{k \in \mathcal{A}} \widetilde{w}_k \theta_k$. Giữ nguyên kích thước DNA 118 chiều bằng cơ chế Gene Freezing Mask (đóng băng gene không kích hoạt) giúp GA hội tụ nhanh gấp 3 lần và triệt tiêu 100% overfit.
+
 
