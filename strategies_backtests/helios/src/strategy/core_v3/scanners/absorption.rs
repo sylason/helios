@@ -37,16 +37,39 @@ impl TacticalScanner for AbsorptionScanner {
         let raw_score = (0.50 * f_sqz + 0.50 * f_vol).min(1.0);
 
         if raw_score >= abs_cfg.min_activation_score {
-            // 2. Xác định hướng bùng nổ bằng VWMA vs SMA middle:
-            // VWMA > BB_Middle: Volume lớn tập trung nến mua -> Accumulation (Long)
-            // VWMA < BB_Middle: Volume lớn tập trung nến bán -> Distribution (Short)
-            let signal_type = if vwma >= bb_middle {
+            let close = tick.closes()[i];
+
+            // 🛡️ FLAW-REG.9 TẦNG 1: Price Action & Mean Alignment
+            // Phải có sự đồng thuận giữa dòng tiền (VWMA) và hành động giá (Close) so với trục giữa BB:
+            // - Long (Accumulation): Cả VWMA và Close đều phải nằm trên hoặc bằng BB Middle
+            // - Short (Distribution): Cả VWMA và Close đều phải nằm dưới hoặc bằng BB Middle
+            // Nếu có phân kỳ (ví dụ VWMA >= bb_middle nhưng Close < bb_middle do nến đỏ cắm đầu), bỏ qua không vào lệnh!
+            let signal_type = if vwma >= bb_middle && close >= bb_middle {
                 SignalType::Long
-            } else {
+            } else if vwma < bb_middle && close <= bb_middle {
                 SignalType::Short
+            } else {
+                return None;
             };
 
-            let close = tick.closes()[i];
+            // 🛡️ FLAW-REG.9 TẦNG 2: Macro Trend Direction Alignment (100% Dynamic qua DNA)
+            // Ngăn chặn triệt để bẫy bắt dao rơi khi xả lũ hoặc cản tàu khi bơm dốc:
+            // - Long: Nếu trend_dir < -max_adverse_slope -> VETO cấm bắt dao rơi!
+            // - Short: Nếu trend_dir > max_adverse_slope -> VETO cấm cản tàu!
+            let trend_dir = matrix.trend_dir.get(i).copied().unwrap_or(0.0);
+            let max_adverse = abs_cfg.max_adverse_slope.max(0.01);
+            match signal_type {
+                SignalType::Long => {
+                    if trend_dir < -max_adverse {
+                        return None;
+                    }
+                }
+                SignalType::Short => {
+                    if trend_dir > max_adverse {
+                        return None;
+                    }
+                }
+            }
             let low = tick.lows()[i];
             let high = tick.highs()[i];
             let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);

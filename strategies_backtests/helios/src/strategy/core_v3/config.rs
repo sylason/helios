@@ -501,6 +501,12 @@ pub struct TacticalAbsorptionParams {
     #[dna(min = 0.25, max = 10.00, step = 0.25)]
     #[serde(default = "default_absorption_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
+
+    /// 🛡️ FLAW-REG.9: Ngưỡng dốc xu hướng KAMA tối đa cấm bắt dao rơi (0.05 -> 0.50, Step 0.05)
+    /// Ngăn chặn bắt dao rơi: Nếu Trend dốc xuống vượt ngưỡng này -> Cấm Long!
+    #[dna(min = 0.05, max = 0.50, step = 0.05)]
+    #[serde(default = "default_absorption_max_adverse_slope")]
+    pub max_adverse_slope: f64,
 }
 
 /// ============================================================================
@@ -756,6 +762,10 @@ fn default_range_sl_buffer_atr() -> f64 {
 
 fn default_absorption_sl_buffer_atr() -> f64 {
     2.0
+}
+
+fn default_absorption_max_adverse_slope() -> f64 {
+    0.15
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]

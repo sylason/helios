@@ -738,15 +738,17 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 118, "DNA_WIDTH phải là chính xác 118 chiều sau khi tích hợp min_confidence_compression (FLAW-REG.1 & FLAW-TSL.9)!");
+        assert_eq!(width, 119, "DNA_WIDTH phải là chính xác 119 chiều sau khi tích hợp max_adverse_slope (FLAW-REG.9)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
         let has_comp_conf = defs.iter().any(|(name, _)| name.contains("min_confidence_compression"));
+        let has_abs_adverse = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.max_adverse_slope"));
         assert!(!has_macd, "defs không được chứa macd!");
         assert!(!has_vol_ma, "defs không được chứa vol_ma!");
         assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
         assert!(has_comp_conf, "defs phải chứa min_confidence_compression!");
+        assert!(has_abs_adverse, "defs phải chứa tactical_sniper.absorption.max_adverse_slope!");
 
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
         assert_eq!(count_struct_sl, 4, "defs phải chứa chính xác 4 gene struct_sl_buffer_atr cho 4 Scanners!");
@@ -915,6 +917,185 @@ mod tests {
         assert!(abs_p.suggested_sl.is_some(), "Absorption Proposal phải có suggested_sl!");
         let abs_sl = abs_p.suggested_sl.unwrap();
         assert!(abs_sl < 2000.0, "Absorption Long SL {} phải < Close 2000.0", abs_sl);
+    }
+
+    #[test]
+    fn test_absorption_falling_knife_blocked_by_macro_trend() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2010.0; len]),
+            low: std::sync::Arc::new(vec![1990.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
+        config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.vwma = std::sync::Arc::new(vec![2005.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.volume_force = std::sync::Arc::new(vec![1.2; len]);
+
+        // KỊCH BẢN 1: Bẫy bắt dao rơi (trend_dir = -0.25 < -0.15)
+        matrix.trend_dir = std::sync::Arc::new(vec![-0.25; len]);
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Long bắt dao rơi khi trend_dir = -0.25!");
+
+        // KỊCH BẢN 2: Bẫy cản tàu Short (trend_dir = +0.25 > +0.15)
+        let mut sensors_short = sensors.clone();
+        sensors_short.vwma = std::sync::Arc::new(vec![1995.0; len]);
+        matrix.trend_dir = std::sync::Arc::new(vec![0.25; len]);
+        let raw_cache_short = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1998.0; len]),
+            high: std::sync::Arc::new(vec![2000.0; len]),
+            low: std::sync::Arc::new(vec![1990.0; len]),
+            close: std::sync::Arc::new(vec![1998.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_short = DataView::new(raw_cache_short);
+        let tick_short = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_short,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let prop_short = AbsorptionScanner.scan(&tick_short, &sensors_short, &matrix, &config);
+        assert!(prop_short.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Short cản tàu khi trend_dir = +0.25!");
+
+        // KỊCH BẢN 3: Phân kỳ Tầng 1 (vwma >= bb_middle nhưng close < bb_middle)
+        matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        let raw_cache_div = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2002.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1990.0; len]),
+            close: std::sync::Arc::new(vec![1995.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_div = DataView::new(raw_cache_div);
+        let tick_div = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_div,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let prop_div = AbsorptionScanner.scan(&tick_div, &sensors, &matrix, &config);
+        assert!(prop_div.is_none(), "AbsorptionScanner PHẢI VETO khi VWMA >= bb_middle nhưng Close < bb_middle!");
+    }
+
+    #[test]
+    fn test_absorption_valid_accumulation_in_neutral_range() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use crate::strategy::core_v3::arbiter::{TacticalScanner, SignalType};
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2001.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1998.0; len]),
+            close: std::sync::Arc::new(vec![2002.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
+        config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.vwma = std::sync::Arc::new(vec![2003.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.volume_force = std::sync::Arc::new(vec![1.2; len]);
+        matrix.trend_dir = std::sync::Arc::new(vec![0.02; len]);
+
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "AbsorptionScanner PHẢI sinh Proposal Long khi thị trường tích lũy chuẩn trong vùng phẳng!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+        assert!(p.raw_score >= 0.1);
+        assert!(p.suggested_sl.is_some());
     }
 }
 

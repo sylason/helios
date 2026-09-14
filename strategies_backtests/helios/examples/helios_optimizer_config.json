@@ -12,8 +12,8 @@
   },
   "prospector": {
     "worker_config": {
-      "population_size": 50,
-      "n_generations": 10,
+      "population_size": 120,
+      "n_generations": 8,
       "cxpb": 0.75,
       "mutpb": 0.35,
       "tournament_size": 4,
@@ -70,7 +70,7 @@
     "scout_method": "maximin_lhs",
     "exploration_strategy": "random_restart",
     "max_threads": 6,
-    "max_random_restarts": 4
+    "max_random_restarts": 3
   },
   "cache_config": {
     "enable_fitness_cache": true,
