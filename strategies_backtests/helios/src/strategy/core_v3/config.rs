@@ -424,6 +424,17 @@ pub struct TacticalRangeParams {
     #[dna(min = 0.10, max = 3.00, step = 0.15)]
     #[serde(default = "default_range_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
+
+    /// 🛡️ FLAW-REG.10: Ngưỡng dốc tối đa của trục giữa BB Middle (0.02 -> 0.50 ATR, Step 0.02 -> 25 nấc)
+    #[dna(min = 0.02, max = 0.50, step = 0.02)]
+    #[serde(default = "default_range_max_bb_slope")]
+    pub max_bb_slope: f64,
+
+    /// 🛡️ FLAW-REG.10: Tỷ lệ mục tiêu Take Profit từ Entry đến dải đối diện (0.10 -> 0.90, Step 0.05 -> 17 nấc)
+    /// 0.50 = Đúng trục giữa BB Middle (SMA 20); < 0.50 = Chốt non an toàn; > 0.50 = Hướng về dải đối diện
+    #[dna(min = 0.10, max = 0.90, step = 0.05)]
+    #[serde(default = "default_range_tp_target_ratio")]
+    pub tp_target_ratio: f64,
 }
 
 /// 🔄 4. CHIẾN ĐỘI CLIMAX REVERSAL (Bắt đỉnh/đáy kiệt sức Parabol)
@@ -766,6 +777,14 @@ fn default_absorption_sl_buffer_atr() -> f64 {
 
 fn default_absorption_max_adverse_slope() -> f64 {
     0.15
+}
+
+fn default_range_max_bb_slope() -> f64 {
+    0.10
+}
+
+fn default_range_tp_target_ratio() -> f64 {
+    0.50
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]

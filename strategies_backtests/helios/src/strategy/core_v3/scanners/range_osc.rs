@@ -18,12 +18,17 @@ impl TacticalScanner for RangeOscScanner {
         let range_cfg = &config.tactical_sniper.range;
         
         let close = tick.closes()[i];
+        let open = tick.opens()[i];
+        let high = tick.highs()[i];
+        let low = tick.lows()[i];
+
         let bb_u = sensors.bb_upper[i];
+        let bb_m = sensors.bb_middle[i];
         let bb_l = sensors.bb_lower[i];
         let bb_w_norm = matrix.bb_width_norm[i];
         let vol_force = matrix.volume_force[i];
         
-        if bb_u.is_nan() || bb_l.is_nan() || close <= 0.0 {
+        if bb_u.is_nan() || bb_m.is_nan() || bb_l.is_nan() || close <= 0.0 {
             return None;
         }
 
@@ -32,58 +37,92 @@ impl TacticalScanner for RangeOscScanner {
             return None;
         }
 
-        // 1.1 BỘ LỌC XU HƯỚNG QUANT: Cấm đánh Range khi thị trường đang có Trend mạnh
-        let max_trend = if range_cfg.max_trend_strength > 0.0 { range_cfg.max_trend_strength } else { 0.60 };
+        // 1.1 BỘ LỌC XU HƯỚNG QUANT: Cấm đánh Range khi thị trường có Trend mạnh
+        let max_trend = range_cfg.max_trend_strength.max(0.01);
         if matrix.trend_strength[i] > max_trend {
             return None;
         }
 
+        // 1.2 🛡️ FLAW-REG.10: Kiểm tra độ dốc trục giữa BB Middle (SMA 20)
+        let bb_slope = matrix.bb_middle_slope_adj.get(i).copied().unwrap_or(0.0);
+        let max_bb_slope = range_cfg.max_bb_slope.max(0.01);
+
         let stoch_k = sensors.stoch_range_k[i];
         let stoch_d = sensors.stoch_range_d[i];
-
         if stoch_k.is_nan() || stoch_d.is_nan() {
             return None;
         }
 
+        let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+        let buffer = current_atr * range_cfg.struct_sl_buffer_atr.max(0.05);
         let bb_prox = (range_cfg.bb_proximity_pct * close).max(1e-5);
         let two_sigma_sq = 2.0 * bb_prox * bb_prox;
 
-        // 2. Chấm điểm Mềm Mẫu Hình LONG (Gaussian Price + Sigmoid Stoch + Hook)
-        let dist_l = (close - bb_l).abs();
-        let f_price_long = (- (dist_l * dist_l) / two_sigma_sq).exp();
-        let f_stoch_long = 1.0 / (1.0 + (-0.1 * (range_cfg.stoch_oversold - stoch_k)).exp());
-        let f_hook_long = 1.0 / (1.0 + (-0.5 * (stoch_k - stoch_d)).exp());
-        let score_long = 0.50 * f_price_long + 0.30 * f_stoch_long + 0.20 * f_hook_long;
+        // 2. Chấm điểm Mẫu Hình LONG:
+        // Giá bắt buộc phải nằm ở nửa dưới dải (close <= bb_m) và không bị đâm thủng dải dưới (close >= bb_l)
+        let f_price_long = if close <= bb_m && close >= bb_l {
+            let dist_l = close - bb_l;
+            (- (dist_l * dist_l) / two_sigma_sq).exp()
+        } else {
+            0.0 // Đâm thủng dải dưới (Breakdown) hoặc nằm ở nửa trên dải -> Triệt tiêu!
+        };
+        let score_long = if f_price_long > 0.0 {
+            let f_stoch_long = 1.0 / (1.0 + (-0.1 * (range_cfg.stoch_oversold - stoch_k)).exp());
+            let f_hook_long = 1.0 / (1.0 + (-0.5 * (stoch_k - stoch_d)).exp());
+            0.50 * f_price_long + 0.30 * f_stoch_long + 0.20 * f_hook_long
+        } else {
+            0.0
+        };
 
-        // 3. Chấm điểm Mềm Mẫu Hình SHORT (Gaussian Price + Sigmoid Stoch + Hook)
-        let dist_u = (close - bb_u).abs();
-        let f_price_short = (- (dist_u * dist_u) / two_sigma_sq).exp();
-        let f_stoch_short = 1.0 / (1.0 + (-0.1 * (stoch_k - range_cfg.stoch_overbought)).exp());
-        let f_hook_short = 1.0 / (1.0 + (-0.5 * (stoch_d - stoch_k)).exp());
-        let score_short = 0.50 * f_price_short + 0.30 * f_stoch_short + 0.20 * f_hook_short;
+        // 3. Chấm điểm Mẫu Hình SHORT:
+        // Giá bắt buộc phải nằm ở nửa trên dải (close >= bb_m) và không bị đâm thủng dải trên (close <= bb_u)
+        let f_price_short = if close >= bb_m && close <= bb_u {
+            let dist_u = bb_u - close;
+            (- (dist_u * dist_u) / two_sigma_sq).exp()
+        } else {
+            0.0 // Đâm thủng dải trên (Breakout) hoặc nằm ở nửa dưới dải -> Triệt tiêu!
+        };
+        let score_short = if f_price_short > 0.0 {
+            let f_stoch_short = 1.0 / (1.0 + (-0.1 * (stoch_k - range_cfg.stoch_overbought)).exp());
+            let f_hook_short = 1.0 / (1.0 + (-0.5 * (stoch_d - stoch_k)).exp());
+            0.50 * f_price_short + 0.30 * f_stoch_short + 0.20 * f_hook_short
+        } else {
+            0.0
+        };
 
         let min_score = range_cfg.min_activation_score;
-        let max_slope = if range_cfg.max_adverse_slope > 0.0 { range_cfg.max_adverse_slope } else { 0.20 };
+        let max_adverse = range_cfg.max_adverse_slope.max(0.01);
         let trend_dir = matrix.trend_dir[i];
-
-        let low = tick.lows()[i];
-        let high = tick.highs()[i];
-        let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
-        let buffer = current_atr * range_cfg.struct_sl_buffer_atr.max(0.05);
+        let tp_ratio = range_cfg.tp_target_ratio.max(0.05).min(0.95);
 
         if score_long >= min_score && score_long > score_short {
-            // 🛡️ CHỐNG BẮT DAO RƠI: Nếu Trend đang đổ dốc mạnh (trend_dir < -max_slope) -> Cấm Long!
-            if trend_dir < -max_slope {
+            // 🛡️ CHỐNG BẮT DAO RƠI & TRÔI DỐC:
+            // 1. KAMA slope vĩ mô không được dốc xuống
+            if trend_dir < -max_adverse {
                 return None;
             }
-            // 🎯 SỬA FLAW-4.2: Take Profit của Long bắt buộc phải cao hơn giá Close ít nhất 0.2%
-            let valid_tp = bb_u.max(close * 1.002);
+            // 2. Trục giữa BB Middle không được dốc cắm đầu
+            if bb_slope < -max_bb_slope {
+                return None;
+            }
+            // 🛡️ KHỐI 2: Nến xác nhận phản ứng (Rejection Candle)
+            let is_green = close >= open;
+            let lower_wick = (open.min(close) - low).max(0.0);
+            let upper_wick = (high - open.max(close)).max(0.0);
+            let is_hammer = lower_wick >= upper_wick * 1.2 && close > (high + low) / 2.0;
+            if !is_green && !is_hammer {
+                return None;
+            }
 
-            // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên dưới dải Bollinger Bands (min(Low, BB_Lower) - buffer)
+            // 🎯 KHỐI 3: Take Profit thực tế hướng về Trục Giữa bb_middle
+            let target_price = bb_l + (bb_u - bb_l) * tp_ratio;
+            let valid_tp = target_price.max(close + buffer.max(current_atr * 0.20));
+
+            // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên dưới dải Bollinger Bands
             let base_support = low.min(bb_l);
             let mut sl = base_support - buffer;
             if sl >= close {
-                sl = close - buffer.max(close * 0.002);
+                sl = close - buffer.max(current_atr * 0.20);
             }
 
             Some(Proposal {
@@ -94,18 +133,31 @@ impl TacticalScanner for RangeOscScanner {
                 suggested_tp: Some(valid_tp),
             })
         } else if score_short >= min_score && score_short > score_long {
-            // 🛡️ CHỐNG CẢN TÀU: Nếu Trend đang dốc đứng đi lên (trend_dir > +max_slope) -> Cấm Short!
-            if trend_dir > max_slope {
+            // 🛡️ CHỐNG CẢN TÀU & TRÔI DỐC LÊN:
+            if trend_dir > max_adverse {
                 return None;
             }
-            // 🎯 SỬA FLAW-4.2: Take Profit của Short bắt buộc phải thấp hơn giá Close ít nhất 0.2%
-            let valid_tp = bb_l.min(close * 0.998);
+            if bb_slope > max_bb_slope {
+                return None;
+            }
+            // 🛡️ KHỐI 2: Nến xác nhận phản ứng (Rejection Candle)
+            let is_red = close <= open;
+            let lower_wick = (open.min(close) - low).max(0.0);
+            let upper_wick = (high - open.max(close)).max(0.0);
+            let is_shooting_star = upper_wick >= lower_wick * 1.2 && close < (high + low) / 2.0;
+            if !is_red && !is_shooting_star {
+                return None;
+            }
 
-            // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên trên dải Bollinger Bands (max(High, BB_Upper) + buffer)
+            // 🎯 KHỐI 3: Take Profit thực tế hướng về Trục Giữa bb_middle
+            let target_price = bb_u - (bb_u - bb_l) * tp_ratio;
+            let valid_tp = target_price.min(close - buffer.max(current_atr * 0.20));
+
+            // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên trên dải Bollinger Bands
             let base_resistance = high.max(bb_u);
             let mut sl = base_resistance + buffer;
             if sl <= close {
-                sl = close + buffer.max(close * 0.002);
+                sl = close + buffer.max(current_atr * 0.20);
             }
 
             Some(Proposal {

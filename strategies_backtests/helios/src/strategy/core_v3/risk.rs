@@ -361,10 +361,12 @@ impl RiskManager {
             let mut new_tp_to_update = trade.tp_price;
             if tag_str == "RANGE_OSC" || tag_str == "REVERSAL" {
                 let raw_tp = if tag_str == "RANGE_OSC" {
+                    let tp_ratio = config.tactical_sniper.range.tp_target_ratio.clamp(0.10, 0.90);
+                    let bb_width = (sensors.bb_upper[i] - sensors.bb_lower[i]).max(0.0);
                     if trade.is_long() {
-                        sensors.bb_upper[i]
+                        sensors.bb_lower[i] + bb_width * tp_ratio
                     } else {
-                        sensors.bb_lower[i]
+                        sensors.bb_upper[i] - bb_width * tp_ratio
                     }
                 } else {
                     // REVERSAL: Mục tiêu phục hồi sóng hồi về KAMA Mid

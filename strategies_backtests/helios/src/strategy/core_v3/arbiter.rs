@@ -159,6 +159,16 @@ impl HeliosArbiter {
                     continue;
                 }
 
+                // 🛡️ FLAW-REG.10 PREEMPTION GUARD: Chống Range cướp thầu khi thị trường có Xu hướng định hướng
+                // Khi bối cảnh vĩ mô đang thiên về Trend (w_t > 0.40), cấm RangeOsc đi ngược chiều xu hướng KAMA:
+                if id == ScannerId::RangeOscillator && w_t > 0.40 {
+                    let trend_dir = matrix.trend_dir.get(i).copied().unwrap_or(0.0);
+                    if (proposal.signal_type == SignalType::Long && trend_dir < 0.0) ||
+                       (proposal.signal_type == SignalType::Short && trend_dir > 0.0) {
+                        continue;
+                    }
+                }
+
                 // Điểm Tự Tin Đấu Thầu (Weighted Geometric Mean Chuẩn Quant + Zero Guard)
                 let confidence = Self::compute_confidence(
                     proposal.raw_score,

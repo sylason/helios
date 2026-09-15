@@ -30,6 +30,7 @@ pub struct HeliosSensors {
     // --- Volatility & Squeeze ---
     pub bb_upper: Arc<Vec<f64>>,
     pub bb_middle: Arc<Vec<f64>>,
+    pub bb_middle_slope_adj: Arc<Vec<f64>>,
     pub bb_lower: Arc<Vec<f64>>,
     pub kc_upper: Arc<Vec<f64>>,
     pub kc_lower: Arc<Vec<f64>>,

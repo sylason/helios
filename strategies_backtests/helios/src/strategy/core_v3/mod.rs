@@ -151,6 +151,27 @@ impl Strategy for HeliosStrategyV3 {
         s.vol_z_score = ctx.z_score_volume(ind.kama.timeframe, "VolZScore", ind.z_score_lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
 
+        // 🛡️ FLAW-REG.10: Tính độ dốc chuẩn hóa của trục giữa Bollinger Bands (SMA 20) qua ATR (K = 5 bars)
+        let k_bars = 5;
+        let bb_m_len = s.bb_middle.len();
+        let mut bb_slope = Vec::with_capacity(bb_m_len);
+        for idx in 0..bb_m_len {
+            if idx < k_bars {
+                bb_slope.push(0.0);
+            } else {
+                let m_curr = s.bb_middle[idx];
+                let m_prev = s.bb_middle[idx - k_bars];
+                let atr = if idx < s.atr_sl.len() { s.atr_sl[idx].max(1e-5) } else { 1.0 };
+                if m_curr.is_nan() || m_prev.is_nan() || atr.is_nan() {
+                    bb_slope.push(0.0);
+                } else {
+                    let raw_slope = (m_curr - m_prev) / (k_bars as f64 * atr);
+                    bb_slope.push(raw_slope);
+                }
+            }
+        }
+        s.bb_middle_slope_adj = std::sync::Arc::new(bb_slope);
+
         self.sensors = s;
         self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
     }
@@ -738,17 +759,21 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 119, "DNA_WIDTH phải là chính xác 119 chiều sau khi tích hợp max_adverse_slope (FLAW-REG.9)!");
+        assert_eq!(width, 121, "DNA_WIDTH phải là chính xác 121 chiều sau khi tích hợp max_bb_slope và tp_target_ratio (FLAW-REG.10)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
         let has_comp_conf = defs.iter().any(|(name, _)| name.contains("min_confidence_compression"));
         let has_abs_adverse = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.max_adverse_slope"));
+        let has_range_bb_slope = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.max_bb_slope"));
+        let has_range_tp_ratio = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.tp_target_ratio"));
         assert!(!has_macd, "defs không được chứa macd!");
         assert!(!has_vol_ma, "defs không được chứa vol_ma!");
         assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
         assert!(has_comp_conf, "defs phải chứa min_confidence_compression!");
         assert!(has_abs_adverse, "defs phải chứa tactical_sniper.absorption.max_adverse_slope!");
+        assert!(has_range_bb_slope, "defs phải chứa tactical_sniper.range.max_bb_slope!");
+        assert!(has_range_tp_ratio, "defs phải chứa tactical_sniper.range.tp_target_ratio!");
 
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
         assert_eq!(count_struct_sl, 4, "defs phải chứa chính xác 4 gene struct_sl_buffer_atr cho 4 Scanners!");
@@ -1096,6 +1121,225 @@ mod tests {
         assert_eq!(p.signal_type, SignalType::Long);
         assert!(p.raw_score >= 0.1);
         assert!(p.suggested_sl.is_some());
+    }
+
+    #[test]
+    fn test_range_osc_band_walking_drift_blocked() {
+        use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1981.0; len]),
+            high: std::sync::Arc::new(vec![1985.0; len]),
+            low: std::sync::Arc::new(vec![1978.0; len]),
+            close: std::sync::Arc::new(vec![1982.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.range.max_bb_slope = 0.10;
+        config.tactical_sniper.range.max_adverse_slope = 0.15;
+        config.tactical_sniper.range.min_activation_score = 0.10;
+        config.tactical_sniper.range.min_width_pct = 0.005;
+        config.tactical_sniper.range.bb_proximity_pct = 0.015;
+        config.tactical_sniper.range.stoch_oversold = 25.0;
+        config.tactical_sniper.range.stoch_overbought = 75.0;
+        config.tactical_sniper.range.volume_max_threshold = 2.0;
+        config.tactical_sniper.range.max_trend_strength = 0.50;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_range_k = std::sync::Arc::new(vec![15.0; len]);
+        sensors.stoch_range_d = std::sync::Arc::new(vec![18.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![0.5; len]);
+        sensors.bb_middle_slope_adj = std::sync::Arc::new(vec![-0.25; len]); // Dốc cắm đầu > 0.10
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
+        matrix.volume_force = std::sync::Arc::new(vec![0.5; len]);
+        matrix.trend_strength = std::sync::Arc::new(vec![0.20; len]);
+        matrix.trend_dir = std::sync::Arc::new(vec![-0.05; len]);
+        matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "RangeOscScanner PHẢI VETO bắt dao rơi khi BB Middle dốc xuống (-0.25 > 0.10)!");
+    }
+
+    #[test]
+    fn test_range_osc_rejection_candle_confirmed() {
+        use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
+        use crate::strategy::core_v3::arbiter::{TacticalScanner, SignalType};
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1981.0; len]),
+            high: std::sync::Arc::new(vec![1986.0; len]),
+            low: std::sync::Arc::new(vec![1979.0; len]),
+            close: std::sync::Arc::new(vec![1984.0; len]), // Nến xanh rút chân
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.range.max_bb_slope = 0.10;
+        config.tactical_sniper.range.max_adverse_slope = 0.15;
+        config.tactical_sniper.range.min_activation_score = 0.10;
+        config.tactical_sniper.range.min_width_pct = 0.005;
+        config.tactical_sniper.range.bb_proximity_pct = 0.015;
+        config.tactical_sniper.range.stoch_oversold = 25.0;
+        config.tactical_sniper.range.stoch_overbought = 75.0;
+        config.tactical_sniper.range.volume_max_threshold = 2.0;
+        config.tactical_sniper.range.max_trend_strength = 0.50;
+        config.tactical_sniper.range.tp_target_ratio = 0.50;
+        config.tactical_sniper.range.struct_sl_buffer_atr = 0.30;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_range_k = std::sync::Arc::new(vec![15.0; len]);
+        sensors.stoch_range_d = std::sync::Arc::new(vec![12.0; len]); // K > D (Hook up)
+        sensors.vol_z_score = std::sync::Arc::new(vec![0.5; len]);
+        sensors.bb_middle_slope_adj = std::sync::Arc::new(vec![0.01; len]); // Thị trường phẳng
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
+        matrix.volume_force = std::sync::Arc::new(vec![0.5; len]);
+        matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
+        matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "RangeOscScanner PHẢI sinh Proposal Long khi có nến xác nhận tại dải phẳng!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+        assert!(p.raw_score >= 0.10);
+        assert!(p.suggested_sl.is_some());
+        assert!(p.suggested_tp.is_some());
+        let tp = p.suggested_tp.unwrap();
+        assert!((tp - 2000.0).abs() < 1.0, "TP ({}) phải xấp xỉ Trục Giữa 2000.0", tp);
+    }
+
+    #[test]
+    fn test_range_osc_breakdown_penetration_blocked() {
+        use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1985.0; len]),
+            high: std::sync::Arc::new(vec![1986.0; len]),
+            low: std::sync::Arc::new(vec![1968.0; len]),
+            close: std::sync::Arc::new(vec![1970.0; len]), // Đâm thủng đáy dải
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.range.max_bb_slope = 0.10;
+        config.tactical_sniper.range.max_adverse_slope = 0.15;
+        config.tactical_sniper.range.min_activation_score = 0.10;
+        config.tactical_sniper.range.min_width_pct = 0.005;
+        config.tactical_sniper.range.bb_proximity_pct = 0.015;
+        config.tactical_sniper.range.stoch_oversold = 25.0;
+        config.tactical_sniper.range.stoch_overbought = 75.0;
+        config.tactical_sniper.range.volume_max_threshold = 2.0;
+        config.tactical_sniper.range.max_trend_strength = 0.50;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_range_k = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_range_d = std::sync::Arc::new(vec![15.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![0.5; len]);
+        sensors.bb_middle_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
+        matrix.volume_force = std::sync::Arc::new(vec![0.5; len]);
+        matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
+        matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "RangeOscScanner PHẢI VETO khi nến đỏ đâm thủng dải dưới (close 1970 < bb_lower 1980)!");
     }
 }
 

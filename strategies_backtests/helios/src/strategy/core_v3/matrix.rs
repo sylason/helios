@@ -14,6 +14,7 @@ pub struct MarketMatrixV3 {
     pub trend_dir: Arc<Vec<f64>>,         // -1.0 (Bearish) to 1.0 (Bullish)
     pub trend_strength: Arc<Vec<f64>>,    // 0.0 to 1.0 (ADX Tanh Scaled)
     pub kama_slope_adj: Arc<Vec<f64>>,    // KAMA Slope điều chỉnh theo ER
+    pub bb_middle_slope_adj: Arc<Vec<f64>>, // 🛡️ FLAW-REG.10: Độ dốc chuẩn hóa của trục giữa BB Middle (SMA 20)
     
     // --- 🌪️ Năng lượng & Biến động (Chaos) ---
     pub squeeze_intensity: Arc<Vec<f64>>, // 0.0 to 1.0 (BB/KC Compression)
@@ -126,7 +127,16 @@ impl MarketMatrixV3 {
         for i in 0..len {
             let t_mul = trend_strength[i].max(0.0).min(1.0);
             trend_multiplier.push(t_mul);
-            range_multiplier.push(1.0 - t_mul);
+
+            // 🛡️ FLAW-REG.10: Hệ số phẳng của trục giữa Bollinger Bands (SMA 20)
+            let bb_slope = if sensors.bb_middle_slope_adj.is_empty() || i >= sensors.bb_middle_slope_adj.len() {
+                0.0
+            } else {
+                let s = sensors.bb_middle_slope_adj[i];
+                if s.is_nan() { 0.0 } else { s }
+            };
+            let flatness_factor = (1.0 - (bb_slope.abs() / 0.10).tanh()).max(0.0).min(1.0);
+            range_multiplier.push((1.0 - t_mul) * flatness_factor);
 
             squeeze_multiplier.push(squeeze_intensity[i]);
 
@@ -164,8 +174,8 @@ impl MarketMatrixV3 {
             let sqz = squeeze_intensity[i].max(0.0).min(1.0);
             let w_comp_raw = (sqz * (1.0 - c_r)).max(0.0).min(1.0);
 
-            // 4. Đi ngang êm đềm (Clean Range): Không Trend, không Bão Chaos, và không Nén Squeeze
-            let w_range_raw = ((1.0 - t_mul) * (1.0 - c_r) * (1.0 - sqz)).max(0.05).min(1.0);
+            // 4. Đi ngang êm đềm (Clean Range): Không Trend, không Bão Chaos, không Nén Squeeze VÀ Trục giữa BB Middle phải phẳng!
+            let w_range_raw = ((1.0 - t_mul) * (1.0 - c_r) * (1.0 - sqz) * flatness_factor).max(0.05).min(1.0);
 
             let w_t = if w_trend_raw.is_nan() { 0.0 } else { w_trend_raw.max(0.0) };
             let w_r = if w_range_raw.is_nan() { 0.0 } else { w_range_raw.max(0.0) };
@@ -198,6 +208,7 @@ impl MarketMatrixV3 {
             trend_dir: Arc::new(trend_dir),
             trend_strength: Arc::new(trend_strength),
             kama_slope_adj: sensors.kama_slope_adj.clone(),
+            bb_middle_slope_adj: sensors.bb_middle_slope_adj.clone(),
             squeeze_intensity: Arc::new(squeeze_intensity),
             bb_width_norm: Arc::new(bb_width_norm),
             liquidity: Arc::new(liquidity),
