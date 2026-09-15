@@ -332,24 +332,35 @@ pub struct TacticalPullbackParams {
     #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
-    /// RSI Vùng Hồi Quy (Universal 1.0 -> 99.0, Step 3.0 -> 33 nấc)
-    #[dna(min = 1.0, max = 99.0, step = 3.0)]
-    pub rsi_buy_thresh: f64,
+    /// Trần RSI an toàn tránh hưng phấn đỉnh sóng (50.0 -> 80.0, Step 2.0 -> 16 nấc)
+    #[dna(min = 50.0, max = 80.0, step = 2.0)]
+    #[serde(default = "default_pullback_rsi_max_cap")]
+    pub rsi_max_cap: f64,
 
-    /// Stochastic Vùng Hồi Quy (Universal 1.0 -> 99.0, Step 3.0 -> 33 nấc)
-    #[dna(min = 1.0, max = 99.0, step = 3.0)]
+    /// Stochastic Vùng Hồi Quy (10.0 -> 50.0, Step 2.0 -> 21 nấc)
+    #[dna(min = 10.0, max = 50.0, step = 2.0)]
     pub stoch_pullback_thresh: f64,
 
-    /// Độ dốc tối thiểu của KAMA (0.01 -> 0.50, Step 0.02 -> 25 nấc)
-    #[dna(min = 0.01, max = 0.50, step = 0.02)]
+    /// Độ dốc tối thiểu của KAMA (0.01 -> 0.40, Step 0.02 -> 20 nấc)
+    #[dna(min = 0.01, max = 0.40, step = 0.02)]
     pub kama_slope_threshold: f64,
 
-    /// Ngưỡng kích hoạt mềm Trend Pullback (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    /// Khoảng cách tối đa cho phép từ giá đến KAMA qua ATR (0.50 -> 3.50 ATR, Step 0.20 -> 16 nấc)
+    #[dna(min = 0.50, max = 3.50, step = 0.20)]
+    #[serde(default = "default_pullback_max_dist_atr")]
+    pub max_pullback_dist_atr: f64,
+
+    /// Ngưỡng cắt đứt hỗ trợ gãy trend KAMA (0.10 -> 1.50 ATR, Step 0.10 -> 15 nấc)
+    #[dna(min = 0.10, max = 1.50, step = 0.10)]
+    #[serde(default = "default_pullback_invalidation_buffer_atr")]
+    pub invalidation_buffer_atr: f64,
+
+    /// Ngưỡng kích hoạt mềm Trend Pullback (0.10 -> 0.90, Step 0.05 -> 17 nấc)
+    #[dna(min = 0.10, max = 0.90, step = 0.05)]
     pub min_activation_score: f64,
 
-    /// Đệm ATR bảo vệ qua KAMA / đáy nhịp hồi (0.10 -> 4.00 ATR, Step 0.15 -> 27 nấc)
-    #[dna(min = 0.10, max = 4.00, step = 0.15)]
+    /// Đệm ATR bảo vệ qua KAMA / đáy nhịp hồi (0.10 -> 3.00 ATR, Step 0.15 -> 20 nấc)
+    #[dna(min = 0.10, max = 3.00, step = 0.15)]
     #[serde(default = "default_pullback_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
 }
@@ -787,8 +798,21 @@ fn default_range_tp_target_ratio() -> f64 {
     0.50
 }
 
+fn default_pullback_rsi_max_cap() -> f64 {
+    68.0
+}
+
+fn default_pullback_max_dist_atr() -> f64 {
+    2.0
+}
+
+fn default_pullback_invalidation_buffer_atr() -> f64 {
+    0.50
+}
+
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct WarmupConfig {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub num: usize,
 }
+

@@ -125,7 +125,10 @@ impl MarketMatrixV3 {
         let mut w_chaos_norm = Vec::with_capacity(len);
 
         for i in 0..len {
-            let t_mul = trend_strength[i].max(0.0).min(1.0);
+            let t_adx = trend_strength[i].max(0.0).min(1.0);
+            let slope_val = sensors.kama_slope_adj[i];
+            let slope_strength = if slope_val.is_nan() { 0.0 } else { (slope_val.abs() / 0.08).tanh().max(0.0).min(1.0) };
+            let t_mul = t_adx.max(slope_strength);
             trend_multiplier.push(t_mul);
 
             // 🛡️ FLAW-REG.10: Hệ số phẳng của trục giữa Bollinger Bands (SMA 20)

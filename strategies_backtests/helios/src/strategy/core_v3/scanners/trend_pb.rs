@@ -17,37 +17,65 @@ impl TacticalScanner for TrendPBScanner {
         let i = tick.i;
         let pb_cfg = &config.tactical_sniper.pullback;
         
+        let slope_adj = sensors.kama_slope_adj[i];
         let stoch_k = sensors.stoch_trend_k[i];
         let rsi = sensors.rsi_trend[i];
-        let slope_adj = sensors.kama_slope_adj[i];
 
         if slope_adj.is_nan() || stoch_k.is_nan() || rsi.is_nan() {
             return None;
         }
 
         let slope_thresh = pb_cfg.kama_slope_threshold.max(1e-4);
-        let f_slope = (slope_adj.abs() / slope_thresh).tanh();
-
-        let stoch_pb_thresh = pb_cfg.stoch_pullback_thresh;
-        let rsi_buy_thresh = pb_cfg.rsi_buy_thresh;
-
-        let min_score = pb_cfg.min_activation_score;
+        if slope_adj.abs() < slope_thresh {
+            return None; // Độ dốc KAMA chưa đủ mạnh để hình thành xu hướng
+        }
 
         let close = tick.closes()[i];
+        let open = tick.opens()[i];
         let low = tick.lows()[i];
         let high = tick.highs()[i];
+
         let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
         let kama_mid = sensors.kama_mid.get(i).copied().unwrap_or(close);
         let buffer = current_atr * pb_cfg.struct_sl_buffer_atr.max(0.05);
 
-        // 1. Chấm điểm Mềm Mẫu Hình LONG (KAMA Slope Dương + Stoch Pullback + RSI Safe)
-        if slope_adj > 0.0 {
-            let f_stoch_long = 1.0 / (1.0 + (-0.1 * (stoch_pb_thresh - stoch_k)).exp());
-            let f_rsi_long = 1.0 / (1.0 + (-0.1 * (rsi_buy_thresh - rsi)).exp());
-            let score_long = 0.40 * f_slope + 0.40 * f_stoch_long + 0.20 * f_rsi_long;
+        // Khoảng cách chuẩn hóa không gian giá so với KAMA qua ATR
+        let delta_kama = (close - kama_mid) / current_atr;
+        let max_dist = pb_cfg.max_pullback_dist_atr.max(0.20);
+        let inval_floor = pb_cfg.invalidation_buffer_atr.max(0.05);
 
-            if score_long >= min_score {
-                // 🛡️ FLAW-TSL.6: Structural SL neo dưới đáy nến nhịp hồi hoặc đường hỗ trợ KAMA
+        // Đạo hàm vi phân gradient nến: Close Location Value (CLV) [-1.0, +1.0]
+        let tr_span = (high - low).max(1e-6);
+        let clv = (2.0 * close - (high + low)) / tr_span;
+
+        let f_slope = (slope_adj.abs() / slope_thresh).tanh().min(1.0);
+
+        // -------------------------------------------------------------------------
+        // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên + Hồi Quy An Toàn + Gradient Dương)
+        // -------------------------------------------------------------------------
+        if slope_adj > 0.0 {
+            // Chốt chặn 1: Hộp không gian hồi quy (-inval <= delta_kama <= max_dist)
+            if delta_kama < -inval_floor || delta_kama > max_dist {
+                return None; // Thủng KAMA gãy trend hoặc bay quá xa KAMA mua đu đỉnh
+            }
+
+            // Chốt chặn 2: Vùng hạ nhiệt Stoch & Trần RSI an toàn (tránh hưng phấn đỉnh sóng)
+            let stoch_thresh = pb_cfg.stoch_pullback_thresh.max(1.0);
+            if stoch_k > stoch_thresh || rsi > pb_cfg.rsi_max_cap {
+                return None;
+            }
+
+            // Chốt chặn 3: Gradient vận tốc nến xác nhận lực cầu (cấm nến đỏ Marubozu)
+            if clv < 0.15 || close < open {
+                return None;
+            }
+
+            let f_dist = (1.0 - (delta_kama.abs() / max_dist)).max(0.0).min(1.0);
+            let f_stoch = (1.0 - (stoch_k / stoch_thresh)).max(0.0).min(1.0);
+            let score_long = (f_slope + f_dist + f_stoch) / 3.0;
+
+            if score_long >= pb_cfg.min_activation_score {
+                // 🛡️ Structural SL neo dưới đáy nhịp hồi hoặc đường hỗ trợ KAMA
                 let base_support = low.min(kama_mid);
                 let mut sl = base_support - buffer;
                 if sl >= close {
@@ -63,14 +91,32 @@ impl TacticalScanner for TrendPBScanner {
                 });
             }
         }
-        // 2. Chấm điểm Mềm Mẫu Hình SHORT (KAMA Slope Âm + Stoch Rally + RSI Overheat)
+        // -------------------------------------------------------------------------
+        // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống + Hồi Quy An Toàn + Gradient Âm)
+        // -------------------------------------------------------------------------
         else if slope_adj < 0.0 {
-            let f_stoch_short = 1.0 / (1.0 + (-0.1 * (stoch_k - (100.0 - stoch_pb_thresh))).exp());
-            let f_rsi_short = 1.0 / (1.0 + (-0.1 * (rsi - (100.0 - rsi_buy_thresh))).exp());
-            let score_short = 0.40 * f_slope + 0.40 * f_stoch_short + 0.20 * f_rsi_short;
+            // Chốt chặn 1: Hộp không gian hồi quy (-max_dist <= delta_kama <= inval)
+            if delta_kama > inval_floor || delta_kama < -max_dist {
+                return None; // Vượt thủng KAMA gãy trend hoặc rơi quá xa KAMA bán đuổi đáy
+            }
 
-            if score_short >= min_score {
-                // 🛡️ FLAW-TSL.6: Structural SL neo trên đỉnh nến nhịp hồi hoặc đường kháng cự KAMA
+            // Chốt chặn 2: Vùng hạ nhiệt Stoch & Sàn RSI an toàn
+            let stoch_thresh = pb_cfg.stoch_pullback_thresh.max(1.0);
+            if stoch_k < (100.0 - stoch_thresh) || rsi < (100.0 - pb_cfg.rsi_max_cap) {
+                return None;
+            }
+
+            // Chốt chặn 3: Gradient vận tốc nến xác nhận lực cung (cấm nến xanh bốc đầu)
+            if clv > -0.15 || close > open {
+                return None;
+            }
+
+            let f_dist = (1.0 - (delta_kama.abs() / max_dist)).max(0.0).min(1.0);
+            let f_stoch = ((stoch_k - (100.0 - stoch_thresh)) / stoch_thresh).max(0.0).min(1.0);
+            let score_short = (f_slope + f_dist + f_stoch) / 3.0;
+
+            if score_short >= pb_cfg.min_activation_score {
+                // 🛡️ Structural SL neo trên đỉnh nhịp hồi hoặc đường kháng cự KAMA
                 let base_resistance = high.max(kama_mid);
                 let mut sl = base_resistance + buffer;
                 if sl <= close {
