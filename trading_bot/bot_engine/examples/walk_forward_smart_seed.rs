@@ -33,8 +33,8 @@ mod common;
 // ⚙️ BẢNG ĐIỀU KHIỂN & CẤU HÌNH TRUNG TÂM (CENTRAL TEST HARNESS CONFIG)
 // ============================================================================
 // 1. Nhận diện & Mục tiêu
-const SYMBOL: &str = "SOLUSDT";
-// const SYMBOL: &str = "ETHUSDT";
+// const SYMBOL: &str = "SOLUSDT";
+const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
 // 2. Dữ liệu & Cửa sổ thời gian

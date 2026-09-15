@@ -2,7 +2,7 @@
 
 > **Mục tiêu tài liệu:** Quản trị tập trung toàn bộ 62 lỗi mức độ **CRITICAL** (nguy cơ cháy tài khoản, sập bot, hoặc sai lệch PnL nghiêm trọng).  
 > **Thư mục lưu trữ:** `trading_bot/docs/debugs/07_comprehensive_audit/TODO_CRITICAL.md`  
-> **Trạng thái tổng quan:** **25/62 lỗi đã được sửa & kiểm thử thành công**, **37/62 lỗi đang chờ xử lý**.
+> **Trạng thái tổng quan:** **27/62 lỗi đã được sửa & kiểm thử thành công**, **35/62 lỗi đang chờ xử lý**.
 
 ---
 
@@ -16,8 +16,8 @@
 | **Nhóm 4: Toán Học Sensors, Chỉ Báo & MTF Buffer** | 6 | 3 | 3 | Rò rỉ nến Binance REST, replay nến cũ |
 | **Nhóm 5: Động Cơ GA Optimizer & Hạ Tầng Mạng** | 12 | 3 | 9 | Vô hiệu hóa LHS, WebSocket ngủ quên, sập số thập phân |
 | **Nhóm 6: Kiểm Toán Chuyên Sâu TSL, TP, Sizing & Dynamic Risk** | 10 | 9 | 1 | Bẫy vả 2 đầu Whipsaw, Hardcode SL -80% ROE, Frozen TP, Absorption Inverted R:R |
-| **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 11 | 2 | 9 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Absorption Bắt Dao Rơi |
-| **TỔNG CỘNG** | **62** | **26** | **36** |  |
+| **Nhóm 7: Trạng Thái Thị Trường Không Thể Phân Tích (Untradable Regimes)** | 11 | 3 | 8 | Bão Whipsaw bị nhầm thành Range, Sổ lệnh Zombie, Absorption Bắt Dao Rơi, Band-Walking Trap |
+| **TỔNG CỘNG** | **62** | **27** | **35** |  |
 
 ---
 
@@ -416,10 +416,19 @@
     2. **Tầng 2 (Macro Trend Direction Guard - 100% Dynamic qua DNA):** Bổ sung gene `max_adverse_slope: f64` (dải `0.05 -> 0.50`, step `0.05`, nâng DNA lên 119 chiều). Nếu `trend_dir < -max_adverse_slope` $\implies$ VETO cấm Long bắt dao rơi; nếu `trend_dir > max_adverse_slope` $\implies$ VETO cấm Short cản tàu.
     3. **Kiểm thử hoàn tất:** 36/36 tests Helios pass, 38/38 tests Bot Engine pass 100%. Triệt tiêu hoàn toàn 4 cú bắt dao rơi sập hầm.
 
-- [ ] **FLAW-REG.10:** **`RangeOsc` Bắt Đáy Ngược Sóng Trong Xu Hướng Giảm Trôi Dốc (Band-Walking Trap)**
-  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs:52-78`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs#L52-L78)
-  - *Bản chất:* Khi thị trường trôi dốc từ từ (Drifting Down), độ dốc trend không vượt ngưỡng `-max_slope` nên không kích hoạt cấm Long. Nến bám sát dải BB Lower khiến Gaussian proximity `f_price_long` đạt 1.0, Stoch oversold đạt 1.0 $\to$ RangeOsc liên tục bắt đáy Long và bị nướng 5/6 lệnh trên SOL.
-  - *Giải pháp đề xuất:* Kiểm tra độ dốc của chính dải Bollinger Bands (`bb_middle` slope hoặc `bb_lower` slope). Nếu dải đang dốc cắm xuống, cấm bắt đáy Long.
+- [x] **FLAW-REG.10:** **`RangeOsc` Bắt Đáy Ngược Sóng Trong Xu Hướng Giảm Trôi Dốc (Band-Walking Trap)** `[ĐÃ SỬA ✅]`
+  - *Vị trí:* [`strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs), [`sensors.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/sensors.rs), [`matrix.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs), [`config.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs), [`arbiter.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs), [`risk.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs), [`core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs).
+  - *Bản chất:* Khi thị trường trôi dốc từ từ (Grind-down), độ dốc KAMA macro không đủ lớn để cấm Long, nhưng nến bám dải dưới BB Lower khiến Gaussian `.abs()` proximity đạt 1.0 $\to$ RangeOsc liên tục bắt đáy và thua 5/6 lệnh trên SOLUSDT (-$5.04). Đồng thời Take Profit bị ép lên tận `bb_upper` khiến lệnh ngâm hàng trăm nến rồi cắn SL/Stagnant Decay.
+  - *Đã xử lý (Additive-Only & Khép Kín 7 Thành Phần):*
+    1. **Tầng Cảm Biến & Ma Trận:** Bổ sung `bb_middle_slope_adj` đo độ dốc chuẩn hóa của SMA(20) qua ATR ($K=5$ bars); tích hợp `flatness_factor = 1.0 - tanh(|slope| / 0.10)` vào $w_{\text{range\_raw}}$ và `range_multiplier`.
+    2. **Đại Tu 4 Khối Của RangeOsc:**
+       - *Khối 1:* Xóa bỏ bẫy `.abs()`, kiểm tra Strict Half-Range Boundary: Long chỉ được xét ở nửa dưới (`close <= bb_m && close >= bb_l`), Short chỉ được xét ở nửa trên (`close >= bb_m && close <= bb_u`). Triệt tiêu điểm về 0 khi giá đâm thủng dải (Breakdown/Breakout).
+       - *Khối 2:* Bắt buộc có nến xác nhận phản ứng (Rejection Candle): Long cần nến xanh hoặc Hammer rút chân; Short cần nến đỏ hoặc Shooting Star.
+       - *Khối 3:* Take Profit thực tế hướng về Trục Giữa: $\text{Target} = \text{bb\_edge} \pm \text{bb\_width} \times \text{tp\_target\_ratio}$.
+       - *Khối 4:* Xóa sạch 7 hằng số hardcode, thay bằng bội số ATR và dynamic DNA.
+    3. **Tầng Trọng Tài & Rủi Ro:** Bổ sung Preemption Guard trong Arbiter (khi $w_{\text{trend\_norm}} > 0.40 \implies$ cấm Range đi ngược chiều xu hướng KAMA); đồng bộ Dynamic TP bám sát dải BB và gene `tp_target_ratio` trong `risk.rs`.
+    4. **Cấu Hình DNA:** Thêm 2 gene `max_bb_slope` ($0.02 \to 0.50$) và `tp_target_ratio` ($0.10 \to 0.90$), nâng DNA lên **121 chiều**.
+    5. **Kiểm Thử Toàn Diện:** Viết 3 unit tests chuyên sâu cho Range mới; kiểm chứng 39/39 tests Helios pass 100% và 38/38 tests Bot Engine pass 100%. Triệt tiêu dứt điểm bẫy Band-Walking Trap.
 
 - [ ] **FLAW-REG.11:** **Vào Lệnh Cưỡng Bức Ngay Cây Nến Kế Tiếp (Compulsive Next-Candle Re-Entry)**
   - *Vị trí:* [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///E:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs) & [`strategies_backtests/helios/src/strategy/core_v3/mod.rs`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)
