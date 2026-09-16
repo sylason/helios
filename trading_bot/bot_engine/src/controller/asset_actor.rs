@@ -338,16 +338,49 @@ impl AssetActor {
         info!("🏁 Actor [{}] stopped.", self.symbol);
     }
 
+    /// Áp dụng bộ DNA vào cả Strategy và helios_config với kiểm tra tính hợp lệ và số chiều an toàn tuyệt đối
+    pub fn apply_dna(&mut self, dna_slice: &[f64], fitness: f64, context: &str) -> bool {
+        let expected_dim = HeliosConfigV3::DNA_WIDTH;
+        if dna_slice.len() != expected_dim {
+            warn!(
+                "⚠️ [{}] Bỏ qua DNA ({}) do không tương thích số chiều: {} gen != {} gen mong đợi! Giữ nguyên cấu hình an toàn.",
+                self.symbol, context, dna_slice.len(), expected_dim
+            );
+            return false;
+        }
+
+        // Kiểm tra tính hợp lệ của số thực (chặn NaN / Inf - FLAW-7.5)
+        for (idx, &val) in dna_slice.iter().enumerate() {
+            if val.is_nan() || val.is_infinite() {
+                warn!(
+                    "⚠️ [{}] Bỏ qua DNA ({}) do chứa giá trị không hợp lệ (NaN/Inf) tại gen #{}: {}!",
+                    self.symbol, context, idx, val
+                );
+                return false;
+            }
+        }
+
+        if let Some(ref mut strategy) = self.strategy {
+            strategy.update_from_dna(dna_slice);
+        }
+        self.helios_config.update_from_dna(dna_slice);
+        info!(
+            "✨ [{}] Áp dụng DNA thành công [{}]! (Fitness: {:.2}%, Dim: {})",
+            self.symbol, context, fitness, dna_slice.len()
+        );
+        true
+    }
+
     /// Tải cấu hình DNA tốt nhất từ SQLite
     pub async fn load_best_params(&mut self) -> Result<(), BotError> {
         info!("🧬 [{}] Searching for best DNA in DB...", self.symbol);
         if let Some(optimized) = self.strategy_repo.get_best_dna(&self.symbol, &self.strategy_id).await? {
-            info!("✨ [{}] DNA loaded successfully! (Fitness: {:.4})", self.symbol, optimized.fitness);
-            if let Some(ref mut strat) = self.strategy {
-                strat.update_from_dna(&optimized.dna);
+            if self.apply_dna(&optimized.dna, optimized.fitness, "DB Best DNA") {
+                return Ok(());
+            } else {
+                warn!("⚠️ [{}] DNA trong DB không tương thích số chiều. Bỏ qua và sử dụng cấu hình mặc định.", self.symbol);
+                return Ok(());
             }
-            self.helios_config.update_from_dna(&optimized.dna);
-            return Ok(());
         }
         warn!("⚠️ [{}] No saved DNA found. Using default parameters.", self.symbol);
         Ok(())
@@ -366,10 +399,7 @@ impl AssetActor {
 
     /// Cập nhật bộ DNA cho chiến thuật hiện tại
     pub fn update_strategy_dna(&mut self, dna: &[f64]) {
-        if let Some(ref mut strategy) = self.strategy {
-            strategy.update_from_dna(dna);
-        }
-        self.helios_config.update_from_dna(dna);
+        self.apply_dna(dna, 0.0, "Manual / Forward Test Update");
     }
 
     /// Kiểm tra và cập nhật DNA từ Receiver nếu có DNA mới từ Re-Optimizer
