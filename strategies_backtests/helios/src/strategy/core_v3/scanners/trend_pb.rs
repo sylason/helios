@@ -13,22 +13,26 @@ impl TacticalScanner for TrendPBScanner {
         ScannerId::TrendPullback
     }
 
-    fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, _matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
+    fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
         let pb_cfg = &config.tactical_sniper.pullback;
         
-        let slope_adj = sensors.kama_slope_adj[i];
-        let stoch_k = sensors.stoch_trend_k[i];
-        let rsi = sensors.rsi_trend[i];
+        let kama_slope = matrix.kama_slope_atr.get(i).copied()
+            .unwrap_or_else(|| sensors.kama_slope_adj.get(i).copied().unwrap_or(0.0));
+        let stoch_k = sensors.stoch_trend_k.get(i).copied().unwrap_or(f64::NAN);
+        let rsi = sensors.rsi_trend.get(i).copied().unwrap_or(f64::NAN);
 
-        if slope_adj.is_nan() || stoch_k.is_nan() || rsi.is_nan() {
+        if kama_slope.is_nan() || stoch_k.is_nan() || rsi.is_nan() {
             return None;
         }
 
         let slope_thresh = pb_cfg.kama_slope_threshold.max(1e-4);
-        if slope_adj.abs() < slope_thresh {
+        if kama_slope.abs() < slope_thresh {
             return None; // Độ dốc KAMA chưa đủ mạnh để hình thành xu hướng
         }
+
+        let trend_axis = matrix.trend_axis.get(i).copied()
+            .unwrap_or_else(|| matrix.trend_strength.get(i).copied().unwrap_or(0.5));
 
         let close = tick.closes()[i];
         let open = tick.opens()[i];
@@ -48,12 +52,12 @@ impl TacticalScanner for TrendPBScanner {
         let tr_span = (high - low).max(1e-6);
         let clv = (2.0 * close - (high + low)) / tr_span;
 
-        let f_slope = (slope_adj.abs() / slope_thresh).tanh().min(1.0);
+        let f_slope = (kama_slope.abs() / slope_thresh).tanh().min(1.0);
 
         // -------------------------------------------------------------------------
-        // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên + Hồi Quy An Toàn + Gradient Dương)
+        // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên Rõ Rệt + Hồi Quy An Toàn + Gradient Dương)
         // -------------------------------------------------------------------------
-        if slope_adj > 0.0 {
+        if kama_slope > slope_thresh {
             // Chốt chặn 1: Hộp không gian hồi quy (-inval <= delta_kama <= max_dist)
             if delta_kama < -inval_floor || delta_kama > max_dist {
                 return None; // Thủng KAMA gãy trend hoặc bay quá xa KAMA mua đu đỉnh
@@ -72,7 +76,7 @@ impl TacticalScanner for TrendPBScanner {
 
             let f_dist = (1.0 - (delta_kama.abs() / max_dist)).max(0.0).min(1.0);
             let f_stoch = (1.0 - (stoch_k / stoch_thresh)).max(0.0).min(1.0);
-            let score_long = (f_slope + f_dist + f_stoch) / 3.0;
+            let score_long = ((f_slope + f_dist + f_stoch) / 3.0) * (0.50 + 0.50 * trend_axis.min(1.0));
 
             if score_long >= pb_cfg.min_activation_score {
                 // 🛡️ Structural SL neo dưới đáy nhịp hồi hoặc đường hỗ trợ KAMA
@@ -92,9 +96,9 @@ impl TacticalScanner for TrendPBScanner {
             }
         }
         // -------------------------------------------------------------------------
-        // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống + Hồi Quy An Toàn + Gradient Âm)
+        // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống Rõ Rệt + Hồi Quy An Toàn + Gradient Âm)
         // -------------------------------------------------------------------------
-        else if slope_adj < 0.0 {
+        else if kama_slope < -slope_thresh {
             // Chốt chặn 1: Hộp không gian hồi quy (-max_dist <= delta_kama <= inval)
             if delta_kama > inval_floor || delta_kama < -max_dist {
                 return None; // Vượt thủng KAMA gãy trend hoặc rơi quá xa KAMA bán đuổi đáy
@@ -113,7 +117,7 @@ impl TacticalScanner for TrendPBScanner {
 
             let f_dist = (1.0 - (delta_kama.abs() / max_dist)).max(0.0).min(1.0);
             let f_stoch = ((stoch_k - (100.0 - stoch_thresh)) / stoch_thresh).max(0.0).min(1.0);
-            let score_short = (f_slope + f_dist + f_stoch) / 3.0;
+            let score_short = ((f_slope + f_dist + f_stoch) / 3.0) * (0.50 + 0.50 * trend_axis.min(1.0));
 
             if score_short >= pb_cfg.min_activation_score {
                 // 🛡️ Structural SL neo trên đỉnh nhịp hồi hoặc đường kháng cự KAMA

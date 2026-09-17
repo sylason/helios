@@ -267,42 +267,70 @@ pub struct MatrixConfig {
     
     #[dna(min = 1.0, max = 10.0, step = 0.3)]
     pub z_score_sensitivity: f64,
+
+    /// 🚀 3 GEN TRỰC GIAO MỚI CHO DE-OVERENGINEERED MATRIX:
+    /// 1. Ngưỡng ADX xác nhận xu hướng rõ rệt (15.0 -> 40.0, Step 1.0 -> 26 nấc)
+    #[dna(min = 15.0, max = 40.0, step = 1.0)]
+    #[serde(default = "default_adx_trend_threshold")]
+    pub adx_trend_threshold: f64,
+
+    /// 2. Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR (0.05 -> 0.50, Step 0.01 -> 46 nấc)
+    #[dna(min = 0.05, max = 0.50, step = 0.01)]
+    #[serde(default = "default_kama_slope_scale_atr")]
+    pub kama_slope_scale_atr: f64,
+
+    /// 3. Độ nhạy bùng nổ khối lượng qua Z-score (1.0 -> 3.0, Step 0.1 -> 21 nấc)
+    #[dna(min = 1.0, max = 3.0, step = 0.1)]
+    #[serde(default = "default_vol_z_sensitivity")]
+    pub vol_z_sensitivity: f64,
 }
+
+fn default_adx_trend_threshold() -> f64 { 25.0 }
+fn default_kama_slope_scale_atr() -> f64 { 0.20 }
+fn default_vol_z_sensitivity() -> f64 { 1.50 }
 
 /// ============================================================================
 /// PHẦN 3: BỘ TRỌNG TÀI & ĐẤU GIÁ TÍN HIỆU (ARBITER CONFIDENCE AUCTION CONFIG)
 /// ============================================================================
-/// Điều phối, kiểm soát quyền phủ quyết và phê duyệt tín hiệu từ 6 Tactical Scanners.
-/// Áp dụng dải phổ quát Universal 1% -> 99% với bước nhảy 3% (~33 nấc nhảy ý nghĩa).
+/// Đã được De-overengineer sang mô hình chấm điểm tuyến tính O(1).
+/// Loại bỏ 5 gen ma và 7 Multipliers phi tuyến.
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct ArbiterConfig {
-    /// 1. Ngưỡng Phủ Quyết Bối Cảnh Nghịch (Veto Threshold: 1% -> 50%, Step 3% -> 17 nấc)
-    /// Khi hệ số bối cảnh (Multiplier) thấp hơn ngưỡng này, lệnh bị hủy ngay lập tức.
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    /// 🎯 NGƯỠNG PHÊ DUYỆT TỰ TIN TUYẾN TÍNH DUY NHẤT (0.05 -> 0.50, Step 0.01 -> 46 nấc)
+    #[dna(min = 0.05, max = 0.50, step = 0.01)]
+    #[serde(default = "default_min_confidence_threshold")]
+    pub min_confidence_threshold: f64,
+
+    // =========================================================================
+    // 🧹 CÁC TRƯỜNG CŨ ĐÃ BỎ GEN DNA (COMMENT OUT #[dna(...)]) ĐỂ DE-OVERENGINEER
+    // Tạm thời giữ lại để tương thích mã nguồn cho đến khi Bước 4 (Arbiter) hoàn tất.
+    // =========================================================================
+    #[serde(default = "default_min_multiplier_veto")]
     pub min_multiplier_veto: f64,
     
-    /// 2. Tỷ Trọng Điểm Số Scanner vs Trọng Số Bối Cảnh (1% -> 99%, Step 3% -> 33 nấc)
-    /// Trọng số quyết định mức độ ưu tiên giữa độ tin cậy của Scanner và ma trận thị trường.
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    #[serde(default = "default_scanner_weight")]
     pub scanner_weight: f64,
 
-    /// 3. Ngưỡng Phê Duyệt Tự Tin Khi Thị Trường Có Xu Hướng (Trending: 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    #[serde(default = "default_min_confidence_trending")]
     pub min_confidence_trending: f64,
     
-    /// 4. Ngưỡng Phê Duyệt Tự Tin Khi Thị Trường Đi Ngang (Ranging: 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    #[serde(default = "default_min_confidence_ranging")]
     pub min_confidence_ranging: f64,
     
-    /// 5. Ngưỡng Phê Duyệt Tự Tin Khi Thị Trường Nén Tích Lũy (Compression: 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    #[serde(default = "default_min_confidence_compression")]
     pub min_confidence_compression: f64,
 
-    /// 6. Ngưỡng Phê Duyệt Tự Tin Khi Thị Trường Bão Hỗn Loạn (Chaos / Whipsaw: 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
-    #[serde(alias = "min_confidence_volatile")]
+    #[serde(default = "default_min_confidence_chaos", alias = "min_confidence_volatile")]
     pub min_confidence_chaos: f64,
 }
+
+fn default_min_confidence_threshold() -> f64 { 0.20 }
+fn default_min_multiplier_veto() -> f64 { 0.01 }
+fn default_scanner_weight() -> f64 { 0.50 }
+fn default_min_confidence_trending() -> f64 { 0.20 }
+fn default_min_confidence_ranging() -> f64 { 0.20 }
+fn default_min_confidence_compression() -> f64 { 0.20 }
+fn default_min_confidence_chaos() -> f64 { 0.20 }
 
 /// ============================================================================
 /// PHẦN 4: BỘ 6 CHIẾN ĐỘI TÁC CHIẾN BẮN TỈA (TACTICAL SNIPER CONFIG)
