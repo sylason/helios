@@ -22,15 +22,15 @@ impl TacticalScanner for MomentumIgnitionScanner {
         let bb_l = sensors.bb_lower[i];
         let close = tick.closes()[i];
         let atr = sensors.atr_sl[i];
-        let vol_force = matrix.volume_force[i];
+        let flow_force = matrix.flow_axis.get(i).copied().unwrap_or(matrix.volume_force[i]);
 
         if rsi_mom.is_nan() || bb_u.is_nan() || bb_l.is_nan() || atr.is_nan() || atr <= 0.0 {
             return None;
         }
 
         let rsi_thresh = mom_cfg.rsi_threshold;
-        let vol_z_thresh = mom_cfg.vol_z_threshold.max(0.01);
-        let f_vol = (vol_force / vol_z_thresh).tanh().max(0.0).min(1.0);
+        let vol_thresh = mom_cfg.vol_z_threshold.max(0.01);
+        let f_vol = (flow_force / vol_thresh).tanh().max(0.0).min(1.0);
 
         // 1. Chấm điểm Mềm Mẫu Hình LONG (BB Upper Breakout + RSI Surge + Volume Force)
         let f_break_long = 1.0 / (1.0 + (-2.0 * (close - bb_u) / atr).exp());

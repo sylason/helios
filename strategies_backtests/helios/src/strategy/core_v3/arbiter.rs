@@ -4,6 +4,7 @@ use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalType {
@@ -104,18 +105,44 @@ impl HeliosArbiter {
         }
     }
 
+    /// 🧭 DIRECTIONAL MACRO VETO: Kiểm tra bộ lọc xu hướng vĩ mô đối xứng 2 chiều
+    /// - Khi KAMA dốc xuống âm sâu (< -thresh) và trend_axis >= 0.40: CẤM TUYỆT ĐỐI MỞ LONG (Chống bắt dao rơi).
+    /// - Khi KAMA dốc lên dương lớn (> +thresh) và trend_axis >= 0.40: CẤM TUYỆT ĐỐI MỞ SHORT (Chống cản đầu xe tăng).
+    #[inline]
+    pub fn is_direction_vetoed(signal: SignalType, kama_slope_atr: f64, trend_axis: f64, threshold: f64) -> bool {
+        let thresh = if threshold <= 0.0 { 0.10 } else { threshold };
+        match signal {
+            SignalType::Long => kama_slope_atr < -thresh && trend_axis >= 0.40,
+            SignalType::Short => kama_slope_atr > thresh && trend_axis >= 0.40,
+        }
+    }
+
     pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, _debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
         let current_close = tick.closes()[i];
         
         let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
         let min_threshold = config.arbiter.min_confidence_threshold;
+        let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
+        let trend_axis = matrix.trend_axis.get(i).copied().unwrap_or(0.0);
+        let macro_thresh = 0.10;
 
         let mut approved_proposals: Vec<(Proposal, f64)> = Vec::new();
 
-        // 1. THU THẬP & CHẤM ĐIỂM TỰ TIN TUYẾN TÍNH O(1) CHO CÁC PROPOSALS
+        // 1. THU THẬP, LỌC MACRO VETO & CHẤM ĐIỂM TỰ TIN TUYẾN TÍNH O(1) CHO CÁC PROPOSALS
         for scanner in &self.scanners {
             if let Some(proposal) = scanner.scan(tick, sensors, matrix, config) {
+                // 🧭 DIRECTIONAL MACRO VETO (CHỐNG BẮT DAO RƠI & CẢN ĐẦU XE TĂNG)
+                if Self::is_direction_vetoed(proposal.signal_type, kama_slope, trend_axis, macro_thresh) {
+                    if _debug_mode {
+                        warn!(
+                            "🛑 [MACRO VETO] Bar: {} | Scanner: {:?} | Signal: {:?} | KAMA Slope: {:.3} | TrendAxis: {:.2} -> VETOED in extreme unidirectional trend!",
+                            i, proposal.scanner_id, proposal.signal_type, kama_slope, trend_axis
+                        );
+                    }
+                    continue;
+                }
+
                 let confidence = Self::compute_confidence(proposal.raw_score, chaos_val);
                 if confidence >= min_threshold {
                     approved_proposals.push((proposal, confidence));
@@ -243,5 +270,29 @@ mod tests {
         let conf_short = 0.72_f64;
         let diff = (conf_long - conf_short).abs();
         assert!(diff <= 0.15, "Xung đột căng thẳng không vượt trội");
+    }
+
+    #[test]
+    fn test_directional_macro_veto_logic() {
+        let thresh = 0.10;
+
+        // 1. Thác đổ (KAMA slope = -0.25, trend_axis = 0.60):
+        // Long bị VETO, Short được PHÉP
+        assert!(HeliosArbiter::is_direction_vetoed(SignalType::Long, -0.25, 0.60, thresh), "Thác đổ mạnh phải cấm Long!");
+        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Short, -0.25, 0.60, thresh), "Thác đổ mạnh phải cho phép Short!");
+
+        // 2. Dựng cột (KAMA slope = +0.30, trend_axis = 0.55):
+        // Short bị VETO, Long được PHÉP
+        assert!(HeliosArbiter::is_direction_vetoed(SignalType::Short, 0.30, 0.55, thresh), "Dựng cột mạnh phải cấm Short!");
+        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Long, 0.30, 0.55, thresh), "Dựng cột mạnh phải cho phép Long!");
+
+        // 3. Sideway / Trung hòa (KAMA slope = -0.05, trend_axis = 0.20):
+        // Cả Long và Short đều KHÔNG bị Veto
+        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Long, -0.05, 0.20, thresh), "Sideway không được cấm Long!");
+        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Short, -0.05, 0.20, thresh), "Sideway không được cấm Short!");
+
+        // 4. KAMA dốc nhưng ADX yếu (KAMA slope = -0.30 nhưng trend_axis = 0.30 < 0.40):
+        // Chưa đủ xác nhận xu hướng vĩ mô mạnh -> Không cấm
+        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Long, -0.30, 0.30, thresh), "Trend axis yếu không được kích hoạt Veto!");
     }
 }

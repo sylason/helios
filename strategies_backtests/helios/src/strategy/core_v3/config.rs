@@ -21,7 +21,6 @@ pub struct HeliosConfigV3 {
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
-#[dna(default(min = 8.0, max = 80.0, step = 3.0))]
 pub struct IndicatorsConfig {
     #[dna(nest)]
     pub kama: KamaParams,
@@ -35,7 +34,8 @@ pub struct IndicatorsConfig {
     pub rsi_reversal: RsiParams,
     #[dna(nest)]
     pub rsi_momentum: RsiParams,
-    #[dna(nest)]
+    // [V3.3 TINH GIẢN DNA] Tắt gen cảm biến RSI riêng của Anomaly (giảm 2 gen)
+    // #[dna(nest)]
     pub rsi_anomaly: RsiParams,
 
     #[dna(nest)]
@@ -48,7 +48,8 @@ pub struct IndicatorsConfig {
     // CẢM BIẾN STOCHASTIC ĐỘC LẬP PER-PLAYBOOK
     #[dna(nest)]
     pub stoch_trend: StochasticParams,
-    #[dna(nest)]
+    // [V3.3 TINH GIẢN DNA] Tắt gen cảm biến Stochastic của Range Oscillator (giảm 7 gen)
+    // #[dna(nest)]
     pub stoch_range: StochasticParams,
 
     #[dna(nest)]
@@ -75,7 +76,8 @@ pub struct KamaParams {
     #[dna(min = 20.0, max = 80.0, step = 4.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub long_period: usize,
-    #[dna(subset = "5m, 15m, 1h, 4h")]
+    /// 🧭 NEO KHUNG VĨ MÔ (Macro Anchor): Khóa cận dưới Timeframe KAMA tối thiểu >= 15m (chỉ chọn 15m, 1h, 4h)
+    #[dna(subset = "15m, 1h, 4h")]
     pub timeframe: Timeframe,
 }
 
@@ -343,11 +345,13 @@ pub struct TacticalSniperConfig {
     pub pullback: TacticalPullbackParams,
     #[dna(nest)]
     pub momentum: TacticalMomentumParams,
-    #[dna(nest)]
+    // [V3.3 TINH GIẢN DNA] Tắt gen của Range Oscillator (giảm 12 gen)
+    // #[dna(nest)]
     pub range: TacticalRangeParams,
     #[dna(nest)]
     pub reversal: TacticalReversalParams,
-    #[dna(nest)]
+    // [V3.3 TINH GIẢN DNA] Tắt gen của Anomaly Fade (giảm 5 gen)
+    // #[dna(nest)]
     pub anomaly: TacticalAnomalyParams,
     #[dna(nest)]
     pub absorption: TacticalAbsorptionParams,
@@ -404,8 +408,8 @@ pub struct TacticalMomentumParams {
     #[dna(min = 1.0, max = 99.0, step = 3.0)]
     pub rsi_threshold: f64,
 
-    /// Độ lệch chuẩn Z-Score Volume bùng nổ (0.2 -> 5.0 sigma, Step 0.2 -> 25 nấc)
-    #[dna(min = 0.20, max = 5.00, step = 0.20)]
+    /// Ngưỡng Z-Score / Volume Force bùng nổ xung lực (0.10 -> 1.00, Step 0.05 -> 19 nấc)
+    #[dna(min = 0.10, max = 1.00, step = 0.05)]
     pub vol_z_threshold: f64,
 
     /// Ngưỡng kích hoạt mềm Momentum Ignition (Universal 1% -> 99%, Step 3% -> 33 nấc)

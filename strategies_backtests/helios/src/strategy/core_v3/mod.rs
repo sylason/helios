@@ -22,12 +22,76 @@ use crate::strategy::core_v3::arbiter::{HeliosArbiter, SignalType, ScannerId};
 use crate::strategy::core_v3::risk::RiskManager;
 use tracing::warn;
 
-/// Trạng thái Cooldown chống cào lệnh sau khi cắt lỗ / hòa vốn
+/// Trạng thái Cooldown chống cào lệnh & bẫy trả thù (Losing Streak Memory & Exponential Backoff)
 #[derive(Clone, Debug, Default)]
 pub struct CooldownTracker {
     pub locked_until_bar: usize,
     pub locked_side: Option<SignalType>,
     pub last_exit_price: f64,
+    pub consecutive_losses: usize,
+    pub last_losing_side: Option<SignalType>,
+    pub last_losing_price: f64,
+}
+
+impl CooldownTracker {
+    /// Tính toán số nến cooldown phạt lũy tiến (Exponential Backoff) với trần tối đa (Max Cap = 60 nến ~ 1 giờ)
+    #[inline]
+    pub fn calculate_exponential_cooldown(base_bars: usize, consecutive_losses: usize, max_cap: usize) -> usize {
+        if base_bars == 0 || consecutive_losses == 0 {
+            return 0;
+        }
+        let streak_power = (consecutive_losses.saturating_sub(1)).min(2) as u32;
+        let multiplier = 1usize << streak_power; // 1, 2, hoặc 4
+        let penalty = base_bars.saturating_mul(multiplier);
+        let cap = if max_cap == 0 { 60 } else { max_cap };
+        penalty.min(cap)
+    }
+
+    /// Kiểm tra xem một tín hiệu vào lệnh có bị chặn bởi Cooldown Tracker hay không
+    #[inline]
+    pub fn should_block(
+        &self,
+        enable_cooldown: bool,
+        current_bar: usize,
+        signal: SignalType,
+        current_price: f64,
+        atr: f64,
+        breakout_atr_mult: f64,
+    ) -> bool {
+        if !enable_cooldown {
+            return false;
+        }
+
+        // 🛡️ 1. SAME-SIDE PRICE GUARD:
+        // Nếu đang trong chuỗi thua cùng chiều: Cấm vào lệnh nếu giá hiện tại tồi tệ hơn giá vừa cắt lỗ!
+        if self.consecutive_losses > 0 && self.last_losing_side == Some(signal) {
+            let is_worse_price = match signal {
+                SignalType::Long => current_price < self.last_losing_price,
+                SignalType::Short => current_price > self.last_losing_price,
+            };
+            if is_worse_price {
+                return true; // Chặn đứng bắt dao rơi / cản đầu xe tăng khi giá tồi tệ hơn điểm cắt lỗ
+            }
+        }
+
+        // 🛡️ 2. UNIVERSAL BIDIRECTIONAL EXPONENTIAL COOLDOWN:
+        if current_bar < self.locked_until_bar {
+            let mult = if breakout_atr_mult <= 0.0 { 1.5 } else { breakout_atr_mult };
+            let threshold = mult * atr.max(1e-5);
+
+            // Chỉ mở khóa sớm nếu giá bứt phá vượt ngưỡng thuận chiều
+            let is_favorable_breakout = match signal {
+                SignalType::Long => (current_price - self.last_exit_price) >= threshold,
+                SignalType::Short => (self.last_exit_price - current_price) >= threshold,
+            };
+
+            if !is_favorable_breakout {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 /// Chiến lược Helios V3.3 - Clean Quant Architecture
@@ -212,23 +276,49 @@ impl Strategy for HeliosStrategyV3 {
                         (is_l, pnl, exit_p)
                     };
 
+                    let closed_side = if is_long { SignalType::Long } else { SignalType::Short };
+
                     // Nếu lệnh vừa đóng hòa vốn hoặc lỗ danh nghĩa (<= 0.001)
                     if trade_pnl <= 0.001 {
-                        self.cooldown_tracker.locked_until_bar = i + stop_cfg.re_entry_cooldown_bars;
-                        self.cooldown_tracker.locked_side = if is_long { Some(SignalType::Long) } else { Some(SignalType::Short) };
+                        // 1. Cập nhật Losing Streak Memory:
+                        if self.cooldown_tracker.last_losing_side == Some(closed_side) {
+                            self.cooldown_tracker.consecutive_losses = self.cooldown_tracker.consecutive_losses.saturating_add(1);
+                        } else {
+                            self.cooldown_tracker.consecutive_losses = 1;
+                        }
+                        self.cooldown_tracker.last_losing_side = Some(closed_side);
+                        self.cooldown_tracker.last_losing_price = exit_price;
+
+                        // 2. Tính phạt Exponential Backoff (15 -> 30 -> 60 nến max cap):
+                        let effective_cooldown = CooldownTracker::calculate_exponential_cooldown(
+                            stop_cfg.re_entry_cooldown_bars,
+                            self.cooldown_tracker.consecutive_losses,
+                            60, // Trần Max Cap 60 nến (~1 giờ) chống khóa vô hạn
+                        );
+
+                        self.cooldown_tracker.locked_until_bar = i + effective_cooldown;
+                        self.cooldown_tracker.locked_side = Some(closed_side);
                         self.cooldown_tracker.last_exit_price = exit_price;
 
                         if self.debug_mode {
                             warn!(
-                                "🛑 [COOLDOWN TRIGGERED] Bar: {} | Side: {:?} | Entry: {:.2} | Exit: {:.2} | Realized PnL: {:.4} <= 0.001 | Locked until Bar: {} ({} bars)",
-                                i, self.cooldown_tracker.locked_side, last_trade.entry_price, exit_price, trade_pnl, self.cooldown_tracker.locked_until_bar, stop_cfg.re_entry_cooldown_bars
+                                "🛑 [EXPONENTIAL COOLDOWN TRIGGERED] Bar: {} | Side: {:?} | Streak: {} | Penalty: {} bars (Cap: 60) | Exit: {:.2} | Realized PnL: {:.4} <= 0.001 | Locked until Bar: {}",
+                                i, closed_side, self.cooldown_tracker.consecutive_losses, effective_cooldown, exit_price, trade_pnl, self.cooldown_tracker.locked_until_bar
                             );
                         }
-                    } else if self.debug_mode {
-                        warn!(
-                            "ℹ️ [COOLDOWN SKIPPED - REAL PROFIT] Bar: {} | Side: {:?} | Entry: {:.2} | Exit: {:.2} | Realized PnL: {:.4} > 0.001 -> Cooldown NOT triggered",
-                            i, if is_long { SignalType::Long } else { SignalType::Short }, last_trade.entry_price, exit_price, trade_pnl
-                        );
+                    } else {
+                        // 3. LỆNH THẮNG THỰC TẾ (> 0.001): RESET TOÀN BỘ CHUỖI THUA & COOLDOWN VỀ 0
+                        self.cooldown_tracker.consecutive_losses = 0;
+                        self.cooldown_tracker.locked_until_bar = 0;
+                        self.cooldown_tracker.locked_side = None;
+                        self.cooldown_tracker.last_losing_side = None;
+
+                        if self.debug_mode {
+                            warn!(
+                                "🎉 [COOLDOWN FULL RESET - WINNING TRADE] Bar: {} | Side: {:?} | Entry: {:.2} | Exit: {:.2} | Realized PnL: {:.4} > 0.001 -> Reset streak & Cooldown to 0!",
+                                i, closed_side, last_trade.entry_price, exit_price, trade_pnl
+                            );
+                        }
                     }
                 }
                 self.prev_open_trade = None;
@@ -245,49 +335,37 @@ impl Strategy for HeliosStrategyV3 {
 
         let mut arbiter = HeliosArbiter::new(); 
         
+        // 🎯 4 PLAYBOOK CHỦ LỰC V3.3: Loại bỏ Anomaly (bắt dao rơi) và RangeOsc (nhiễu sideway)
         arbiter.add_scanner(Box::new(scanners::trend_pb::TrendPBScanner));
         arbiter.add_scanner(Box::new(scanners::momentum_ignition::MomentumIgnitionScanner));
-        arbiter.add_scanner(Box::new(scanners::range_osc::RangeOscScanner));
         arbiter.add_scanner(Box::new(scanners::reversal::ReversalScanner));
-        arbiter.add_scanner(Box::new(scanners::anomaly::AnomalyScanner));
         arbiter.add_scanner(Box::new(scanners::absorption::AbsorptionScanner));
 
         let decision = arbiter.process_tick(tick, &self.sensors, &self.matrix, &self.config, self.debug_mode);
 
         if decision.is_approved {
             if let Some(signal) = decision.final_signal {
-                // 4. KIỂM TRA BỘ LỌC RE-ENTRY COOLDOWN (FLAW-TSL.7: UNIVERSAL BIDIRECTIONAL COOLDOWN & DIRECTIONAL EARLY RELEASE)
+                // 4. KIỂM TRA BỘ LỌC RE-ENTRY COOLDOWN & SAME-SIDE PRICE GUARD
                 let stop_cfg = &self.config.risk_management.stop_management;
-                if stop_cfg.enable_re_entry_cooldown && i < self.cooldown_tracker.locked_until_bar {
-                    let current_price = tick.closes()[i];
-                    let current_atr = self.sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
-                    let mult = if stop_cfg.cooldown_breakout_atr_mult <= 0.0 { 1.5 } else { stop_cfg.cooldown_breakout_atr_mult };
-                    let threshold = mult * current_atr;
-                    
-                    // 🎯 SỬA FLAW-TSL.7: Khóa 2 chiều chống bẫy Alternating Whipsaw ở đỉnh/đáy.
-                    // Với Long: Chỉ mở khóa sớm nếu giá HỒI PHỤC TĂNG VƯỢT LÊN (current_price - last_exit >= mult * ATR)
-                    // Với Short: Chỉ mở khóa sớm nếu giá SẬP GÃY GIẢM SÂU XUỐNG (last_exit - current_price >= mult * ATR)
-                    let is_favorable_breakout = if signal == SignalType::Long {
-                        (current_price - self.cooldown_tracker.last_exit_price) >= threshold
-                    } else {
-                        (self.cooldown_tracker.last_exit_price - current_price) >= threshold
-                    };
+                let current_price = tick.closes()[i];
+                let current_atr = self.sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
 
-                    if !is_favorable_breakout {
-                        if self.debug_mode {
-                            let diff = if signal == SignalType::Long {
-                                current_price - self.cooldown_tracker.last_exit_price
-                            } else {
-                                self.cooldown_tracker.last_exit_price - current_price
-                            };
-                            warn!(
-                                "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Bidirectional Cooldown! Locked until bar: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | FavorableDiff: {:+.2} < {:.2}*ATR ({:.2})",
-                                i, signal, self.cooldown_tracker.locked_until_bar, self.cooldown_tracker.locked_until_bar.saturating_sub(i),
-                                self.cooldown_tracker.last_exit_price, current_price, diff, mult, threshold
-                            );
-                        }
-                        return;
+                if self.cooldown_tracker.should_block(
+                    stop_cfg.enable_re_entry_cooldown,
+                    i,
+                    signal,
+                    current_price,
+                    current_atr,
+                    stop_cfg.cooldown_breakout_atr_mult,
+                ) {
+                    if self.debug_mode {
+                        warn!(
+                            "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Cooldown/Guard! Streak: {} | Locked until: {} | LastExit: {:.2} | Curr: {:.2}",
+                            i, signal, self.cooldown_tracker.consecutive_losses, self.cooldown_tracker.locked_until_bar,
+                            self.cooldown_tracker.last_exit_price, current_price
+                        );
                     }
+                    return;
                 }
                 let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
                 
@@ -367,23 +445,15 @@ mod tests {
         atr: f64,
         atr_mult: f64,
     ) -> bool {
-        if !enable_cooldown {
-            return false;
-        }
-        if current_bar < locked_until_bar {
-            let mult = if atr_mult <= 0.0 { 1.5 } else { atr_mult };
-            let threshold = mult * atr.max(1e-5);
-            // 🎯 SỬA FLAW-TSL.7: Khóa 2 chiều chống bẫy Alternating Whipsaw
-            let is_favorable_breakout = if signal == SignalType::Long {
-                (current_price - last_exit_price) >= threshold
-            } else {
-                (last_exit_price - current_price) >= threshold
-            };
-            if !is_favorable_breakout {
-                return true; // Bị chặn bởi Cooldown 2 chiều
-            }
-        }
-        false
+        let tracker = CooldownTracker {
+            locked_until_bar,
+            locked_side: None,
+            last_exit_price,
+            consecutive_losses: 0,
+            last_losing_side: None,
+            last_losing_price: 0.0,
+        };
+        tracker.should_block(enable_cooldown, current_bar, signal, current_price, atr, atr_mult)
     }
 
     #[test]
@@ -577,6 +647,59 @@ mod tests {
     }
 
     #[test]
+    fn test_exponential_cooldown_calculation() {
+        let base = 15;
+        let cap = 60;
+
+        // Thua 0 lần -> 0 nến
+        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 0, cap), 0);
+        // Thua lần 1 -> 15 * 2^0 = 15 nến
+        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 1, cap), 15);
+        // Thua lần 2 liên tiếp -> 15 * 2^1 = 30 nến
+        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 2, cap), 30);
+        // Thua lần 3 liên tiếp -> 15 * 2^2 = 60 nến (chạm trần)
+        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 3, cap), 60);
+        // Thua lần 4+ liên tiếp -> vẫn giữ trần 60 nến (chống khóa vô hạn)
+        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 4, cap), 60);
+        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 10, cap), 60);
+    }
+
+    #[test]
+    fn test_same_side_price_guard_blocks_worse_price() {
+        // Vừa cắt lỗ Long tại 2400.0, streak = 1
+        let tracker = CooldownTracker {
+            locked_until_bar: 10, // Giả sử đã hết thời gian khóa bar
+            locked_side: Some(SignalType::Long),
+            last_exit_price: 2400.0,
+            consecutive_losses: 1,
+            last_losing_side: Some(SignalType::Long),
+            last_losing_price: 2400.0,
+        };
+
+        // 1. Long ở giá tồi tệ hơn (2390.0 < 2400.0) -> BỊ CHẶN TUYỆT ĐỐI bởi Same-Side Price Guard (dù đã qua bar 10)
+        assert!(tracker.should_block(true, 15, SignalType::Long, 2390.0, 10.0, 1.5), "Long ở giá thấp hơn giá vừa cắt lỗ PHẢI BỊ CHẶN!");
+
+        // 2. Long ở giá phục hồi tốt hơn (2405.0 > 2400.0) và đã qua bar 10 -> CHO PHÉP
+        assert!(!tracker.should_block(true, 15, SignalType::Long, 2405.0, 10.0, 1.5), "Long ở giá hồi phục cao hơn giá cắt lỗ được phép vào");
+
+        // 3. Vừa cắt lỗ Short tại 2400.0, streak = 1
+        let tracker_short = CooldownTracker {
+            locked_until_bar: 10,
+            locked_side: Some(SignalType::Short),
+            last_exit_price: 2400.0,
+            consecutive_losses: 1,
+            last_losing_side: Some(SignalType::Short),
+            last_losing_price: 2400.0,
+        };
+
+        // Short ở giá cao hơn (2410.0 > 2400.0) -> BỊ CHẶN bởi Same-Side Price Guard
+        assert!(tracker_short.should_block(true, 15, SignalType::Short, 2410.0, 10.0, 1.5), "Short ở giá cao hơn giá vừa cắt lỗ PHẢI BỊ CHẶN!");
+
+        // Short ở giá sập sâu hơn (2395.0 < 2400.0) -> CHO PHÉP
+        assert!(!tracker_short.should_block(true, 15, SignalType::Short, 2395.0, 10.0, 1.5), "Short ở giá sập sâu hơn giá cắt lỗ được phép vào");
+    }
+
+    #[test]
     fn test_volume_zscore_differentiation_from_price() {
         use crate::strategy::sensors::HeliosSensors;
         use crate::strategy::core_v3::matrix::MarketMatrixV3;
@@ -759,7 +882,7 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 121, "DNA_WIDTH phải là chính xác 121 chiều sau khi De-overengineer Matrix & Arbiter!");
+        assert_eq!(width, 95, "DNA_WIDTH phải là chính xác 95 chiều sau khi tắt gen Anomaly & RangeOsc!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
@@ -770,12 +893,18 @@ mod tests {
         let has_phantom_comp = defs.iter().any(|(name, _)| name.contains("min_confidence_compression"));
         let has_phantom_veto = defs.iter().any(|(name, _)| name.contains("min_multiplier_veto"));
         let has_abs_adverse = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.max_adverse_slope"));
-        let has_range_bb_slope = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.max_bb_slope"));
-        let has_range_tp_ratio = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.tp_target_ratio"));
+        let has_range = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range"));
+        let has_anomaly = defs.iter().any(|(name, _)| name.contains("tactical_sniper.anomaly"));
+        let has_rsi_ano = defs.iter().any(|(name, _)| name.contains("rsi_anomaly"));
+        let has_stoch_range = defs.iter().any(|(name, _)| name.contains("stoch_range"));
         let has_pb_max_dist = defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.max_pullback_dist_atr"));
         let has_pb_inval = defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.invalidation_buffer_atr"));
         assert!(!has_macd, "defs không được chứa macd!");
         assert!(!has_vol_ma, "defs không được chứa vol_ma!");
+        assert!(!has_range, "defs KHÔNG được chứa tactical_sniper.range!");
+        assert!(!has_anomaly, "defs KHÔNG được chứa tactical_sniper.anomaly!");
+        assert!(!has_rsi_ano, "defs KHÔNG được chứa rsi_anomaly!");
+        assert!(!has_stoch_range, "defs KHÔNG được chứa stoch_range!");
         assert!(has_min_conf, "defs phải chứa min_confidence_threshold!");
         assert!(has_matrix_adx, "defs phải chứa matrix.adx_trend_threshold!");
         assert!(has_matrix_kama_scale, "defs phải chứa matrix.kama_slope_scale_atr!");
@@ -784,13 +913,11 @@ mod tests {
         assert!(!has_phantom_veto, "defs KHÔNG được chứa gen ma min_multiplier_veto!");
         assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
         assert!(has_abs_adverse, "defs phải chứa tactical_sniper.absorption.max_adverse_slope!");
-        assert!(has_range_bb_slope, "defs phải chứa tactical_sniper.range.max_bb_slope!");
-        assert!(has_range_tp_ratio, "defs phải chứa tactical_sniper.range.tp_target_ratio!");
         assert!(has_pb_max_dist, "defs phải chứa tactical_sniper.pullback.max_pullback_dist_atr!");
         assert!(has_pb_inval, "defs phải chứa tactical_sniper.pullback.invalidation_buffer_atr!");
 
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
-        assert_eq!(count_struct_sl, 4, "defs phải chứa chính xác 4 gene struct_sl_buffer_atr cho 4 Scanners!");
+        assert_eq!(count_struct_sl, 3, "defs phải chứa chính xác 3 gene struct_sl_buffer_atr cho 3 Scanners (pullback, momentum, absorption)!");
 
         // Thử cập nhật với vector toàn 0.0 (giả sử GA sinh số 0)
         let zeros = vec![0.0; width];
