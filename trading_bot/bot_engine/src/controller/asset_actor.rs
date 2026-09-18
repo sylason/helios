@@ -36,9 +36,25 @@ pub struct EngineCooldownGuard {
     pub locked_until_bar: usize,
     pub last_exit_price: f64,
     pub locked_side: Option<String>,
+    pub consecutive_losses: usize,
+    pub last_losing_side: Option<String>,
+    pub last_losing_price: f64,
 }
 
 impl EngineCooldownGuard {
+    /// Tính toán số nến cooldown phạt lũy tiến (Exponential Backoff) với trần tối đa 60 nến (~1 giờ)
+    #[inline]
+    pub fn calculate_exponential_cooldown(base_bars: usize, consecutive_losses: usize, max_cap: usize) -> usize {
+        if base_bars == 0 || consecutive_losses == 0 {
+            return 0;
+        }
+        let streak_power = (consecutive_losses.saturating_sub(1)).min(2) as u32;
+        let multiplier = 1usize << streak_power; // 1, 2, hoặc 4
+        let penalty = base_bars.saturating_mul(multiplier);
+        let cap = if max_cap == 0 { 60 } else { max_cap };
+        penalty.min(cap)
+    }
+
     /// Kiểm tra xem một Action (Buy/Sell) có bị chặn bởi Cooldown hay không
     /// Trả về `true` nếu bị VETO (chặn), `false` nếu HỢP LỆ (được phép thực thi)
     pub fn should_veto(
@@ -50,20 +66,41 @@ impl EngineCooldownGuard {
         enable_cooldown: bool,
         breakout_atr_mult: f64,
     ) -> bool {
-        if !enable_cooldown || current_bar_idx >= self.locked_until_bar {
+        if !enable_cooldown {
             return false;
         }
 
-        let mult = if breakout_atr_mult <= 0.0 { 1.5 } else { breakout_atr_mult };
-        let threshold = mult * current_atr;
+        // 🛡️ 1. SAME-SIDE PRICE GUARD:
+        // Nếu đang trong chuỗi thua cùng chiều: Cấm vào lệnh nếu giá hiện tại tồi tệ hơn giá vừa cắt lỗ!
+        let side_str = if is_buy { "LONG" } else { "SHORT" };
+        if self.consecutive_losses > 0 && self.last_losing_side.as_deref() == Some(side_str) {
+            let is_worse_price = if is_buy {
+                current_close < self.last_losing_price
+            } else {
+                current_close > self.last_losing_price
+            };
+            if is_worse_price {
+                return true; // Veto bắt dao rơi / cản đầu xe tăng khi giá tồi tệ hơn điểm cắt lỗ
+            }
+        }
 
-        let is_favorable_breakout = if is_buy {
-            (current_close - self.last_exit_price) >= threshold
-        } else {
-            (self.last_exit_price - current_close) >= threshold
-        };
+        // 🛡️ 2. UNIVERSAL BIDIRECTIONAL EXPONENTIAL COOLDOWN:
+        if current_bar_idx < self.locked_until_bar {
+            let mult = if breakout_atr_mult <= 0.0 { 1.5 } else { breakout_atr_mult };
+            let threshold = mult * current_atr;
 
-        !is_favorable_breakout
+            let is_favorable_breakout = if is_buy {
+                (current_close - self.last_exit_price) >= threshold
+            } else {
+                (self.last_exit_price - current_close) >= threshold
+            };
+
+            if !is_favorable_breakout {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
@@ -294,6 +331,7 @@ impl AssetActor {
                                     self.symbol, pending.fitness, pending.dna.len()
                                 );
                             }
+                            self.helios_config.update_from_dna(&pending.dna);
                         }
                     }
                 }
@@ -528,14 +566,42 @@ impl AssetActor {
 
                     // 🛡️ DUAL SENTINELS: Kích hoạt Cooldown tại Engine khi lệnh đóng lỗ hoặc hòa vốn danh nghĩa
                     let stop_cfg = &self.helios_config.risk_management.stop_management;
-                    if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 && trade_pnl <= 0.001 {
-                        self.cooldown_guard.locked_until_bar = current_bar_idx + stop_cfg.re_entry_cooldown_bars;
-                        self.cooldown_guard.last_exit_price = exit_price;
-                        self.cooldown_guard.locked_side = Some(side_str.to_string());
-                        warn!(
-                            "🛑 [ENGINE COOLDOWN ACTIVATED] Symbol: {} | Side: {} | Entry: {:.2} | Exit: {:.2} | PnL: {:+.4} <= 0.001 | Locked until bar_idx: {} ({} bars) | Directional Early Release Mult: {:.2}",
-                            self.symbol, side_str, p.entry_price, exit_price, trade_pnl, self.cooldown_guard.locked_until_bar, stop_cfg.re_entry_cooldown_bars, stop_cfg.cooldown_breakout_atr_mult
-                        );
+                    if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 {
+                        if trade_pnl <= 0.001 {
+                            // 1. Cập nhật chuỗi thua:
+                            if self.cooldown_guard.last_losing_side.as_deref() == Some(side_str) {
+                                self.cooldown_guard.consecutive_losses = self.cooldown_guard.consecutive_losses.saturating_add(1);
+                            } else {
+                                self.cooldown_guard.consecutive_losses = 1;
+                            }
+                            self.cooldown_guard.last_losing_side = Some(side_str.to_string());
+                            self.cooldown_guard.last_losing_price = exit_price;
+
+                            // 2. Tính Exponential Cooldown (trần 60 nến ~ 1 giờ):
+                            let effective_cooldown = EngineCooldownGuard::calculate_exponential_cooldown(
+                                stop_cfg.re_entry_cooldown_bars,
+                                self.cooldown_guard.consecutive_losses,
+                                60,
+                            );
+
+                            self.cooldown_guard.locked_until_bar = current_bar_idx + effective_cooldown;
+                            self.cooldown_guard.last_exit_price = exit_price;
+                            self.cooldown_guard.locked_side = Some(side_str.to_string());
+                            warn!(
+                                "🛑 [ENGINE EXPONENTIAL COOLDOWN ACTIVATED] Symbol: {} | Side: {} | Streak: {} | Penalty: {} bars (Cap: 60) | Exit: {:.2} | PnL: {:+.4} <= 0.001 | Locked until bar_idx: {}",
+                                self.symbol, side_str, self.cooldown_guard.consecutive_losses, effective_cooldown, exit_price, trade_pnl, self.cooldown_guard.locked_until_bar
+                            );
+                        } else {
+                            // 3. RESET TOÀN BỘ KHI CÓ LỢI NHUẬN THỰC TẾ:
+                            self.cooldown_guard.consecutive_losses = 0;
+                            self.cooldown_guard.locked_until_bar = 0;
+                            self.cooldown_guard.locked_side = None;
+                            self.cooldown_guard.last_losing_side = None;
+                            info!(
+                                "🎉 [ENGINE COOLDOWN RESET - REAL PROFIT] Symbol: {} | Side: {} | PnL: {:+.4} > 0.001 -> Reset streak & Cooldown to 0!",
+                                self.symbol, side_str, trade_pnl
+                            );
+                        }
                     }
                 }
 
@@ -729,6 +795,7 @@ mod tests {
             locked_until_bar: 115,
             last_exit_price: 2000.0,
             locked_side: Some("LONG".to_string()),
+            ..Default::default()
         };
 
         let current_bar = 105; // Còn 10 bars trong cooldown
@@ -754,6 +821,7 @@ mod tests {
             locked_until_bar: 115,
             last_exit_price: 2000.0,
             locked_side: Some("LONG".to_string()),
+            ..Default::default()
         };
 
         let current_bar = 105;
@@ -791,6 +859,7 @@ mod tests {
             locked_until_bar: 115,
             last_exit_price: 2000.0,
             locked_side: Some("LONG".to_string()),
+            ..Default::default()
         };
 
         // 1. Hết hạn cooldown (bar 116 >= 115): Cho phép mở lệnh kể cả biến động nhỏ
@@ -803,6 +872,31 @@ mod tests {
         assert!(
             !guard.should_veto(true, 105, 2002.0, 10.0, false, 1.5),
             "Khi enable_cooldown = false, không được Veto!"
+        );
+    }
+
+    #[test]
+    fn test_engine_cooldown_same_side_price_guard() {
+        // Vừa cắt lỗ Long tại 2000.0, streak = 1
+        let guard = EngineCooldownGuard {
+            locked_until_bar: 100, // Đã qua thời gian khóa bar
+            last_exit_price: 2000.0,
+            locked_side: Some("LONG".to_string()),
+            consecutive_losses: 1,
+            last_losing_side: Some("LONG".to_string()),
+            last_losing_price: 2000.0,
+        };
+
+        // Long ở giá thấp hơn giá cắt lỗ (1990.0 < 2000.0) -> PHẢI BỊ VETO bởi Same-Side Price Guard
+        assert!(
+            guard.should_veto(true, 105, 1990.0, 10.0, true, 1.5),
+            "Long ở giá thấp hơn giá cắt lỗ trong chuỗi thua PHẢI BỊ VETO!"
+        );
+
+        // Long ở giá hồi phục cao hơn (2005.0 > 2000.0) -> CHO PHÉP
+        assert!(
+            !guard.should_veto(true, 105, 2005.0, 10.0, true, 1.5),
+            "Long ở giá hồi phục cao hơn được phép vào"
         );
     }
 }
