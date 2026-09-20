@@ -1,4 +1,26 @@
-// strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs
+//! # ABSORPTION SCOUT SCANNER (ABSORPTION)
+//!
+//! ## 1. Mục đích:
+//! Nhận diện vùng nén biến động (Volatility Squeeze) nơi có sự xuất hiện của khối lượng giao dịch
+//! hấp thụ lớn (Volume Absorption). Đây là vùng mà dòng tiền tổ chức âm thầm gom hàng (Accumulation)
+//! hoặc phân phối (Distribution) trước khi đẩy giá bứt phá.
+//!
+//! ## 2. Logic Hoạt Động & Bộ Lọc Phòng Ngự 2 Tầng:
+//! - **Chỉ báo sử dụng:**
+//!   + `squeeze_intensity`: Cường độ nén của biến động thị trường.
+//!   + `volume_force`: Khối lượng giao dịch gia tăng bất thường.
+//!   + `vwma` (Volume Weighted Moving Average): Đường giá bình quân gia quyền khối lượng.
+//!   + `bb_middle`, `bb_lower`, `bb_upper`: Dải Bollinger Bands bao bọc vùng nén.
+//!   + `trend_dir`: Hướng xu hướng vĩ mô để tránh bẫy cản tàu hoặc bắt dao rơi.
+//! - **Hệ Thống Phòng Ngự 2 Tầng:**
+//!   + Tầng 1 (Price Action & Mean Alignment): Phải có sự đồng thuận giữa VWMA và Close so với BB Middle.
+//!     - Long: Cả VWMA và Close đều phải nằm trên hoặc bằng BB Middle.
+//!     - Short: Cả VWMA và Close đều phải nằm dưới hoặc bằng BB Middle.
+//!   + Tầng 2 (Macro Trend Alignment): VETO chặn bắt dao rơi khi `trend_dir` dốc ngược chiều vượt ngưỡng `max_adverse_slope`.
+//! - **Thiết lập Vị thế:**
+//!   + Long: SL neo dưới đáy nến hoặc biên dưới BB: `low.min(bb_lower) - buffer`.
+//!   + Short: SL neo trên đỉnh nến hoặc biên trên BB: `high.max(bb_upper) + buffer`.
+//!   + Take Profit: `None` (để Trailing SL tự động bảo toàn lợi nhuận).
 
 use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
@@ -17,36 +39,62 @@ impl TacticalScanner for AbsorptionScanner {
         let i = tick.i;
         let abs_cfg = &config.tactical_sniper.absorption;
         
-        let vol_force = matrix.volume_force[i];
-        let squeeze = matrix.squeeze_intensity[i];
-        let vwma = sensors.vwma[i];
-        let bb_middle = sensors.bb_middle[i];
-        let bb_lower = sensors.bb_lower[i];
-        let bb_upper = sensors.bb_upper[i];
+        let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
+        let squeeze = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0);
+        let vwma = sensors.vwma.get(i).copied().unwrap_or(f64::NAN);
+        let bb_middle = sensors.bb_middle.get(i).copied().unwrap_or(f64::NAN);
+        let bb_lower = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
+        let bb_upper = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
 
-        if vwma.is_nan() || bb_middle.is_nan() || bb_lower.is_nan() || bb_upper.is_nan() {
+        if vwma.is_nan() || bb_middle.is_nan() || bb_lower.is_nan() || bb_upper.is_nan() || raw_vol_z.is_nan() || squeeze.is_nan() {
             return None;
         }
 
         let sqz_thresh = abs_cfg.squeeze_threshold.max(0.01);
         let vol_thresh = abs_cfg.vol_z_threshold.max(0.01);
 
-        // 1. Chấm điểm Mềm Cường độ Nén Squeeze & Lực gom Volume
+        let high = tick.highs()[i];
+        let low = tick.lows()[i];
+        let close = tick.closes()[i];
+        let candle_range = (high - low).max(1e-5);
+        let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+
+        // 🛡️ PHƯƠNG ÁN 2: Mô hình Nỗ lực vs Kết quả (Effort vs Result - Wyckoff VSA)
+        // Chuẩn hóa biên độ nến qua ATR với Epsilon toán học sàn 0.10 (chống chia cho 0)
+        let norm_spread = (candle_range / current_atr).max(0.10);
+        let f_vol = if raw_vol_z > 0.0 {
+            let effort_vs_result = raw_vol_z / norm_spread;
+            (effort_vs_result / vol_thresh).tanh()
+        } else {
+            0.0 // Volume cạn kiệt (Z-Score âm) -> Không có lực hấp thụ
+        };
+
+        // 1. Chấm điểm Mềm Cường độ Nén Squeeze & Lực gom Volume qua trọng số DNA squeeze_weight
         let f_sqz = (squeeze / sqz_thresh).tanh();
-        let f_vol = (vol_force / vol_thresh).tanh();
-        let raw_score = (0.50 * f_sqz + 0.50 * f_vol).min(1.0);
+        let w_sqz = if abs_cfg.squeeze_weight <= 0.0 { 0.50 } else { abs_cfg.squeeze_weight.clamp(0.0, 1.0) };
+        let raw_score = (w_sqz * f_sqz + (1.0 - w_sqz) * f_vol).min(1.0);
 
         if raw_score >= abs_cfg.min_activation_score {
-            let close = tick.closes()[i];
+            // 🛡️ PHƯƠNG ÁN B: Dynamic Quant (%B + CLV Spring/Upthrust)
+            let bb_width = (bb_upper - bb_lower).max(1e-5);
+            let pct_b = (close - bb_lower) / bb_width;
+            let clv = (2.0 * close - high - low) / candle_range;
 
-            // 🛡️ FLAW-REG.9 TẦNG 1: Price Action & Mean Alignment
-            // Phải có sự đồng thuận giữa dòng tiền (VWMA) và hành động giá (Close) so với trục giữa BB:
-            // - Long (Accumulation): Cả VWMA và Close đều phải nằm trên hoặc bằng BB Middle
-            // - Short (Distribution): Cả VWMA và Close đều phải nằm dưới hoặc bằng BB Middle
-            // Nếu có phân kỳ (ví dụ VWMA >= bb_middle nhưng Close < bb_middle do nến đỏ cắm đầu), bỏ qua không vào lệnh!
-            let signal_type = if vwma >= bb_middle && close >= bb_middle {
+            let spring_tol = abs_cfg.spring_tolerance.max(0.0);
+            let min_clv = abs_cfg.min_clv.max(0.0);
+            let max_bound = if abs_cfg.max_boundary_pct_b <= 0.0 { 0.40 } else { abs_cfg.max_boundary_pct_b.clamp(0.05, 0.50) };
+
+            // - Long (Accumulation Spring):
+            //   + Vị trí: Biên dưới dải nén (%B <= max_bound), cho phép nhúng râu (%B >= -spring_tol)
+            //   + Lực nến: CLV >= min_clv (rút chân tăng chứng minh cá mập gom hấp thụ)
+            //   + Dòng tiền: VWMA < BB Middle (giá trị gia quyền khối lượng ở vùng giá thấp)
+            // - Short (Distribution Upthrust):
+            //   + Vị trí: Biên trên dải nén (%B >= 1.0 - max_bound), cho phép quét đỉnh (%B <= 1.0 + spring_tol)
+            //   + Lực nến: CLV <= -min_clv (đè đầu giảm chứng minh cá mập xả hàng)
+            //   + Dòng tiền: VWMA > BB Middle (giá trị gia quyền khối lượng ở vùng giá cao)
+            let signal_type = if pct_b >= -spring_tol && pct_b <= max_bound && clv >= min_clv && vwma < bb_middle {
                 SignalType::Long
-            } else if vwma < bb_middle && close <= bb_middle {
+            } else if pct_b >= (1.0 - max_bound) && pct_b <= (1.0 + spring_tol) && clv <= -min_clv && vwma > bb_middle {
                 SignalType::Short
             } else {
                 return None;
@@ -70,9 +118,7 @@ impl TacticalScanner for AbsorptionScanner {
                     }
                 }
             }
-            let low = tick.lows()[i];
-            let high = tick.highs()[i];
-            let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+
             let buffer = current_atr * abs_cfg.struct_sl_buffer_atr.max(0.05);
 
             // 🛡️ FLAW-TSL.6: Structural SL neo dưới dải BB Lower (Long) hoặc trên dải BB Upper (Short) vùng nén
@@ -81,7 +127,7 @@ impl TacticalScanner for AbsorptionScanner {
                     let base_support = low.min(bb_lower);
                     let mut s = base_support - buffer;
                     if s >= close {
-                        s = close - buffer.max(close * 0.002);
+                        s = close - buffer;
                     }
                     s
                 }
@@ -89,7 +135,7 @@ impl TacticalScanner for AbsorptionScanner {
                     let base_resistance = high.max(bb_upper);
                     let mut s = base_resistance + buffer;
                     if s <= close {
-                        s = close + buffer.max(close * 0.002);
+                        s = close + buffer;
                     }
                     s
                 }

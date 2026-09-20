@@ -56,3 +56,42 @@
   - [x] Chạy `cargo test --lib` trên `strategies_backtests/helios` (49/49 PASSED).
   - [x] Chạy `cargo test --lib` trên `trading_bot/bot_engine` (40/40 PASSED).
   - [x] Thông báo câu lệnh commit thủ công cho người dùng.
+
+---
+
+## 🚨 BƯỚC 8: KHẮC PHỤC NGHỊCH LÝ OPTIMIZER 0 TRADES & WFE GATE FALSE PASS
+
+### 📊 Bảng Đề Xuất Giải Pháp Khắc Phục Triệt Để
+
+| STT | Vấn đề phát hiện | Giải pháp đề xuất | Ưu điểm | Nhược điểm & Rủi ro biên (Edge Cases) |
+| :--- | :--- | :--- | :--- | :--- |
+| **1** | **Chỉ báo thừa có period = 0 làm hỏng Warmup** | Dọn dẹp dứt điểm `rsi_anomaly` & `stoch_range` khỏi `HeliosStrategyV3::init` và `HeliosSensors`. Chỉ tính toán chỉ báo cho 4 Playbook active. | Triệt tiêu 100% mảng toàn NaN. `warmup_period` trở về giá trị thực (~100 - 300 nến). Backtest chạy bình thường. | Cần đảm bảo không còn scanner nào tham chiếu tới 2 biến này trong struct `HeliosSensors`. |
+| **2** | **Lỗ hổng WFE Gate lọt lưới DNA 0 trade** | Siết chặt cổng WFE: Bắt buộc `val_trades >= 1` VÀ `val_ret > 0.0` VÀ `ret > 0.0` VÀ `trades >= min_trades`. Nếu vi phạm $\to$ **REJECT NGAY**. | Không bao giờ deploy DNA rác/chết vào hệ thống thực chiến. | Trong giai đoạn thị trường đóng băng (flat chop), nếu không có lệnh nào trong 48h OOS, bot sẽ giữ nguyên DNA cũ thay vì cập nhật mới. |
+| **3** | **Bảo vệ chống tràn Warmup trong `ferro_trade`** | Trong `manager.rs`, nếu một chỉ báo trả về `actual_warmup >= full_len`, bắn `warn!` và không cộng dồn vào `warmup_period`. | Phát hiện ngay lập tức chỉ báo lỗi thay vì âm thầm triệt tiêu vòng lặp của engine. | Cần sửa đổi mã nguồn ở crate `ferro_trade`. |
+| **4** | **Bảo vệ Lookback Z-Score MTF** | Khống chế `z_score_lookback` tối đa theo khung thời gian (chẳng hạn khung 4h chỉ cho phép lookback $\le 50$ nến) để không vượt quá chiều dài In-Sample. | Chống trường hợp lookback lớn hơn kích thước cửa sổ trượt. | Cần điều chỉnh khoảng giá trị trong `config.rs`. |
+
+---
+
+### 📋 Checklist Nhiệm Vụ Triển Khai (Baby Steps)
+
+- [x] **8.1 (Blocker Cốt Lõi - Ưu Tiên 1): Loại bỏ triệt để các Indicator mồ côi (`period = 0`)**
+  - [x] Xóa/comment out khởi tạo `rsi_anomaly` trong `HeliosStrategyV3::init` (`strategies_backtests/helios/src/strategy/core_v3/mod.rs`).
+  - [x] Xóa/comment out khởi tạo `stoch_range` trong `HeliosStrategyV3::init` (`strategies_backtests/helios/src/strategy/core_v3/mod.rs`).
+  - [x] Dọn dẹp các trường tương ứng trong `HeliosSensors` nếu không còn dùng.
+  - [x] Kiểm tra xác nhận `warmup_period` giảm về mức chuẩn (~100-300 nến thay vì 63,199).
+
+- [x] **8.2 (Phòng Ngự Cổng - Ưu Tiên 1.5): Khóa chặn WFE Validation Gate với DNA 0 Trades**
+  - [x] Cập nhật điều kiện WFE Gate trong `prospector_runner.rs`: Chặn deploy nếu `val_trades == 0` hoặc `trades == 0` hoặc `ret <= 0.0`.
+  - [x] Đảm bảo chỉ có DNA có lợi nhuận thực tế và có giao dịch hợp lệ mới được phong Champion.
+
+- [x] **8.3 (Kiểm Chứng Tức Thì): Chạy Test Xác Minh `diagnostic_backtest`**
+  - [x] Chạy test `diagnostic_backtest` trên dữ liệu nến: Xác nhận `Trades > 0` và `Return != 0.0%` (Đạt 18 trades trong test).
+  - [x] Đảm bảo toàn bộ testsuite (`cargo test --lib`) trong cả 2 crate `helios` (49/49) và `bot_engine` (40/40) đều pass 100%.
+
+- [ ] **8.4 (Thực Nghiệm Walk-Forward): Chạy Lại Walk-Forward Test**
+  - [ ] Chạy lại `walk_forward_smart_seed.rs` trên ETHUSDT.
+  - [ ] Kiểm tra log: Xác nhận GA Optimizer qua từng chu kỳ sinh ra Champion với số lệnh $\ge 7$, Return dương, và WFE Gate đánh giá đúng thực chất.
+
+- [ ] **8.5 (Cải Thiện Độ Vững Chắc Hệ Thống - Giai Đoạn Hoàn Thiện):**
+  - [ ] Bổ sung cơ chế bảo vệ chống tràn `warmup_period` trong `ferro_trade::IndicatorManager`.
+  - [ ] Rà soát giới hạn trần `z_score_lookback` cho khung MTF KAMA.

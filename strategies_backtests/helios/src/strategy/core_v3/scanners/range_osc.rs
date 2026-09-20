@@ -1,4 +1,24 @@
-// strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs
+//! # RANGE OSCILLATOR SCANNER (RANGE_OSC)
+//!
+//! ## 1. Mục đích:
+//! Khai thác trạng thái thị trường đi ngang, tích lũy không có xu hướng (Range-Bound / Choppy Market).
+//! Thực hiện giao dịch hồi quy về giá trị trung bình (Mean Reversion): Mua tại biên dưới Bollinger Bands
+//! và Bán tại biên trên, chốt lời khi giá quay về đường trung bình SMA 20 (BB Middle).
+//!
+//! ## 2. Logic Hoạt Động & Hệ Thống Phòng Ngự 5 Tầng:
+//! - **Chỉ báo sử dụng:**
+//!   + Dải Bollinger Bands (`bb_upper`, `bb_middle`, `bb_lower`, `bb_width_norm`): Xác định biên độ kênh dao động.
+//!   + `volume_force`: Phát hiện dòng tiền tin tức bất thường.
+//!   + `trend_strength` & `bb_middle_slope_adj`: Nhận diện độ dốc và xung lực xu hướng để tránh cản tàu.
+//!   + Stochastic Range (`stoch_range_k`, `stoch_range_d`): Đo đạc tín hiệu quá mua / quá bán và điểm giao cắt đảo chiều.
+//! - **Các Chốt Chặn Phòng Ngự:**
+//!   + Chốt chặn 1: Bề rộng dải tối thiểu `bb_width_norm >= min_width_pct` & Khối lượng thấp (không có tin tức xả hàng).
+//!   + Chốt chặn 2: Sức mạnh xu hướng `trend_strength <= max_trend` (cấm tuyệt đối giao dịch Range khi thị trường đang có Trend).
+//!   + Chốt chặn 3: Trục giữa BB Middle phẳng, không dốc (`|bb_slope| <= max_bb_slope`).
+//!   + Chốt chặn 4: Nến đảo chiều phản ứng biên (Rejection Candle: Hammer rút chân cho Long, Shooting Star râu trên cho Short).
+//! - **Thiết lập Vị thế:**
+//!   + Stop Loss: Neo ngoài biên dải Bollinger Bands (`low.min(bb_l) - buffer` cho Long, `high.max(bb_u) + buffer` cho Short).
+//!   + Take Profit: Hướng về trục giữa BB Middle (`target_price = bb_l + (bb_u - bb_l) * tp_ratio`).
 
 use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;

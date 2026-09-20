@@ -1,4 +1,22 @@
-// strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs
+//! # MOMENTUM IGNITION SCANNER (MOMENTUM_IGN)
+//!
+//! ## 1. Mục đích:
+//! Bắt các cú bứt phá xung lực nến mạnh (Momentum Ignition / Volatility Breakout) khi thị trường
+//! thoát khỏi vùng tích lũy với sự gia tăng đột biến của biên độ nến và khối lượng giao dịch.
+//!
+//! ## 2. Logic Hoạt Động Cốt Lõi:
+//! - **Chỉ báo sử dụng:**
+//!   + Dải Bollinger Bands (`bb_upper`, `bb_lower`): Nhận diện giá vượt biên biến động.
+//!   + RSI Momentum (`rsi_momentum`): Đo đạc sức mạnh gia tốc dòng tiền ngắn hạn.
+//!   + Khối lượng dòng tiền (`flow_force` / `volume_force`): Xác nhận có dòng tiền lớn tham gia.
+//!   + ATR (`atr_sl`): Chuẩn hóa khoảng cách giá và làm đệm Stop Loss.
+//! - **Cơ chế Chấm Điểm (Sigmoid / Tanh Smooth Scoring):**
+//!   + Long: $0.40 \times f_{\text{break\_long}} + 0.35 \times f_{\text{rsi\_long}} + 0.25 \times f_{\text{vol}}$
+//!   + Short: $0.40 \times f_{\text{break\_short}} + 0.35 \times f_{\text{rsi\_short}} + 0.25 \times f_{\text{vol}}$
+//! - **Thiết lập Vị thế:**
+//!   + Long: Đặt `suggested_sl` dưới đáy nến bùng nổ: `Low[i] - buffer`.
+//!   + Short: Đặt `suggested_sl` trên đỉnh nến bùng nổ: `High[i] + buffer`.
+//!   + Take Profit: `None` (ủy quyền hoàn toàn cho động cơ Trailing Stop Loss trong `RiskManager`).
 
 use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;

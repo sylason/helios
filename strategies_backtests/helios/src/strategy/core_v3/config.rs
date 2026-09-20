@@ -551,16 +551,36 @@ pub struct TacticalAbsorptionParams {
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
 
-    /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.25 -> 10.00 ATR, Step 0.25 -> 40 nấc)
-    #[dna(min = 0.25, max = 10.00, step = 0.25)]
+    /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.10 -> 2.50 ATR, Step 0.10 -> 25 nấc)
+    #[dna(min = 0.10, max = 2.50, step = 0.10)]
     #[serde(default = "default_absorption_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
 
-    /// 🛡️ FLAW-REG.9: Ngưỡng dốc xu hướng KAMA tối đa cấm bắt dao rơi (0.05 -> 0.50, Step 0.05)
+    /// 🛡️ FLAW-REG.9: Ngưỡng dốc xu hướng KAMA tối đa cấm bắt dao rơi (0.02 -> 0.25, Step 0.01 -> 24 nấc)
     /// Ngăn chặn bắt dao rơi: Nếu Trend dốc xuống vượt ngưỡng này -> Cấm Long!
-    #[dna(min = 0.05, max = 0.50, step = 0.05)]
+    #[dna(min = 0.02, max = 0.25, step = 0.01)]
     #[serde(default = "default_absorption_max_adverse_slope")]
     pub max_adverse_slope: f64,
+
+    /// 🌊 Dung sai quét râu nến ngoài biên dải nén (0.00 -> 0.25, Step 0.05 -> 6 nấc)
+    #[dna(min = 0.00, max = 0.25, step = 0.05)]
+    #[serde(default = "default_absorption_spring_tolerance")]
+    pub spring_tolerance: f64,
+
+    /// 🎯 Ngưỡng lực nến rút chân/đè đầu CLV tối thiểu (0.00 -> 0.60, Step 0.05 -> 13 nấc)
+    #[dna(min = 0.00, max = 0.60, step = 0.05)]
+    #[serde(default = "default_absorption_min_clv")]
+    pub min_clv: f64,
+
+    /// 📏 Vị trí đóng nến tối đa bên trong dải nén (%B từ 0.15 -> 0.48, Step 0.03 -> 12 nấc)
+    #[dna(min = 0.15, max = 0.48, step = 0.03)]
+    #[serde(default = "default_absorption_max_boundary_pct_b")]
+    pub max_boundary_pct_b: f64,
+
+    /// ⚖️ Trọng số kết hợp giữa độ nén và xung lực dòng tiền (0.20 -> 0.80, Step 0.10 -> 7 nấc)
+    #[dna(min = 0.20, max = 0.80, step = 0.10)]
+    #[serde(default = "default_absorption_squeeze_weight")]
+    pub squeeze_weight: f64,
 }
 
 /// ============================================================================
@@ -815,11 +835,27 @@ fn default_range_sl_buffer_atr() -> f64 {
 }
 
 fn default_absorption_sl_buffer_atr() -> f64 {
-    2.0
+    0.50
 }
 
 fn default_absorption_max_adverse_slope() -> f64 {
     0.15
+}
+
+fn default_absorption_spring_tolerance() -> f64 {
+    0.10
+}
+
+fn default_absorption_min_clv() -> f64 {
+    0.20
+}
+
+fn default_absorption_max_boundary_pct_b() -> f64 {
+    0.40
+}
+
+fn default_absorption_squeeze_weight() -> f64 {
+    0.50
 }
 
 fn default_range_max_bb_slope() -> f64 {

@@ -1,4 +1,26 @@
-// strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs
+//! # TREND PULLBACK SCANNER (TREND_PB)
+//!
+//! ## 1. Mục đích:
+//! Bắt các nhịp hồi quy có kiểm soát (Pullback / Retracement) thuận theo trục xu hướng vĩ mô
+//! được dẫn dắt bởi KAMA (Kaufman Adaptive Moving Average). Mục tiêu là "Mua khi giá giảm trong Trend tăng,
+//! Bán khi giá tăng trong Trend giảm" tại các vùng hỗ trợ/kháng cự động.
+//!
+//! ## 2. Logic Hoạt Động & Bộ Lọc 3 Tầng An Toàn:
+//! - **Chỉ báo sử dụng:**
+//!   + `kama_slope_atr`: Độ dốc chuẩn hóa của KAMA làm la bàn xu hướng.
+//!   + `kama_mid`: Đường trung vị KAMA đóng vai trò hỗ trợ/kháng cự động.
+//!   + `stoch_trend_k`: Stochastic nhận diện nhịp hạ nhiệt tạm thời của giá.
+//!   + `rsi_trend`: Trần/Sàn RSI bảo vệ chống mua đu đỉnh hoặc bán đu đáy.
+//!   + `clv` (Close Location Value): Đạo hàm vị trí nến xác nhận nến phản ứng thuận chiều.
+//! - **Quy trình Chấm Điểm & Phê Duyệt:**
+//!   + Bước 1: Kiểm tra độ dốc KAMA đủ mạnh (`|kama_slope| >= slope_thresh`).
+//!   + Bước 2: Kiểm tra khoảng cách `delta_kama` nằm trong hộp an toàn `[-inval_floor, max_dist]`.
+//!   + Bước 3: Stochastic đã hạ nhiệt + RSI chưa chạm trần cực đại.
+//!   + Bước 4: CLV xác nhận đóng nến thuận chiều (Long cấm nến đỏ, Short cấm nến xanh).
+//! - **Thiết lập Vị thế:**
+//!   + Long: `suggested_sl` neo dưới đáy nhịp hồi hoặc hỗ trợ KAMA: `low.min(kama_mid) - buffer`.
+//!   + Short: `suggested_sl` neo trên đỉnh nhịp hồi hoặc kháng cự KAMA: `high.max(kama_mid) + buffer`.
+//!   + Take Profit: `None` (để Trailing Stop Loss trong `RiskManager` tự động thả diều lợi nhuận).
 
 use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;

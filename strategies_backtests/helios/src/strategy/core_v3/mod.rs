@@ -185,8 +185,9 @@ impl Strategy for HeliosStrategyV3 {
         let (rsi_m, _, _) = ctx.rsi(ind.rsi_momentum.timeframe, "RSI_Mom", ind.rsi_momentum.period);
         s.rsi_momentum = rsi_m;
 
-        let (rsi_a, _, _) = ctx.rsi(ind.rsi_anomaly.timeframe, "RSI_Ano", ind.rsi_anomaly.period);
-        s.rsi_anomaly = rsi_a;
+        // [V3.3 TINH GIẢN] Tắt chỉ báo RSI_Ano của Playbook Anomaly đã de-overengineer (tránh bẫy period 0 trả về toàn NaN)
+        // let (rsi_a, _, _) = ctx.rsi(ind.rsi_anomaly.timeframe, "RSI_Ano", ind.rsi_anomaly.period);
+        // s.rsi_anomaly = rsi_a;
 
         // DEDICATED PER-PLAYBOOK STOCHASTIC SENSORS
         let (st_t_k, st_t_d, _, _, _) = ctx.stoch(
@@ -199,15 +200,16 @@ impl Strategy for HeliosStrategyV3 {
         s.stoch_trend_k = st_t_k;
         s.stoch_trend_d = st_t_d;
 
-        let (st_r_k, st_r_d, _, _, _) = ctx.stoch(
-            ind.stoch_range.timeframe, "STOCH_Range", 
-            ind.stoch_range.period as u32, 
-            ind.stoch_range.k_period as u32, ind.stoch_range.k_ma_type.clone(),
-            ind.stoch_range.d_period as u32, ind.stoch_range.d_ma_type.clone(),
-            ind.stoch_range.zone
-        );
-        s.stoch_range_k = st_r_k;
-        s.stoch_range_d = st_r_d;
+        // [V3.3 TINH GIẢN] Tắt chỉ báo STOCH_Range của Playbook RangeOsc đã de-overengineer (tránh bẫy period 0 trả về toàn NaN)
+        // let (st_r_k, st_r_d, _, _, _) = ctx.stoch(
+        //     ind.stoch_range.timeframe, "STOCH_Range", 
+        //     ind.stoch_range.period as u32, 
+        //     ind.stoch_range.k_period as u32, ind.stoch_range.k_ma_type.clone(),
+        //     ind.stoch_range.d_period as u32, ind.stoch_range.d_ma_type.clone(),
+        //     ind.stoch_range.zone
+        // );
+        // s.stoch_range_k = st_r_k;
+        // s.stoch_range_d = st_r_d;
 
         // ABSORPTION VWMA SENSOR
         s.vwma = ctx.vwma(ind.vwma.timeframe, "VWMA", ind.vwma.period);
@@ -882,7 +884,7 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 95, "DNA_WIDTH phải là chính xác 95 chiều sau khi tắt gen Anomaly & RangeOsc!");
+        assert_eq!(width, 99, "DNA_WIDTH phải là chính xác 99 chiều sau khi bổ sung max_boundary_pct_b & squeeze_weight cho Absorption!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
@@ -893,6 +895,10 @@ mod tests {
         let has_phantom_comp = defs.iter().any(|(name, _)| name.contains("min_confidence_compression"));
         let has_phantom_veto = defs.iter().any(|(name, _)| name.contains("min_multiplier_veto"));
         let has_abs_adverse = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.max_adverse_slope"));
+        let has_spring_tol = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.spring_tolerance"));
+        let has_min_clv = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.min_clv"));
+        let has_max_boundary = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.max_boundary_pct_b"));
+        let has_squeeze_weight = defs.iter().any(|(name, _)| name.contains("tactical_sniper.absorption.squeeze_weight"));
         let has_range = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range"));
         let has_anomaly = defs.iter().any(|(name, _)| name.contains("tactical_sniper.anomaly"));
         let has_rsi_ano = defs.iter().any(|(name, _)| name.contains("rsi_anomaly"));
@@ -906,6 +912,10 @@ mod tests {
         assert!(!has_rsi_ano, "defs KHÔNG được chứa rsi_anomaly!");
         assert!(!has_stoch_range, "defs KHÔNG được chứa stoch_range!");
         assert!(has_min_conf, "defs phải chứa min_confidence_threshold!");
+        assert!(has_spring_tol, "defs phải chứa tactical_sniper.absorption.spring_tolerance!");
+        assert!(has_min_clv, "defs phải chứa tactical_sniper.absorption.min_clv!");
+        assert!(has_max_boundary, "defs phải chứa tactical_sniper.absorption.max_boundary_pct_b!");
+        assert!(has_squeeze_weight, "defs phải chứa tactical_sniper.absorption.squeeze_weight!");
         assert!(has_matrix_adx, "defs phải chứa matrix.adx_trend_threshold!");
         assert!(has_matrix_kama_scale, "defs phải chứa matrix.kama_slope_scale_atr!");
         assert!(has_matrix_vol_z, "defs phải chứa matrix.vol_z_sensitivity!");
@@ -1102,18 +1112,43 @@ mod tests {
         assert!(rng_sl < 1985.0, "RangeOsc Long SL {} phải < Close 1985.0", rng_sl);
         assert!(rng_p.suggested_tp.is_some(), "RangeOsc Proposal phải có suggested_tp!");
 
-        // 4. Kiểm tra AbsorptionScanner
-        sensors.vwma = std::sync::Arc::new(vec![2005.0; len]); // vwma > bb_middle -> Long
+        // 4. Kiểm tra AbsorptionScanner (Wyckoff Accumulation Spring: Giá & VWMA ở nửa dưới BB, nến rút chân CLV >= 0.20)
+        sensors.vwma = std::sync::Arc::new(vec![1990.0; len]); // vwma < bb_middle -> Long
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]); // Z-score volume bùng nổ dương
+        
+        let raw_cache_abs = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1988.0; len]),
+            high: std::sync::Arc::new(vec![1994.0; len]),
+            low: std::sync::Arc::new(vec![1982.0; len]),
+            close: std::sync::Arc::new(vec![1991.0; len]), // close 1991: %B = (1991-1980)/40 = 0.275; CLV = (2*1991-1994-1982)/12 = 0.50
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_abs = DataView::new(raw_cache_abs);
+        let mut actions_abs = SmallVec::new();
+        let tick_abs = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_abs,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions_abs,
+            position: Position::default(),
+        };
         let mut matrix_abs = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix_abs.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix_abs.volume_force = std::sync::Arc::new(vec![1.2; len]);
-        let abs_prop = AbsorptionScanner.scan(&tick, &sensors, &matrix_abs, &config);
-        assert!(abs_prop.is_some(), "AbsorptionScanner phải sinh Proposal Long!");
+        matrix_abs.trend_dir = std::sync::Arc::new(vec![0.02; len]);
+        let abs_prop = AbsorptionScanner.scan(&tick_abs, &sensors, &matrix_abs, &config);
+        assert!(abs_prop.is_some(), "AbsorptionScanner phải sinh Proposal Long khi tích lũy rút chân ở nửa dưới BB!");
         let abs_p = abs_prop.unwrap();
         assert!(abs_p.suggested_sl.is_some(), "Absorption Proposal phải có suggested_sl!");
         let abs_sl = abs_p.suggested_sl.unwrap();
-        assert!(abs_sl < 2000.0, "Absorption Long SL {} phải < Close 2000.0", abs_sl);
+        assert!(abs_sl < 1991.0, "Absorption Long SL {} phải < Close 1991.0", abs_sl);
     }
 
     #[test]
@@ -1129,12 +1164,13 @@ mod tests {
         let len = 50;
         let i = len - 1;
 
+        // Nến tích lũy rút chân ở nửa dưới BB: close 1990, high 1994, low 1982
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![2000.0; len]),
-            high: std::sync::Arc::new(vec![2010.0; len]),
-            low: std::sync::Arc::new(vec![1990.0; len]),
-            close: std::sync::Arc::new(vec![2000.0; len]),
+            open: std::sync::Arc::new(vec![1988.0; len]),
+            high: std::sync::Arc::new(vec![1994.0; len]),
+            low: std::sync::Arc::new(vec![1982.0; len]),
+            close: std::sync::Arc::new(vec![1990.0; len]),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -1160,33 +1196,35 @@ mod tests {
         config.tactical_sniper.absorption.min_activation_score = 0.1;
         config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
         config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+        config.tactical_sniper.absorption.spring_tolerance = 0.10;
+        config.tactical_sniper.absorption.min_clv = 0.20;
 
         let mut sensors = HeliosSensors::default();
-        sensors.vwma = std::sync::Arc::new(vec![2005.0; len]);
+        sensors.vwma = std::sync::Arc::new(vec![1992.0; len]); // vwma < bb_middle -> Long
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.volume_force = std::sync::Arc::new(vec![1.2; len]);
 
-        // KỊCH BẢN 1: Bẫy bắt dao rơi (trend_dir = -0.25 < -0.15)
+        // KỊCH BẢN 1: Bẫy bắt dao rơi (trend_dir = -0.25 < -0.15) -> VETO Long
         matrix.trend_dir = std::sync::Arc::new(vec![-0.25; len]);
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Long bắt dao rơi khi trend_dir = -0.25!");
 
-        // KỊCH BẢN 2: Bẫy cản tàu Short (trend_dir = +0.25 > +0.15)
+        // KỊCH BẢN 2: Bẫy cản tàu Short (trend_dir = +0.25 > +0.15) -> VETO Short
         let mut sensors_short = sensors.clone();
-        sensors_short.vwma = std::sync::Arc::new(vec![1995.0; len]);
+        sensors_short.vwma = std::sync::Arc::new(vec![2008.0; len]); // vwma > bb_middle -> Short
         matrix.trend_dir = std::sync::Arc::new(vec![0.25; len]);
         let raw_cache_short = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![1998.0; len]),
-            high: std::sync::Arc::new(vec![2000.0; len]),
-            low: std::sync::Arc::new(vec![1990.0; len]),
-            close: std::sync::Arc::new(vec![1998.0; len]),
+            open: std::sync::Arc::new(vec![2012.0; len]),
+            high: std::sync::Arc::new(vec![2018.0; len]),
+            low: std::sync::Arc::new(vec![2006.0; len]),
+            close: std::sync::Arc::new(vec![2010.0; len]), // close 2010: %B = (2010-1980)/40 = 0.75; CLV = (2*2010-2018-2006)/12 = -0.33 <= -0.20
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -1204,30 +1242,30 @@ mod tests {
         let prop_short = AbsorptionScanner.scan(&tick_short, &sensors_short, &matrix, &config);
         assert!(prop_short.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Short cản tàu khi trend_dir = +0.25!");
 
-        // KỊCH BẢN 3: Phân kỳ Tầng 1 (vwma >= bb_middle nhưng close < bb_middle)
+        // KỊCH BẢN 3: Nến cắm đầu rơi tự do (CLV âm, Marubozu đỏ tại nửa dưới) -> PHẢI LỌC BỎ
         matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
-        let raw_cache_div = RawDataCache {
+        let raw_cache_knife = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![2002.0; len]),
-            high: std::sync::Arc::new(vec![2005.0; len]),
-            low: std::sync::Arc::new(vec![1990.0; len]),
-            close: std::sync::Arc::new(vec![1995.0; len]),
+            open: std::sync::Arc::new(vec![1995.0; len]),
+            high: std::sync::Arc::new(vec![1996.0; len]),
+            low: std::sync::Arc::new(vec![1985.0; len]),
+            close: std::sync::Arc::new(vec![1986.0; len]), // close 1986 sát đáy: CLV = (2*1986-1996-1985)/11 = -9/11 = -0.81 < 0.20
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
-        let data_view_div = DataView::new(raw_cache_div);
-        let tick_div = ferro_trade::strategy::TickContext {
+        let data_view_knife = DataView::new(raw_cache_knife);
+        let tick_knife = ferro_trade::strategy::TickContext {
             i,
             equity: 1000.0,
-            data_view: &data_view_div,
+            data_view: &data_view_knife,
             indicator_manager: &indicator_manager,
             trades: &trades,
             last_closed_trade: None,
             actions: &mut actions,
             position: Position::default(),
         };
-        let prop_div = AbsorptionScanner.scan(&tick_div, &sensors, &matrix, &config);
-        assert!(prop_div.is_none(), "AbsorptionScanner PHẢI VETO khi VWMA >= bb_middle nhưng Close < bb_middle!");
+        let prop_knife = AbsorptionScanner.scan(&tick_knife, &sensors, &matrix, &config);
+        assert!(prop_knife.is_none(), "AbsorptionScanner PHẢI LỌC BỎ nến cắm đầu (CLV < 0.20) không cho bắt dao rơi!");
     }
 
     #[test]
@@ -1243,12 +1281,13 @@ mod tests {
         let len = 50;
         let i = len - 1;
 
+        // Nến tích lũy gom hàng chuẩn ở nửa dưới BB: close 1990, high 1994, low 1982
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![2001.0; len]),
-            high: std::sync::Arc::new(vec![2005.0; len]),
-            low: std::sync::Arc::new(vec![1998.0; len]),
-            close: std::sync::Arc::new(vec![2002.0; len]),
+            open: std::sync::Arc::new(vec![1988.0; len]),
+            high: std::sync::Arc::new(vec![1994.0; len]),
+            low: std::sync::Arc::new(vec![1982.0; len]),
+            close: std::sync::Arc::new(vec![1990.0; len]), // %B = (1990-1980)/40 = 0.25; CLV = (2*1990-1994-1982)/12 = +0.33 >= 0.20
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -1274,17 +1313,19 @@ mod tests {
         config.tactical_sniper.absorption.min_activation_score = 0.1;
         config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
         config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+        config.tactical_sniper.absorption.spring_tolerance = 0.10;
+        config.tactical_sniper.absorption.min_clv = 0.20;
 
         let mut sensors = HeliosSensors::default();
-        sensors.vwma = std::sync::Arc::new(vec![2003.0; len]);
+        sensors.vwma = std::sync::Arc::new(vec![1992.0; len]); // vwma < bb_middle -> Long
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.volume_force = std::sync::Arc::new(vec![1.2; len]);
         matrix.trend_dir = std::sync::Arc::new(vec![0.02; len]);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);

@@ -1,4 +1,21 @@
-// strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs
+//! # CLIMAX REVERSAL SCANNER (REVERSAL)
+//!
+//! ## 1. Mục đích:
+//! Bắt các điểm kiệt sức của sóng giá sau những cú đẩy cực hạn (Climax Run / Capitulation Dump).
+//! Khi giá bị kéo căng quá mức khỏi giá trị cân bằng và thanh khoản bị cạn kiệt, Scanner này
+//! tìm kiếm cơ hội đảo chiều hồi quy về đường trung vị KAMA (KAMA Midline).
+//!
+//! ## 2. Logic Hoạt Động Cốt Lõi:
+//! - **Chỉ báo sử dụng:**
+//!   + `z_score`: Độ lệch chuẩn số học của giá so với trung bình (nhận diện độ căng dãn giá).
+//!   + `kama_mid`: Trục trung vị Kaufman biểu thị mức giá cân bằng dài hạn.
+//!   + `volume_force`: Đo lường sự suy kiệt khối lượng (Volume Exhaustion).
+//!   + `atr_sl`: Chuẩn hóa khoảng cách ly giác (Displacement) và đệm Stop Loss.
+//! - **Cơ chế Chấm Điểm 3 Thành Phần:**
+//!   $$\text{Score} = 0.40 \times f_z + 0.40 \times f_{\text{disp}} + 0.20 \times f_{\text{vol\_exhaustion}}$$
+//! - **Thiết lập Vị thế:**
+//!   + Long: Khi `z_score < 0.0` và `close < kama_mid`. SL: `low - wick_buffer`, TP: `Some(kama_mid)`.
+//!   + Short: Khi `z_score > 0.0` và `close > kama_mid`. SL: `high + wick_buffer`, TP: `Some(kama_mid)`.
 
 use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
