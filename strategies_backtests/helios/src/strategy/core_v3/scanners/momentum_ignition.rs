@@ -35,65 +35,128 @@ impl TacticalScanner for MomentumIgnitionScanner {
         let i = tick.i;
         let mom_cfg = &config.tactical_sniper.momentum;
         
-        let rsi_mom = sensors.rsi_momentum[i];
-        let bb_u = sensors.bb_upper[i];
-        let bb_l = sensors.bb_lower[i];
+        let bb_u = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
+        let bb_l = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
         let close = tick.closes()[i];
-        let atr = sensors.atr_sl[i];
-        let flow_force = matrix.flow_axis.get(i).copied().unwrap_or(matrix.volume_force[i]);
 
-        if rsi_mom.is_nan() || bb_u.is_nan() || bb_l.is_nan() || atr.is_nan() || atr <= 0.0 {
+        if bb_u.is_nan() || bb_l.is_nan() || close.is_nan() {
             return None;
         }
 
-        let rsi_thresh = mom_cfg.rsi_threshold;
-        let vol_thresh = mom_cfg.vol_z_threshold.max(0.01);
-        let f_vol = (flow_force / vol_thresh).tanh().max(0.0).min(1.0);
-
-        // 1. Chấm điểm Mềm Mẫu Hình LONG (BB Upper Breakout + RSI Surge + Volume Force)
-        let f_break_long = 1.0 / (1.0 + (-2.0 * (close - bb_u) / atr).exp());
-        let f_rsi_long = 1.0 / (1.0 + (-0.15 * (rsi_mom - rsi_thresh)).exp());
-        let score_long = 0.40 * f_break_long + 0.35 * f_rsi_long + 0.25 * f_vol;
-
-        // 2. Chấm điểm Mềm Mẫu Hình SHORT (BB Lower Breakdown + RSI Plummet + Volume Force)
-        let f_break_short = 1.0 / (1.0 + (-2.0 * (bb_l - close) / atr).exp());
-        let f_rsi_short = 1.0 / (1.0 + (-0.15 * ((100.0 - rsi_thresh) - rsi_mom)).exp());
-        let score_short = 0.40 * f_break_short + 0.35 * f_rsi_short + 0.25 * f_vol;
-
-        let min_score = mom_cfg.min_activation_score;
-
-        let low = tick.lows()[i];
-        let high = tick.highs()[i];
-        let buffer = atr * mom_cfg.struct_sl_buffer_atr.max(0.05);
-
-        if score_long >= min_score && score_long > score_short {
-            // 🛡️ FLAW-TSL.6: Structural SL neo dưới đáy nến bùng nổ xung lực (Low[i] - buffer)
-            let mut sl = low - buffer;
-            if sl >= close {
-                sl = close - buffer.max(close * 0.002);
-            }
-            Some(Proposal {
-                signal_type: SignalType::Long,
-                raw_score: score_long.min(1.0),
-                scanner_id: self.id(),
-                suggested_sl: Some(sl),
-                suggested_tp: None,
-            })
-        } else if score_short >= min_score && score_short > score_long {
-            // 🛡️ FLAW-TSL.6: Structural SL neo trên đỉnh nến bùng nổ xung lực (High[i] + buffer)
-            let mut sl = high + buffer;
-            if sl <= close {
-                sl = close + buffer.max(close * 0.002);
-            }
-            Some(Proposal {
-                signal_type: SignalType::Short,
-                raw_score: score_short.min(1.0),
-                scanner_id: self.id(),
-                suggested_sl: Some(sl),
-                suggested_tp: None,
-            })
-        } else {
-            None
+        // 🛡️ VẤN ĐỀ 2 (TODO-P0-04): Early Exit Guard (Khử 100% điểm ảo Sigmoid)
+        // Giá bắt buộc phải thực sự vượt biên dải Bollinger Bands mới được coi là Breakout
+        let is_long_candidate = close > bb_u;
+        let is_short_candidate = close < bb_l;
+        if !is_long_candidate && !is_short_candidate {
+            return None; // Giá nằm trong dải -> Dứt khoát không có Breakout
         }
+
+        let atr = sensors.atr_sl.get(i).copied().unwrap_or(f64::NAN);
+        let rsi_mom = sensors.rsi_momentum.get(i).copied().unwrap_or(f64::NAN);
+        let flow_force = matrix.flow_axis.get(i).copied()
+            .or_else(|| matrix.volume_force.get(i).copied())
+            .unwrap_or(f64::NAN);
+
+        if rsi_mom.is_nan() || atr.is_nan() || atr <= 0.0 || flow_force.is_nan() {
+            return None;
+        }
+
+        let open = tick.opens()[i];
+        let high = tick.highs()[i];
+        let low = tick.lows()[i];
+
+        // 🛡️ VẤN ĐỀ 1 (TODO-P0-02): Màu nến & CLV Guard (Khử 100% bẫy râu nến Fakeout)
+        let candle_range = (high - low).max(1e-5);
+        let clv = (2.0 * close - high - low) / candle_range;
+        let min_clv = if mom_cfg.min_clv <= 0.0 { 0.20 } else { mom_cfg.min_clv.clamp(0.05, 0.90) };
+
+        let signal_type = if is_long_candidate && close > open && clv >= min_clv {
+            SignalType::Long
+        } else if is_short_candidate && close < open && clv <= -min_clv {
+            SignalType::Short
+        } else {
+            return None; // Nến rút chân / râu ngược (Shooting Star / Hammer) -> Loại bỏ bẫy fakeout
+        };
+
+        // 🛡️ VẤN ĐỀ 3 (TODO-P0-05): Macro Trend Veto (Chống bắt dao rơi & cản đầu xe tăng)
+        let trend_dir = matrix.trend_dir.get(i).copied()
+            .or_else(|| sensors.kama_slope_adj.get(i).copied())
+            .unwrap_or(0.0);
+        let max_adverse = if mom_cfg.max_adverse_slope <= 0.0 { 0.15 } else { mom_cfg.max_adverse_slope.max(0.01) };
+        match signal_type {
+            SignalType::Long => {
+                if trend_dir < -max_adverse {
+                    return None; // KAMA dốc xuống -> Cấm Long bùng nổ ngược thác lũ
+                }
+            }
+            SignalType::Short => {
+                if trend_dir > max_adverse {
+                    return None; // KAMA dốc lên -> Cấm Short bùng nổ cản đầu xe tăng
+                }
+            }
+        }
+
+        // 🛡️ VẤN ĐỀ 4 (TODO-P0-06): Chuẩn hóa điểm số phi thứ nguyên qua Tanh & Trọng số DNA
+        let vol_thresh = if mom_cfg.vol_z_threshold <= 0.0 { 1.50 } else { mom_cfg.vol_z_threshold.max(0.10) };
+        let rsi_thresh = if mom_cfg.rsi_threshold <= 0.0 { 60.0 } else { mom_cfg.rsi_threshold.clamp(40.0, 90.0) };
+
+        let f_vol = (flow_force.max(0.0) / vol_thresh).tanh();
+
+        let (f_break, f_rsi) = match signal_type {
+            SignalType::Long => {
+                let dist = (close - bb_u).max(0.0);
+                let f_b = (dist / atr).tanh();
+                let rsi_excess = (rsi_mom - rsi_thresh).max(0.0);
+                let f_r = (rsi_excess / 15.0).tanh();
+                (f_b, f_r)
+            }
+            SignalType::Short => {
+                let dist = (bb_l - close).max(0.0);
+                let f_b = (dist / atr).tanh();
+                let rsi_excess = ((100.0 - rsi_thresh) - rsi_mom).max(0.0);
+                let f_r = (rsi_excess / 15.0).tanh();
+                (f_b, f_r)
+            }
+        };
+
+        // Tổ hợp lồi 3 thành phần động từ DNA
+        let w_break = if mom_cfg.w_breakout <= 0.0 { 0.40 } else { mom_cfg.w_breakout.clamp(0.10, 0.80) };
+        let w_vol = if mom_cfg.w_volume <= 0.0 { 0.30 } else { mom_cfg.w_volume.clamp(0.10, 0.80) };
+        let w_rsi = (1.0 - w_break - w_vol).max(0.05);
+        let total_w = w_break + w_vol + w_rsi;
+        let raw_score = ((w_break * f_break + w_vol * f_vol + w_rsi * f_rsi) / total_w).min(1.0);
+
+        if raw_score < mom_cfg.min_activation_score {
+            return None;
+        }
+
+        // 🛡️ VẤN ĐỀ 4 (TODO-P1-02): Stop Loss cấu trúc sạch sẽ (loại bỏ hardcode 0.002 và 0.05)
+        let buffer_mult = if mom_cfg.struct_sl_buffer_atr <= 0.0 { 0.50 } else { mom_cfg.struct_sl_buffer_atr.max(0.10) };
+        let buffer = atr * buffer_mult;
+
+        let sl = match signal_type {
+            SignalType::Long => {
+                let mut s = low - buffer;
+                if s >= close {
+                    s = close - buffer;
+                }
+                s
+            }
+            SignalType::Short => {
+                let mut s = high + buffer;
+                if s <= close {
+                    s = close + buffer;
+                }
+                s
+            }
+        };
+
+        Some(Proposal {
+            signal_type,
+            raw_score,
+            scanner_id: self.id(),
+            suggested_sl: Some(sl),
+            suggested_tp: None,
+        })
     }
 }

@@ -404,22 +404,42 @@ pub struct TacticalMomentumParams {
     #[dna(min = 0.04, max = 0.40, step = 0.015)]
     pub max_initial_sl_pct: f64,
 
-    /// RSI Xung Lực Bùng Nổ (Universal 1.0 -> 99.0, Step 3.0 -> 33 nấc)
-    #[dna(min = 1.0, max = 99.0, step = 3.0)]
+    /// RSI Xung Lực Bùng Nổ (50.0 -> 80.0, Step 1.0 -> 31 nấc)
+    #[dna(min = 50.0, max = 80.0, step = 1.0)]
     pub rsi_threshold: f64,
 
-    /// Ngưỡng Z-Score / Volume Force bùng nổ xung lực (0.10 -> 1.00, Step 0.05 -> 19 nấc)
-    #[dna(min = 0.10, max = 1.00, step = 0.05)]
+    /// Ngưỡng Z-Score bùng nổ xung lực khối lượng (1.00 -> 3.50, Step 0.10 -> 26 nấc)
+    #[dna(min = 1.00, max = 3.50, step = 0.10)]
     pub vol_z_threshold: f64,
 
     /// Ngưỡng kích hoạt mềm Momentum Ignition (Universal 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
 
-    /// Đệm ATR dưới đáy nến bùng nổ xung lực (0.10 -> 3.00 ATR, Step 0.15 -> 20 nấc)
-    #[dna(min = 0.10, max = 3.00, step = 0.15)]
+    /// Đệm ATR dưới đáy nến bùng nổ xung lực (0.20 -> 2.00 ATR, Step 0.10 -> 19 nấc)
+    #[dna(min = 0.20, max = 2.00, step = 0.10)]
     #[serde(default = "default_momentum_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
+
+    /// 🎯 Ngưỡng lực nến rút chân/đè đầu CLV tối thiểu (0.10 -> 0.60, Step 0.05 -> 11 nấc)
+    #[dna(min = 0.10, max = 0.60, step = 0.05)]
+    #[serde(default = "default_momentum_min_clv")]
+    pub min_clv: f64,
+
+    /// 🛡️ Ngưỡng dốc xu hướng KAMA tối đa cấm bùng nổ ngược sóng (0.05 -> 0.35, Step 0.02 -> 16 nấc)
+    #[dna(min = 0.05, max = 0.35, step = 0.02)]
+    #[serde(default = "default_momentum_max_adverse_slope")]
+    pub max_adverse_slope: f64,
+
+    /// 🚀 Trọng số xung lực giá bứt phá vượt biên (0.20 -> 0.60, Step 0.05 -> 9 nấc)
+    #[dna(min = 0.20, max = 0.60, step = 0.05)]
+    #[serde(default = "default_momentum_w_breakout")]
+    pub w_breakout: f64,
+
+    /// 📊 Trọng số xung lực khối lượng bùng nổ (0.20 -> 0.60, Step 0.05 -> 9 nấc)
+    #[dna(min = 0.20, max = 0.60, step = 0.05)]
+    #[serde(default = "default_momentum_w_volume")]
+    pub w_volume: f64,
 }
 
 /// 🌊 3. CHIẾN ĐỘI RANGE OSCILLATOR (Bắt đỉnh/đáy biên độ thị trường đi ngang)
@@ -827,7 +847,23 @@ fn default_pullback_sl_buffer_atr() -> f64 {
 }
 
 fn default_momentum_sl_buffer_atr() -> f64 {
-    0.3
+    0.50
+}
+
+fn default_momentum_min_clv() -> f64 {
+    0.20
+}
+
+fn default_momentum_max_adverse_slope() -> f64 {
+    0.15
+}
+
+fn default_momentum_w_breakout() -> f64 {
+    0.40
+}
+
+fn default_momentum_w_volume() -> f64 {
+    0.30
 }
 
 fn default_range_sl_buffer_atr() -> f64 {
