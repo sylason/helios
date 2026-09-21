@@ -37,13 +37,14 @@
   }
   ```
 - **Tiêu chí nghiệm thu (Acceptance Criteria):**
-  - [ ] Thêm test case truyền vào `vol_force = f64::NAN`, hàm `scan()` phải trả về `None`.
-  - [ ] Không có bất kỳ `Proposal` nào có `raw_score` là `NaN` lọt qua tầng Tactical Scanner.
+  - [x] Thêm test case truyền vào dữ liệu chứa `NaN`, hàm `scan()` phải trả về `None`.
+  - [x] Không có bất kỳ `Proposal` nào có `raw_score` là `NaN` lọt qua tầng Tactical Scanner.
 
 ---
 
 ### Task REV-02: Giải Quyết Triệt Để Nghịch Lý Arbiter Macro Veto (WFSS_37.log L.25806-25840)
 - **Độ ưu tiên:** 🔴 **P0 (Khẩn cấp)**
+- **Phân hệ phụ trách:** 🏛️ **`04_arbiter`** ([`arbiter.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs)) — *Sẽ được xử lý trong đợt kiểm toán phân hệ Arbiter*
 - **Tệp tác động:** 
   - [`strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs) (Dòng 111 - 118, Dòng 136 - 144)
   - [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs)
@@ -71,95 +72,82 @@
 
 ---
 
-### Task REV-03: Tích Hợp Chốt Chặn Nến Xác Nhận Đảo Chiều (Anti-Falling Knife Guard)
+### Task REV-03: Tích Hợp Chốt Chặn Nến Xác Nhận Đảo Chiều (Anti-Falling Knife Guard) [ĐÃ HOÀN THÀNH]
 - **Độ ưu tiên:** 🔴 **P0 (Khẩn cấp)**
+- **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH: CLV Guard qua DNA `min_reversal_clv`**.
 - **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs) (Dòng 70 - 87)
 - **Mô tả vấn đề:**
   - Hiện tại chỉ kiểm tra $Z < 0$ và $\text{close} < \text{kama\_mid}$.
   - Nến hiện tại có thể là nến Marubozu cắm đầu rơi tự do không có râu, vào lệnh ngay lập tức bị quán tính quét SL ở nến sau.
-- **Giải pháp kỹ thuật:**
-  Bắt buộc nến kích hoạt phải là nến từ chối giá (Price Rejection Candle):
-  ```rust
-  let open = tick.opens()[i];
-  let high = tick.highs()[i];
-  let low = tick.lows()[i];
-
-  // 1. Long Reversal: Bắt buộc có râu nến dưới thể hiện lực hấp thụ mua lên
-  // HOẶC nến đóng cửa xanh và nằm ở nửa trên biên độ nến
-  if z_score < 0.0 && close_price < kama_mid {
-      let lower_wick = close_price.min(open) - low;
-      let is_hammer = lower_wick >= (current_atr * 0.40);
-      let is_bullish_close = close_price > open && close_price >= (high + low) * 0.5;
-
-      if !is_hammer && !is_bullish_close {
-          return None; // Từ chối nến Marubozu đỏ lòm đang rơi tự do!
-      }
-      ...
-  }
-  // 2. Short Reversal: Bắt buộc có râu trên HOẶC nến đóng đỏ ở nửa dưới
-  else if z_score > 0.0 && close_price > kama_mid {
-      let upper_wick = high - close_price.max(open);
-      let is_shooting_star = upper_wick >= (current_atr * 0.40);
-      let is_bearish_close = close_price < open && close_price <= (high + low) * 0.5;
-
-      if !is_shooting_star && !is_bearish_close {
-          return None; // Từ chối nến Marubozu xanh ngắt đang bơm dựng cột!
-      }
-      ...
-  }
-  ```
+- **Giải pháp kỹ thuật đã chốt (Phương án 2 - CLV Guard):**
+  - Trích xuất: `open = tick.opens()[i]`, `high = tick.highs()[i]`, `low = tick.lows()[i]`, `close = tick.closes()[i]`.
+  - Tính toán độ lệch đóng nến phi thứ nguyên **CLV (Close Location Value)**:
+    $$\text{CLV} = \frac{2 \cdot \text{Close} - \text{High} - \text{Low}}{\max(\text{High} - \text{Low}, 1e-5)} \in [-1.0, +1.0]$$
+  - Bổ sung tham số DNA `min_reversal_clv` $[0.05, 0.50]$, step $0.05$, default $0.20$ vào `TacticalReversalParams`.
+  - **1. Long Reversal:** Bắt buộc $\text{CLV} \ge \text{min\_reversal\_clv}$ (giá đóng cửa ở nửa trên của nến, xác nhận nến rút chân Hammer hoặc nến xanh có lực hấp thụ mua lên; cấm tuyệt đối nến Marubozu đỏ $\text{CLV} \le -0.50$).
+  - **2. Short Reversal:** Bắt buộc $\text{CLV} \le -\text{min\_reversal\_clv}$ (giá đóng cửa ở nửa dưới của nến, xác nhận nến rút râu đỉnh Shooting Star hoặc nến đỏ có lực xả đè xuống; cấm tuyệt đối nến Marubozu xanh $\text{CLV} \ge 0.50$).
 - **Tiêu chí nghiệm thu (Acceptance Criteria):**
-  - [ ] Khi nến $i$ là nến Marubozu đỏ đặc không râu ($\text{low} == \text{close}$), ReversalScanner phải trả về `None`.
-  - [ ] Khi nến $i$ là nến Hammer rút chân với râu dưới $\ge 0.4 \times \text{ATR}$, ReversalScanner tạo `Proposal` Long thành công.
+  - [x] Khi nến $i$ là nến Marubozu đỏ đặc không râu ($\text{low} == \text{close}$), ReversalScanner phải trả về `None`.
+  - [x] Khi nến $i$ là nến rút chân với $\text{CLV} \ge \text{min\_reversal\_clv}$, ReversalScanner tạo `Proposal` Long thành công.
 
 ---
 
 ## 🟡 GIAI ĐOẠN 2: NÂNG CẤP THUẬT TOÁN ĐẢO CHIỀU & BỘ LỌC NẾN (P1)
 
-### Task REV-04: Tái Cấu Trúc Thành Phần Khối Lượng $f_{\text{vol}}$ (Thoát Khỏi Bẫy MFI)
+### Task REV-04: Tái Cấu Trúc Thành Phần Khối Lượng $f_{\text{vol}}$ & Đưa MFI Về Đúng Thiên Chức [ĐÃ HOÀN THÀNH]
 - **Độ ưu tiên:** 🟡 **P1 (Quan trọng)**
+- **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH: Tách rời Volume thực & Dùng MFI làm Bộ lọc Dòng tiền Quá bán/Quá mua**.
 - **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs) (Dòng 41, Dòng 55)
 - **Mô tả vấn đề:**
-  - `vol_force` trong `matrix.rs` cộng gộp $50\%$ MFI. Vì MFI luôn duy trì quanh $40-60$, `vol_force` không bao giờ tiệm cận 0.
-  - Phép tính $1.0 - \tanh(\text{vol\_force} / \text{drop})$ luôn bị dìm điểm sát 0.
-- **Giải pháp kỹ thuật:**
-  Sử dụng trực tiếp tỷ lệ khối lượng so với SMA Volume 20 phiên từ `sensors.vol_sma`:
-  ```rust
-  let vol_current = tick.volumes()[i];
-  let vol_sma = sensors.vol_sma.get(i).copied().unwrap_or(vol_current);
-  let vol_ratio = if vol_sma > 0.0 { vol_current / vol_sma } else { 1.0 };
-
-  // Khối lượng cạn kiệt: vol_ratio < 1.0 -> f_vol tăng cao
-  let f_vol = (1.0 - (vol_ratio / exhaust_drop).tanh()).max(0.0).min(1.0);
-  ```
+  - `vol_force` trong `matrix.rs` cộng gộp $50\%$ MFI. Vì MFI luôn duy trì quanh $40-60$, `vol_force` không bao giờ tiệm cận 0, làm $f_{\text{vol}}$ luôn bị đè chết sát 0.
+  - Hơn nữa, dùng MFI chia cho 100 làm thước đo khối lượng gây nghịch lý hướng: khi giá bơm dựng cột để Short Reversal, MFI vọt lên $80-90$ làm $f_{\text{vol}}$ triệt tiêu về 0!
+- **Giải pháp kỹ thuật đã chốt (Phương án 1 - Separation of Concerns):**
+  1. **Thành phần Khối lượng $f_{\text{vol}}$ thuần túy:** Đo bằng tỷ lệ khối lượng thực so với SMA Volume 20 phiên từ `sensors.vol_sma`:
+     ```rust
+     let vol_current = tick.volumes()[i];
+     let vol_sma = sensors.vol_sma.get(i).copied().unwrap_or(vol_current);
+     let vol_ratio = if vol_sma > 0.0 { vol_current / vol_sma } else { 1.0 };
+     let f_vol = (1.0 - (vol_ratio / exhaust_drop).tanh()).max(0.0).min(1.0);
+     ```
+  2. **Đưa MFI về đúng thiên chức (Money Flow Exhaustion Filter):**
+     - Bổ sung tham số DNA `mfi_reversal_thresh` $[20.0, 45.0]$, step $5.0$, default $30.0$ vào `TacticalReversalParams`.
+     - **Long Reversal:** Đòi hỏi dòng tiền bán cạn kiệt: $\text{MFI} \le \text{mfi\_reversal\_thresh}$ (ví dụ $\le 30.0$).
+     - **Short Reversal:** Đòi hỏi dòng tiền mua quá tải: $\text{MFI} \ge 100.0 - \text{mfi\_reversal\_thresh}$ (ví dụ $\ge 70.0$).
 - **Tiêu chí nghiệm thu (Acceptance Criteria):**
-  - [ ] Khi volume nến hiện tại cạn kiệt bằng $30\%$ mức trung bình (`vol_ratio = 0.3`), $f_{\text{vol}}$ phải đạt điểm cao ($> 0.60$).
-  - [ ] Điểm số $f_{\text{vol}}$ phân phối đều trong dải $[0.0, 1.0]$ thay vì bị kẹt dưới $0.15$.
+  - [x] Khi volume nến hiện tại cạn kiệt bằng $30\%$ mức trung bình (`vol_ratio = 0.3`), $f_{\text{vol}}$ đạt điểm cao ($> 0.60$).
+  - [x] MFI đóng vai trò bộ lọc định hướng đảo chiều chính xác cho cả 2 chiều Long ($\le 30$) và Short ($\ge 70$), không còn bị bóp méo ngược chiều.
 
 ---
 
-### Task REV-05: Kiểm Soát & Bảo Vệ Tỷ Lệ Risk/Reward Khởi Tạo
+### Task REV-05: Chốt Chặn Khoảng Cách Hồi Quy Tối Thiểu (Remaining Displacement Filter) [ĐÃ HOÀN THÀNH]
 - **Độ ưu tiên:** 🟡 **P1 (Quan trọng)**
-- **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs) (Dòng 68 - 88)
+- **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH: Khoảng cách hồi quy tối thiểu qua DNA `min_reversal_displacement`**.
+- **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs) (Dòng 48 - 56)
 - **Mô tả vấn đề:**
-  - Khi giá nến đóng cửa đã hồi phục quá gần `kama_mid` trong khi râu nến sâu khiến SL ở rất xa, tỷ lệ R:R bị đảo ngược nghiêm trọng (ví dụ mạo hiểm 20 giá để ăn 3 giá).
-- **Giải pháp kỹ thuật:**
-  Bổ sung kiểm tra tỷ lệ R:R tối thiểu $\ge 1.0$ (hoặc tham số hóa):
-  ```rust
-  let sl_dist = (close_price - suggested_sl.unwrap()).abs();
-  let tp_dist = (close_price - kama_mid).abs();
+  - Khi giá nến đóng cửa đã hồi phục quá gần `kama_mid`, miếng bánh tiềm năng không còn đủ lớn trong khi rủi ro vẫn hiện hữu.
+  - Sử dụng R:R cố định (Fixed R:R Cutoff) là sai lầm vì bị râu nến biến dạng và triệt tiêu các cơ hội có xác suất thắng cao.
+- **Giải pháp kỹ thuật đã chốt (Phương án 1 - Remaining Displacement Pre-condition):**
+  - Tận dụng trực tiếp gen DNA sẵn có `min_reversal_displacement` $[0.50, 3.00] \times ATR$ trong `TacticalReversalParams`.
+  - Nâng cấp từ chấm điểm mềm sang **Điều kiện Tiên Quyết Cứng (Early Exit Guard)**:
+    ```rust
+    let displacement = (close_price - kama_mid).abs();
+    let min_disp_dist = rev_cfg.min_reversal_displacement.max(0.50) * current_atr;
 
-  if tp_dist < sl_dist * 0.80 {
-      return None; // Hủy bỏ cơ hội nếu tiềm năng lợi nhuận không xứng đáng với rủi ro dừng lỗ!
-  }
-  ```
+    // Nếu khoảng cách tới KAMA Midline không đủ lớn -> Giá đã hồi gần xong, từ chối ngay lập tức!
+    if displacement < min_disp_dist {
+        return None;
+    }
+    ```
+  - Đảm bảo tiềm năng sóng hồi luôn $\ge 0.50 \sim 3.00 \times ATR$, triệt tiêu 100% các lệnh vào khi giá đã áp sát KAMA.
 - **Tiêu chí nghiệm thu (Acceptance Criteria):**
-  - [ ] Từ chối phát tín hiệu nếu khoảng cách TP nhỏ hơn $80\%$ khoảng cách SL.
+  - [x] Khi $Close$ chỉ cách $KAMA$ một khoảng $< min\_reversal\_displacement \times ATR$, Scanner phải trả về `None`.
+  - [x] Khi $Close$ còn cách $KAMA \ge min\_reversal\_displacement \times ATR$, Scanner tiếp tục đánh giá các bước kế tiếp.
 
 ---
 
 ### Task REV-06: Chống Bẫy Phục Hồi Giả (Dead Cat Bounce Protection) Trong `risk.rs`
 - **Độ ưu tiên:** 🟡 **P1 (Quan trọng)**
+- **Phân hệ phụ trách:** 🛡️ **`06_risk`** ([`risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs)) — *Sẽ được xử lý trong đợt kiểm toán phân hệ Risk Manager*
 - **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs) (Dòng 361 - 410)
 - **Mô tả vấn đề:**
   - Lệnh Reversal hướng về `kama_mid`. Trong nhiều trường hợp sóng chỉ hồi $50\%$ quãng đường rồi sập tiếp cán qua entry, biến một lệnh đang lãi đẹp thành lệnh thua.
@@ -173,33 +161,29 @@
 
 ## 🟢 GIAI ĐOẠN 3: ĐỒNG BỘ DNA CONFIG & TINH CHỈNH KHÔNG GIAN TÌM KIẾM (P2)
 
-### Task REV-07: Tối Ưu Hóa Dải Gen DNA Trong `config.rs`
+### Task REV-07: Tinh Chỉnh Dải Gen DNA & Khử Hardcode Tỷ Trọng Trong `config.rs` [ĐÃ HOÀN THÀNH]
 - **Độ ưu tiên:** 🟢 **P2 (Trung bình)**
-- **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs) (Dòng 485 - 509)
+- **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH: Bổ sung 4 gen mới, nâng `DNA_WIDTH` từ 103 lên 107 chiều, giữ nguyên dải rộng phổ quát**.
+- **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs) (Dòng 505 - 530)
 - **Mô tả vấn đề:**
-  - `z_score_threshold`: Cận dưới $0.5$ quá nhỏ, tạo nhiễu. Cần nâng lên tối thiểu $1.5$ sigma.
-  - `wick_sl_buffer_atr`: Cận dưới $0.20$ quá mỏng. Cần nâng lên tối thiểu $0.40$ hoặc $0.50$ ATR.
-- **Giải pháp kỹ thuật:**
-  ```rust
-  pub struct TacticalReversalParams {
-      ...
-      /// Nâng cận dưới Z-Score để đảm bảo thực sự là Climax (1.5 -> 4.5 sigma)
-      #[dna(min = 1.5, max = 4.5, step = 0.2)]
-      pub z_score_threshold: f64,
-
-      /// Nâng cận dưới Wick Buffer chống vi nhiễu sàn (0.4 -> 4.0 ATR)
-      #[dna(min = 0.40, max = 4.00, step = 0.20)]
-      pub wick_sl_buffer_atr: f64,
-      ...
-  }
-  ```
+  - Điểm số hiện tại bị hardcode cố định tỷ trọng $0.40 / 0.40 / 0.20$.
+  - Cần đưa các ngưỡng CLV và MFI ra ngoài DNA để GA tự thích ứng.
+  - Tuân thủ nguyên tắc Universal Adaptability: Giữ nguyên dải rộng phổ quát cho `z_score_threshold` $[0.5, 5.0]$ và `wick_sl_buffer_atr` $[0.20, 6.00]$.
+- **Giải pháp kỹ thuật đã chốt:**
+  1. Bổ sung 4 gen mới vào `TacticalReversalParams`:
+     - `min_reversal_clv`: $[0.05, 0.60]$, step $0.05$, default $0.20$
+     - `mfi_reversal_thresh`: $[15.0, 45.0]$, step $5.0$, default $30.0$
+     - `w_z_score`: $[0.10, 0.80]$, step $0.05$, default $0.40$
+     - `w_displacement`: $[0.10, 0.80]$, step $0.05$, default $0.40$
+  2. Nâng `DNA_WIDTH` của `HeliosConfigV3` từ 103 lên 107 chiều.
 - **Tiêu chí nghiệm thu (Acceptance Criteria):**
-  - [ ] Bộ gen sau khi sửa compile thành công và giảm số lượng trạng thái rác trong thuật toán di truyền.
+  - [x] `DNA_WIDTH` nâng thành công lên 107 và test `test_dna_width_and_parameter_defs_integrity` pass 100%.
 
 ---
 
 ### Task REV-08: Chuẩn Hóa Cập Nhật Dynamic TP Cho Reversal Khi KAMA Trôi Dốc
 - **Độ ưu tiên:** 🟢 **P2 (Trung bình)**
+- **Phân hệ phụ trách:** 🛡️ **`06_risk`** ([`risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs)) — *Sẽ được xử lý trong đợt kiểm toán phân hệ Risk Manager*
 - **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs) (Dòng 372 - 390)
 - **Mô tả vấn đề:**
   - Khi KAMA Mid trôi dốc quá nhanh, TP bị kéo lùi lại sát entry price, vô hiệu hóa tiềm năng lợi nhuận.
@@ -212,16 +196,17 @@
 
 ## 🔵 GIAI ĐOẠN 4: KIỂM THỬ & ĐÁNH GIÁ THỰC NGHIỆM (P3)
 
-### Task REV-09: Xây Dựng Suite Unit Tests Toàn Diện Cho `reversal.rs`
+### Task REV-09: Xây Dựng Suite Unit Tests Toàn Diện Cho `reversal.rs` [ĐÃ HOÀN THÀNH]
 - **Độ ưu tiên:** 🔵 **P3 (Kiểm thử)**
+- **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH: 4 unit test cases toàn diện trong `core_v3/mod.rs` pass 100%**.
 - **Tệp tác động:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs)
-- **Danh mục Test Cases cần viết:**
-  1. `test_nan_and_div_by_zero_safety`: Giả lập dữ liệu chứa NaN trong sensors và matrix.
-  2. `test_rejection_candle_filter`: Kiểm chứng từ chối nến Marubozu và phê duyệt nến Hammer/Engulfing.
-  3. `test_risk_reward_guard`: Kiểm chứng hủy lệnh khi khoảng cách TP < khoảng cách SL.
-  4. `test_directional_macro_veto_bypass_exception`: Kiểm chứng ngoại lệ Veto cho Reversal khi thỏa mãn điều kiện kiệt sức.
+- **Danh mục Test Cases đã viết:**
+  1. `test_reversal_clv_guard_rejects_marubozu_and_accepts_hammer`: Kiểm chứng từ chối nến Marubozu đỏ đặc và phê duyệt nến rút chân Hammer.
+  2. `test_reversal_remaining_displacement_guard`: Kiểm chứng hủy lệnh khi khoảng cách tới KAMA không đủ lớn.
+  3. `test_reversal_mfi_exhaustion_filter`: Kiểm chứng lọc chính xác quá bán cho Long và quá mua cho Short.
+  4. `test_reversal_nan_safety`: Kiểm chứng an toàn tuyệt đối khi gặp dữ liệu NaN.
 - **Tiêu chí nghiệm thu (Acceptance Criteria):**
-  - [ ] Tất cả 4 test cases chạy `cargo test` vượt qua 100% không có cảnh báo.
+  - [x] Tất cả 4 test cases chạy `cargo test` vượt qua 100% không có cảnh báo.
 
 ---
 

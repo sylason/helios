@@ -526,6 +526,27 @@ pub struct TacticalReversalParams {
     /// Ngưỡng kích hoạt mềm Climax Reversal (Universal 1% -> 99%, Step 3% -> 33 nấc)
     #[dna(min = 0.01, max = 0.99, step = 0.03)]
     pub min_activation_score: f64,
+
+    /// 🎯 Ngưỡng lực nến rút chân/đè đầu CLV tối thiểu (0.05 -> 0.60, Step 0.05 -> 12 nấc)
+    #[dna(min = 0.05, max = 0.60, step = 0.05)]
+    #[serde(default = "default_reversal_min_clv")]
+    pub min_reversal_clv: f64,
+
+    /// 💧 Ngưỡng kiệt sức dòng tiền MFI (15.0 -> 45.0, Step 5.0 -> 7 nấc)
+    /// Long yêu cầu MFI <= thresh, Short yêu cầu MFI >= 100 - thresh
+    #[dna(min = 15.0, max = 45.0, step = 5.0)]
+    #[serde(default = "default_reversal_mfi_thresh")]
+    pub mfi_reversal_thresh: f64,
+
+    /// ⚖️ Trọng số thành phần Z-Score trong chấm điểm Reversal (0.10 -> 0.80, Step 0.05 -> 15 nấc)
+    #[dna(min = 0.10, max = 0.80, step = 0.05)]
+    #[serde(default = "default_reversal_w_z_score")]
+    pub w_z_score: f64,
+
+    /// ⚖️ Trọng số thành phần Displacement trong chấm điểm Reversal (0.10 -> 0.80, Step 0.05 -> 15 nấc)
+    #[dna(min = 0.10, max = 0.80, step = 0.05)]
+    #[serde(default = "default_reversal_w_displacement")]
+    pub w_displacement: f64,
 }
 
 /// 💥 5. CHIẾN ĐỘI ANOMALY FADE (Săn các râu nến quét thanh khoản dị thường)
@@ -912,6 +933,22 @@ fn default_pullback_max_dist_atr() -> f64 {
 
 fn default_pullback_invalidation_buffer_atr() -> f64 {
     0.50
+}
+
+fn default_reversal_min_clv() -> f64 {
+    0.20
+}
+
+fn default_reversal_mfi_thresh() -> f64 {
+    30.0
+}
+
+fn default_reversal_w_z_score() -> f64 {
+    0.40
+}
+
+fn default_reversal_w_displacement() -> f64 {
+    0.40
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]

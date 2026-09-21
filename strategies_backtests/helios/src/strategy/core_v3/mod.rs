@@ -887,11 +887,291 @@ mod tests {
     }
 
     #[test]
+    fn test_reversal_clv_guard_rejects_marubozu_and_accepts_hammer() {
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::{TacticalScanner, SignalType};
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // 1. KỊCH BẢN 1: Nến Marubozu đỏ đặc rơi tự do (High=2000, Low=1950, Close=1950 => CLV = -1.0)
+        let opens = vec![2000.0; len];
+        let highs = vec![2000.0; len];
+        let lows = vec![1950.0; len];
+        let closes_marubozu = vec![1950.0; len];
+        let volumes = vec![1000.0; len];
+        let datetimes = vec![0i64; len];
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes.clone()),
+            open: std::sync::Arc::new(opens.clone()),
+            high: std::sync::Arc::new(highs.clone()),
+            low: std::sync::Arc::new(lows.clone()),
+            close: std::sync::Arc::new(closes_marubozu),
+            volume: std::sync::Arc::new(volumes.clone()),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick_marubozu = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![-3.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2040.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![25.0; len]); // Dưới 30.0 (quá bán thỏa mãn)
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.reversal.z_score_threshold = 2.5;
+        config.tactical_sniper.reversal.min_activation_score = 0.50;
+        config.tactical_sniper.reversal.min_reversal_clv = 0.20;
+        config.tactical_sniper.reversal.mfi_reversal_thresh = 30.0;
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // CLV = -1.0 < 0.20 -> Phải từ chối bắt dao rơi nến Marubozu!
+        let prop_marubozu = ReversalScanner.scan(&tick_marubozu, &sensors, &matrix, &config);
+        assert!(prop_marubozu.is_none(), "ReversalScanner PHẢI từ chối nến Marubozu cắm đầu không có râu!");
+
+        // 2. KỊCH BẢN 2: Nến Hammer rút chân (High=2000, Low=1950, Close=1995 => CLV = +0.80)
+        let closes_hammer = vec![1995.0; len];
+        let raw_cache_hammer = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes_hammer),
+            volume: std::sync::Arc::new(volumes),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_hammer = DataView::new(raw_cache_hammer);
+        let tick_hammer = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_hammer,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        // CLV = (2*1995 - 2000 - 1950) / 50 = +0.80 >= 0.20 -> Chấp thuận vào lệnh Long!
+        let prop_hammer = ReversalScanner.scan(&tick_hammer, &sensors, &matrix, &config);
+        assert!(prop_hammer.is_some(), "ReversalScanner PHẢI kích hoạt khi nến có râu rút chân Hammer!");
+        assert_eq!(prop_hammer.unwrap().signal_type, SignalType::Long);
+    }
+
+    #[test]
+    fn test_reversal_remaining_displacement_guard() {
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Giá đã hồi gần sát KAMA Mid: Close = 2038.0, KAMA = 2040.0 => Displacement = 2.0
+        // Trong khi min_reversal_displacement = 1.0 * ATR(15.0) = 15.0 > 2.0!
+        let opens = vec![2030.0; len];
+        let highs = vec![2040.0; len];
+        let lows = vec![2020.0; len];
+        let closes = vec![2038.0; len]; // CLV = (2*2038 - 2040 - 2020) / 20 = 16/20 = 0.80 (đẹp)
+        let volumes = vec![1000.0; len];
+        let datetimes = vec![0i64; len];
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(volumes),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![-2.5; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2040.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![25.0; len]);
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.reversal.min_reversal_displacement = 1.0; // Yêu cầu tối thiểu 1.0 * ATR = 15.0
+        config.tactical_sniper.reversal.min_reversal_clv = 0.20;
+        config.tactical_sniper.reversal.mfi_reversal_thresh = 30.0;
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // Khoảng cách hồi quy chỉ còn 2.0 < 15.0 -> Phải từ chối ngay lập tức!
+        let prop = ReversalScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "ReversalScanner PHẢI từ chối khi khoảng cách tới KAMA không đủ lớn (Remaining Displacement Guard)!");
+    }
+
+    #[test]
+    fn test_reversal_mfi_exhaustion_filter() {
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let opens = vec![2000.0; len];
+        let highs = vec![2000.0; len];
+        let lows = vec![1950.0; len];
+        let closes = vec![1995.0; len]; // CLV = 0.80
+        let volumes = vec![1000.0; len];
+        let datetimes = vec![0i64; len];
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(volumes),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![-3.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2040.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.reversal.mfi_reversal_thresh = 30.0;
+        config.tactical_sniper.reversal.min_reversal_clv = 0.20;
+
+        // Trường hợp 1: MFI = 45.0 > 30.0 (chưa kiệt sức bán) -> Phải từ chối!
+        sensors.mfi = std::sync::Arc::new(vec![45.0; len]);
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        let prop_fail = ReversalScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_fail.is_none(), "ReversalScanner PHẢI từ chối khi MFI > mfi_reversal_thresh!");
+
+        // Trường hợp 2: MFI = 20.0 <= 30.0 (kiệt sức bán chuẩn xác) -> Kích hoạt!
+        sensors.mfi = std::sync::Arc::new(vec![20.0; len]);
+        let matrix_pass = MarketMatrixV3::from_sensors(&config, &sensors);
+        let prop_pass = ReversalScanner.scan(&tick, &sensors, &matrix_pass, &config);
+        assert!(prop_pass.is_some(), "ReversalScanner PHẢI kích hoạt khi MFI kiệt sức <= mfi_reversal_thresh!");
+    }
+
+    #[test]
+    fn test_reversal_nan_safety() {
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2000.0; len]),
+            low: std::sync::Arc::new(vec![1950.0; len]),
+            close: std::sync::Arc::new(vec![1995.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![f64::NAN; len]); // NaN Z-Score
+        sensors.kama_mid = std::sync::Arc::new(vec![2040.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![25.0; len]);
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        let prop = ReversalScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "ReversalScanner PHẢI trả về None khi dữ liệu chứa NaN!");
+    }
+
+    #[test]
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 103, "DNA_WIDTH phải là chính xác 103 chiều sau khi bổ sung min_clv, max_adverse_slope, w_breakout & w_volume cho Momentum!");
+        assert_eq!(width, 107, "DNA_WIDTH phải là chính xác 107 chiều sau khi bổ sung 4 gen cho Reversal!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
@@ -910,6 +1190,10 @@ mod tests {
         let has_mom_adverse = defs.iter().any(|(name, _)| name.contains("tactical_sniper.momentum.max_adverse_slope"));
         let has_mom_w_break = defs.iter().any(|(name, _)| name.contains("tactical_sniper.momentum.w_breakout"));
         let has_mom_w_vol = defs.iter().any(|(name, _)| name.contains("tactical_sniper.momentum.w_volume"));
+        let has_rev_clv = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.min_reversal_clv"));
+        let has_rev_mfi = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.mfi_reversal_thresh"));
+        let has_rev_w_z = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.w_z_score"));
+        let has_rev_w_disp = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.w_displacement"));
         let has_range = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range"));
         let has_anomaly = defs.iter().any(|(name, _)| name.contains("tactical_sniper.anomaly"));
         let has_rsi_ano = defs.iter().any(|(name, _)| name.contains("rsi_anomaly"));
@@ -928,6 +1212,13 @@ mod tests {
         assert!(has_max_boundary, "defs phải chứa tactical_sniper.absorption.max_boundary_pct_b!");
         assert!(has_squeeze_weight, "defs phải chứa tactical_sniper.absorption.squeeze_weight!");
         assert!(has_mom_clv, "defs phải chứa tactical_sniper.momentum.min_clv!");
+        assert!(has_mom_adverse, "defs phải chứa tactical_sniper.momentum.max_adverse_slope!");
+        assert!(has_mom_w_break, "defs phải chứa tactical_sniper.momentum.w_breakout!");
+        assert!(has_mom_w_vol, "defs phải chứa tactical_sniper.momentum.w_volume!");
+        assert!(has_rev_clv, "defs phải chứa tactical_sniper.reversal.min_reversal_clv!");
+        assert!(has_rev_mfi, "defs phải chứa tactical_sniper.reversal.mfi_reversal_thresh!");
+        assert!(has_rev_w_z, "defs phải chứa tactical_sniper.reversal.w_z_score!");
+        assert!(has_rev_w_disp, "defs phải chứa tactical_sniper.reversal.w_displacement!");
         assert!(has_mom_adverse, "defs phải chứa tactical_sniper.momentum.max_adverse_slope!");
         assert!(has_mom_w_break, "defs phải chứa tactical_sniper.momentum.w_breakout!");
         assert!(has_mom_w_vol, "defs phải chứa tactical_sniper.momentum.w_volume!");

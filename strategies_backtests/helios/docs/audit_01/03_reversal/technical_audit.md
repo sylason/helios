@@ -389,7 +389,7 @@ Dưới đây là bảng tổng hợp các lỗi kỹ thuật và rủi ro tiề
 | **FLAW-REV.04** | **Bẫy dìm điểm $f_{\text{vol}}$ do MFI nền 50% trong `vol_force`** | 🟡 **HIGH** | `reversal.rs:55`<br>`matrix.rs:112` | $f_{\text{vol}}$ gần như luôn bằng 0 vì MFI hiếm khi về 0, làm Reversal mất trắng 20% tổng điểm tiềm năng. |
 | **FLAW-REV.05** | **Wick SL Buffer quá mỏng ($0.2 \times \text{ATR}$)** | 🟡 **HIGH** | `config.rs:503`<br>`reversal.rs:66` | Dải DNA cho phép `wick_sl_buffer_atr` xuống tới 0.20 ATR, khoảng cách dừng lỗ quá chật chội dễ bị quét bởi spread. |
 | **FLAW-REV.06** | **Rủi ro trôi dốc KAMA Midline làm co hẹp TP** | 🟡 **HIGH** | `risk.rs:373`<br>`reversal.rs:67` | Khi giá rơi cực nhanh, `kama_mid` ngắn hạn tụt dốc theo sau, biến mục tiêu chốt lời thành điểm hòa vốn hoặc âm. |
-| **FLAW-REV.07** | **Thiếu kiểm tra tương quan khoảng cách R:R** | 🟢 **MEDIUM** | `reversal.rs:75-76` | Không đo lường tỷ lệ $\frac{|\text{close} - \text{TP}|}{|\text{close} - \text{SL}|}$, có thể phát lệnh với R:R âm nghiêm trọng. |
+| **FLAW-REV.07** | **Thiếu chốt chặn khoảng cách hồi quy tối thiểu (Remaining Displacement)** | 🟡 **HIGH** | `reversal.rs:48-54` | Không có Early Exit Guard cho `displacement`, cho phép mở lệnh khi giá đã hồi gần sát KAMA Midline khiến biên độ lợi nhuận cạn kiệt. |
 
 ---
 
@@ -397,29 +397,40 @@ Dưới đây là bảng tổng hợp các lỗi kỹ thuật và rủi ro tiề
 
 Để đưa `reversal.rs` trở thành cỗ máy săn đảo chiều hoàn chỉnh, loại bỏ hoàn toàn các lỗi kiến trúc trên, đề xuất triển khai gói cải tiến toàn diện sau:
 
-### 7.1. Cải Tiến 1: Sửa Lỗi Phòng Vệ `NaN` & Viết Lại $f_{\text{vol}}$
-Thay thế việc đo lường khối lượng qua `matrix.volume_force` (bị dính MFI) bằng việc đo trực tiếp qua tỷ lệ sụt giảm volume của nến hiện tại so với trung bình volume 20 phiên (`sensors.vol_sma`):
+### 7.1. Cải Tiến 1: Sửa Lỗi Phòng Vệ `NaN`, Tách Rời Volume Thực & Đưa MFI Về Đúng Thiên Chức
+1. **Khối lượng $f_{\text{vol}}$ thuần túy**: Thay thế việc đo lường khối lượng qua `matrix.volume_force` (bị dính MFI) bằng việc đo trực tiếp qua tỷ lệ volume nến hiện tại so với trung bình volume 20 phiên (`sensors.vol_sma`):
 $$\text{vol\_ratio} = \frac{\text{tick.volumes}()[i]}{\text{sensors.vol\_sma}[i]}$$
 $$f_{\text{vol}} = \text{clamp}\left(1.0 - \tanh\left(\frac{\text{vol\_ratio}}{\text{exhaust\_drop}}\right), 0.0, 1.0\right)$$
-Đồng thời bổ sung chốt chặn `NaN` tuyệt đối:
+
+2. **Bộ lọc Dòng tiền Quá bán / Quá mua qua MFI (Money Flow Exhaustion Filter)**:
+Đưa MFI về đúng thiên chức đo lường dòng tiền kiệt sức thay vì đo độ lớn volume:
+- Tham số DNA: `mfi_reversal_thresh` $[20.0, 45.0]$, default $30.0$.
+- Long Reversal: Bắt buộc $\text{MFI} \le \text{mfi\_reversal\_thresh}$ (dòng tiền xả lũ kiệt quệ).
+- Short Reversal: Bắt buộc $\text{MFI} \ge 100.0 - \text{mfi\_reversal\_thresh}$ (dòng tiền gom mua kiệt quệ).
+
+3. **Chốt chặn an toàn `NaN` tuyệt đối**:
 ```rust
 if score.is_nan() || score < min_score {
     return None;
 }
 ```
 
-### 7.2. Cải Tiến 2: Bổ Sung Bộ Lọc Nến Xác Nhận (Price Action Rejection Guard)
-Thêm gen cấu hình `min_rejection_wick_atr` vào `TacticalReversalParams` (Dải: `0.3 -> 2.0 ATR`).
-Chỉ phát tín hiệu Long khi:
-```rust
-let lower_wick = (close_price.min(tick.opens()[i]) - low);
-let is_hammer = lower_wick >= (current_atr * rev_cfg.min_rejection_wick_atr);
-let is_bullish_engulfing = close_price > tick.opens()[i] && close_price > (high + low) * 0.5;
+### 7.2. Cải Tiến 2: Bổ Sung Bộ Lọc Nến Xác Nhận Qua CLV Guard (Price Action CLV Guard)
+Thay vì dùng râu nến phụ thuộc ATR, hệ thống chuẩn hóa phi thứ nguyên qua **CLV (Close Location Value)** và tham số DNA `min_reversal_clv` trong `TacticalReversalParams` (Dải: `0.05 -> 0.50`, step `0.05`, default `0.20`).
 
-if !(is_hammer || is_bullish_engulfing) {
-    return None; // Từ chối bắt dao rơi khi chưa có dấu hiệu nến rút chân/đóng xanh!
-}
+Công thức tính CLV:
+$$\text{CLV} = \frac{2 \cdot \text{Close} - \text{High} - \text{Low}}{\max(\text{High} - \text{Low}, 1e-5)} \in [-1.0, +1.0]$$
+
+Điều kiện xác nhận:
+```rust
+let candle_range = (high - low).max(1e-5);
+let clv = (2.0 * close_price - high - low) / candle_range;
+let min_clv = rev_cfg.min_reversal_clv.clamp(0.05, 0.50);
+
+// Long Reversal: Bắt buộc CLV >= min_clv (giá đóng ở nửa trên, nến rút chân/hấp thụ cầu)
+// Short Reversal: Bắt buộc CLV <= -min_clv (giá đóng ở nửa dưới, nến rút râu/xả hàng đè giá)
 ```
+Giải pháp này loại bỏ 100% nến Marubozu rơi/bơm tự do ($\text{CLV} \approx \pm 1.0$) mà không bỏ lỡ các nến Hammer/Shooting Star quan trọng.
 
 ### 7.3. Cải Tiến 3: Thiết Kế Cơ Chế Ngoại Lệ Mở Khóa Veto (Macro Veto Bypass Exception)
 Trong [`arbiter.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs), thiết kế lại hàm `is_direction_vetoed` để chấp nhận ngoại lệ khi có **Sự Kiệt Sức Cực Hạn Có Xác Nhận (Confirmed Climax Exhaustion)**:
