@@ -119,7 +119,6 @@ impl HeliosArbiter {
 
     pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, _debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
-        let current_close = tick.closes()[i];
         
         let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
         let min_threshold = config.arbiter.min_confidence_threshold;
@@ -161,50 +160,10 @@ impl HeliosArbiter {
             };
         }
 
-        // 2. GIẢI QUYẾT XUNG ĐỘT TÍN HIỆU (CONFLICT RESOLUTION)
-        let mut best: Option<(Proposal, f64)> = None;
+        // 2. GIẢI QUYẾT XUNG ĐỘT TÍN HIỆU QUA TWO-STAGE AUCTION (O(N), COMMUTATIVE, CONFIDENCE-FIRST)
+        let winner = Self::resolve_conflicts(approved_proposals);
 
-        for (proposal, conf) in approved_proposals {
-            match &best {
-                None => {
-                    best = Some((proposal, conf));
-                }
-                Some((current_prop, current_conf)) => {
-                    if proposal.signal_type == current_prop.signal_type {
-                        // CÙNG CHIỀU: Ưu tiên lệnh có khoảng cách Stop Loss gần hơn (R:R tốt hơn)
-                        let dist_new = proposal.suggested_sl.map(|sl| (current_close - sl).abs()).unwrap_or(f64::MAX);
-                        let dist_curr = current_prop.suggested_sl.map(|sl| (current_close - sl).abs()).unwrap_or(f64::MAX);
-
-                        if dist_new < dist_curr {
-                            best = Some((proposal, conf));
-                        } else if (dist_new - dist_curr).abs() < 1e-6 && conf > *current_conf {
-                            best = Some((proposal, conf));
-                        }
-                    } else {
-                        // NGƯỢC CHIỀU (XUNG ĐỘT LONG VS SHORT):
-                        // Nếu một bên có độ tự tin vượt trội (> 0.15), chọn bên mạnh hơn;
-                        // Nếu độ tự tin tương đương, hủy cả hai (Flat - Cash is King để bảo vệ tài khoản).
-                        let diff = conf - *current_conf;
-                        if diff > 0.15 {
-                            best = Some((proposal, conf));
-                        } else if diff < -0.15 {
-                            // Giữ nguyên current
-                        } else {
-                            return ArbiterDecision {
-                                is_approved: false,
-                                final_signal: None,
-                                winning_scanner: None,
-                                final_confidence: 0.0,
-                                final_sl: None,
-                                final_tp: None,
-                            };
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some((proposal, confidence)) = best {
+        if let Some((proposal, confidence)) = winner {
             ArbiterDecision {
                 is_approved: true,
                 final_signal: Some(proposal.signal_type),
@@ -222,6 +181,56 @@ impl HeliosArbiter {
                 final_sl: None,
                 final_tp: None,
             }
+        }
+    }
+
+    /// ⚔️ TWO-STAGE AUCTION: Giải quyết xung đột tín hiệu O(N), Commutative, Confidence-First
+    /// Tầng 1: Đấu thầu nội bộ từng chiều (Intra-Side Auction: tìm Long mạnh nhất và Short mạnh nhất)
+    /// Tầng 2: Phân xử đối đầu liên chiều (Inter-Side Face-Off: Long vs Short)
+    pub fn resolve_conflicts(approved_proposals: Vec<(Proposal, f64)>) -> Option<(Proposal, f64)> {
+        let mut best_long: Option<(Proposal, f64)> = None;
+        let mut best_short: Option<(Proposal, f64)> = None;
+
+        // TẦNG 1: ĐẤU THẦU NỘI BỘ TỪNG CHIỀU (INTRA-SIDE AUCTION)
+        for (proposal, conf) in approved_proposals {
+            let target_slot = match proposal.signal_type {
+                SignalType::Long => &mut best_long,
+                SignalType::Short => &mut best_short,
+            };
+
+            match target_slot {
+                None => {
+                    *target_slot = Some((proposal, conf));
+                }
+                Some((current_prop, current_conf)) => {
+                    // Ưu tiên 1: Confidence cao hơn (vượt sai số 1e-6)
+                    if conf > *current_conf + 1e-6 {
+                        *target_slot = Some((proposal, conf));
+                    } else if (conf - *current_conf).abs() <= 1e-6 && proposal.raw_score > current_prop.raw_score {
+                        // Ưu tiên 2 (Tie-breaking): raw_score cao hơn nếu confidence hòa
+                        *target_slot = Some((proposal, conf));
+                    }
+                }
+            }
+        }
+
+        // TẦNG 2: PHÂN XỬ LIÊN CHIỀU (INTER-SIDE FACE-OFF: LONG VS SHORT)
+        match (best_long, best_short) {
+            (Some(long_candidate), None) => Some(long_candidate),
+            (None, Some(short_candidate)) => Some(short_candidate),
+            (Some((l_prop, l_conf)), Some((s_prop, s_conf))) => {
+                let diff = l_conf - s_conf;
+                if diff > 0.15 {
+                    Some((l_prop, l_conf))
+                } else if diff < -0.15 {
+                    Some((s_prop, s_conf))
+                } else {
+                    // Xung đột giằng co không bên nào vượt trội (|diff| <= 0.15):
+                    // Triệt tiêu cả 2 (Flat - Cash is King để bảo vệ tài khoản)
+                    None
+                }
+            }
+            (None, None) => None,
         }
     }
 }
@@ -258,18 +267,129 @@ mod tests {
     }
 
     #[test]
-    fn test_conflict_resolution_closer_stop_loss() {
-        let dist_loose = (2500.0 - 2450.0_f64).abs();
-        let dist_tight = (2500.0 - 2480.0_f64).abs();
-        assert!(dist_tight < dist_loose, "Absorption có SL chặt hơn TrendPB");
+    fn test_conflict_resolution_higher_confidence_wins() {
+        // Đề xuất 1: TrendPB Long, confidence 0.85, SL xa ($2450)
+        let p1 = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.85,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(2450.0),
+            suggested_tp: None,
+        };
+        // Đề xuất 2: Absorption Long, confidence 0.50, SL hẹp ($2480)
+        let p2 = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.50,
+            scanner_id: ScannerId::AbsorptionScout,
+            suggested_sl: Some(2480.0),
+            suggested_tp: None,
+        };
+
+        // Theo nguyên tắc Confidence-First: p1 (0.85) phải thắng p2 (0.50) dù SL của p1 xa hơn!
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p1, 0.85), (p2, 0.50)]);
+        assert!(winner.is_some());
+        let (winning_prop, winning_conf) = winner.unwrap();
+        assert_eq!(winning_prop.scanner_id, ScannerId::TrendPullback);
+        assert_eq!(winning_conf, 0.85);
+    }
+
+    #[test]
+    fn test_conflict_resolution_tie_breaker_uses_raw_score() {
+        let p1 = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.82,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(2450.0),
+            suggested_tp: None,
+        };
+        let p2 = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.88,
+            scanner_id: ScannerId::AbsorptionScout,
+            suggested_sl: Some(2480.0),
+            suggested_tp: None,
+        };
+
+        // Cả 2 cùng có confidence = 0.80 sau khi trừ penalty, nhưng p2 có raw_score cao hơn (0.88 > 0.82)
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p1, 0.80), (p2, 0.80)]);
+        assert!(winner.is_some());
+        let (winning_prop, _) = winner.unwrap();
+        assert_eq!(winning_prop.scanner_id, ScannerId::AbsorptionScout);
     }
 
     #[test]
     fn test_conflict_resolution_opposite_signals_flat() {
-        let conf_long = 0.70_f64;
-        let conf_short = 0.72_f64;
-        let diff = (conf_long - conf_short).abs();
-        assert!(diff <= 0.15, "Xung đột căng thẳng không vượt trội");
+        let p_long = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.70,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(2450.0),
+            suggested_tp: None,
+        };
+        let p_short = Proposal {
+            signal_type: SignalType::Short,
+            raw_score: 0.72,
+            scanner_id: ScannerId::ClimaxReversal,
+            suggested_sl: Some(2550.0),
+            suggested_tp: None,
+        };
+
+        // Xung đột giằng co (0.72 - 0.70 = 0.02 <= 0.15) -> Triệt tiêu (Flat)
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p_long, 0.70), (p_short, 0.72)]);
+        assert!(winner.is_none(), "Xung đột căng thẳng không vượt trội phải hủy lệnh để bảo toàn vốn!");
+    }
+
+    #[test]
+    fn test_conflict_resolution_opposite_signals_decisive_win() {
+        let p_long = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.85,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(2450.0),
+            suggested_tp: None,
+        };
+        let p_short = Proposal {
+            signal_type: SignalType::Short,
+            raw_score: 0.60,
+            scanner_id: ScannerId::ClimaxReversal,
+            suggested_sl: Some(2550.0),
+            suggested_tp: None,
+        };
+
+        // Long vượt trội Short (0.85 - 0.60 = 0.25 > 0.15) -> Long chiến thắng
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p_long, 0.85), (p_short, 0.60)]);
+        assert!(winner.is_some());
+        let (winning_prop, winning_conf) = winner.unwrap();
+        assert_eq!(winning_prop.signal_type, SignalType::Long);
+        assert_eq!(winning_conf, 0.85);
+    }
+
+    #[test]
+    fn test_two_stage_auction_commutativity() {
+        let p_long = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.90,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(2450.0),
+            suggested_tp: None,
+        };
+        let p_short = Proposal {
+            signal_type: SignalType::Short,
+            raw_score: 0.60,
+            scanner_id: ScannerId::ClimaxReversal,
+            suggested_sl: Some(2550.0),
+            suggested_tp: None,
+        };
+
+        // Thứ tự 1: [Long, Short]
+        let w1 = HeliosArbiter::resolve_conflicts(vec![(p_long.clone(), 0.90), (p_short.clone(), 0.60)]);
+        // Thứ tự 2: [Short, Long]
+        let w2 = HeliosArbiter::resolve_conflicts(vec![(p_short, 0.60), (p_long, 0.90)]);
+
+        assert!(w1.is_some());
+        assert!(w2.is_some());
+        assert_eq!(w1.as_ref().unwrap().0.scanner_id, w2.as_ref().unwrap().0.scanner_id);
+        assert_eq!(w1.unwrap().0.scanner_id, ScannerId::TrendPullback);
     }
 
     #[test]
