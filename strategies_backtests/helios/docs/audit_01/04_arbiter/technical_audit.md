@@ -585,3 +585,32 @@ pub struct HeliosStrategyV3 {
 }
 ```
 Khởi tạo và đăng ký sẵn các Scanners một lần duy nhất trong `HeliosStrategyV3::new()`. Tốc độ duyệt tick sẽ tăng vọt và giải phóng hoàn toàn áp lực cấp phát heap cho CPU.
+
+---
+
+## 9. CÁC PHÁT HIỆN KIỂM TOÁN CHUYÊN SÂU BỔ SUNG (5 ĐIỂM YẾU CỐT TỬ)
+
+Qua quá trình đối chất nguyên lý gốc (First-Principles) và rà soát sâu luồng dữ liệu (Data Lineage), chúng ta phát hiện thêm 5 bẫy ngầm nghiêm trọng chi phối toàn bộ hiệu năng và độ lệch lạc của Arbiter:
+
+### 🚨 1. Ảo Tưởng Trọng Số Playbook (The Phantom DNA Trap)
+- **Thực trạng:** Trong `arbiter.rs`, `confidence = compute_confidence(raw_score, chaos_val)`. Hoàn toàn không có trọng số `playbook_weight` nào được nhân vào điểm tự tin!
+- **Hệ quả:** Toàn bộ các trường `scanner_weight`, `min_confidence_trending` trong `config.rs` đã bị vô hiệu hóa / comment out. Arbiter đối xử thô $1:1$ giữa các Scanner, khiến Scanner nào có thang điểm nội bộ phóng khoáng hơn (như `Absorption`) luôn luôn đè bẹp các Scanner khắt khe hơn (như `TrendPB`).
+
+### 🚨 2. Dị Tật `chaos_index` (Đánh Đồng Biến Động Mạnh Với Hỗn Loạn)
+- **Công thức:** `ch = 0.60 * c_r + 0.40 * z_abs` trong `matrix.rs:122`.
+- **Thực trạng:** $c\_r$ là phân vị của NATR (độ lớn biến động), $z\_abs$ là độ lệch giá so với trung bình. Khi thị trường có một xu hướng bùng nổ (Super Trend) hoặc một cú xả hoảng loạn (Capitulation), cả NATR và $|Z|$ đều đạt đỉnh $\implies \text{chaos\_index} \to 1.0$.
+- **Hệ quả:** Thị trường biến động mạnh một chiều (sóng đẹp nhất) bị Arbiter coi là bão Whipsaw, kéo tụt `confidence` về $0.0$, làm tê liệt hoàn toàn việc mở lệnh của cả `MomentumIgnition` và `ClimaxReversal`!
+- **Minh chứng dòng code bị bỏ quên:** Dòng 86 `matrix.rs` tính `entropy = rolling_percentile(&sensors.efficiency_ratio)`, nhưng dòng 122 lại bỏ xó không dùng, làm mất khả năng phân biệt sóng định hướng với nhiễu loạn.
+
+### 🚨 3. Phạt Tuyến Tính Bờ Vực (Linear Penalty Cliff)
+- **Công thức:** $\text{Confidence} = \text{raw\_score} \times (1.0 - \text{penalty})$.
+- **Hệ quả:** Nếu $\text{chaos\_index} \ge 0.80$, thì dù setup hoàn hảo $\text{raw\_score} = 1.0$, điểm tự tin tối đa chỉ còn $0.20$. Chỉ cần $\text{chaos} = 0.81$, điểm rớt xuống $0.19 < 0.20$ (ngưỡng min) $\implies$ Bị loại bỏ $100\%$. Đây là một bờ vực toán học nhị phân nguy hiểm.
+
+### 🚨 4. Trùng Lặp Hai Tầng Cổng Lọc (`min_activation_score` vs `min_confidence_threshold`)
+- **Thực trạng:** Từng Scanner đã có ngưỡng kích hoạt riêng trong DNA (`min_activation_score`). Lên đến Arbiter lại bị kẹp thêm một ngưỡng tĩnh duy nhất `min_confidence_threshold` ($0.20$).
+- **Hệ quả:** Hai tầng cổng lọc dẫm chân lên nhau, làm vô hiệu hóa ngưỡng cấu hình DNA nội tại của từng Scanner nếu `min_confidence_threshold` cao hơn, hoặc trở nên thừa thãi nếu nó thấp hơn.
+
+### 🚨 5. Lãng Phí Heap Allocation Tàn Phá Hiệu Năng (`core_v3/mod.rs:338–345`)
+- **Thực trạng:** Khởi tạo `HeliosArbiter::new()` và cấp phát 4 lần `Box::new()` ở mỗi cây nến 1 phút.
+- **Hệ quả:** Tốn hàng triệu lần cấp phát heap vô nghĩa trong quá trình chạy backtest và tối ưu hóa GA.
+

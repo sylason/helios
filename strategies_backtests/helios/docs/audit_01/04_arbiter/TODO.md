@@ -57,11 +57,11 @@ Dưới đây là các đề xuất thiết kế ban đầu đã được bóc t
 | :---: | :--- | :--- | :---: | :---: | :--- |
 | **1** | `TASK-ARB-01` | **Xóa bỏ R:R Fallacy, chuyển sang Confidence-First** | 🔴 **CRITICAL** | ✅ Hoàn thành | [`arbiter.rs:173–183`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L173-L183) |
 | **2** | `TASK-ARB-02` | **Tái cấu trúc Two-Stage Auction (Đấu thầu 2 tầng)** | 🔴 **CRITICAL** | ✅ Hoàn thành | [`arbiter.rs:164–205`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L164-L205) |
-| **3** | `TASK-ARB-03` | **Miễn trừ Macro Veto cho Climax Reversal (Giải quyết REV-02)** | 🔴 **CRITICAL** | ⏳ Chờ xử lý | [`arbiter.rs:108–118, 136–144`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L108-L118) |
-| **4** | `TASK-ARB-04` | **Khử Magic Numbers, cấu hình hóa vào `ArbiterConfig`** | 🟡 **HIGH** | ⏳ Chờ xử lý | [`config.rs:300–327`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L300-L327), [`arbiter.rs:128`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L128) |
+| **3** | `TASK-ARB-03` | **Xóa bỏ Macro Veto trùng lặp khỏi Arbiter (Giải quyết REV-02)** | 🔴 **CRITICAL** | ✅ Hoàn thành | [`arbiter.rs:95–160`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L95-L160) |
+| **4** | `TASK-ARB-04` | **Khử Magic Numbers, cấu hình hóa vào `ArbiterConfig`** | 🟡 **HIGH** | ✅ Hoàn thành | [`config.rs:300–335`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L300-L335), [`arbiter.rs:122`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L122) |
 | **5** | `TASK-ARB-05` | **Tối ưu hóa Zero-Allocation cho Arbiter trong Strategy** | 🟡 **HIGH** | ⏳ Chờ xử lý | [`core_v3/mod.rs:338–346`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L338-L346) |
-| **6** | `TASK-ARB-06` | **Vá an toàn `NaN` tường minh cho `compute_confidence`** | 🟢 **MEDIUM** | ⏳ Chờ xử lý | [`arbiter.rs:98–106`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L98-L106) |
-| **7** | `TASK-ARB-07` | **Xây dựng Suite Unit Tests Toàn Diện Cho Arbiter** | 🔵 **TESTING** | ⏳ Chờ xử lý | [`arbiter.rs:230–298`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L230-L298) |
+| **6** | `TASK-ARB-06` | **Vá an toàn `NaN` tường minh cho `compute_confidence`** | 🟢 **MEDIUM** | ✅ Hoàn thành | [`arbiter.rs:99–108`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L99-L108) |
+| **7** | `TASK-ARB-07` | **Xây dựng Suite Unit Tests Toàn Diện Cho Arbiter** | 🔵 **TESTING** | ✅ Hoàn thành | [`arbiter.rs:220–360`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L220-L360) |
 
 ---
 
@@ -91,13 +91,15 @@ Dưới đây là các đề xuất thiết kế ban đầu đã được bóc t
 
 ---
 
-### 🔴 TASK-ARB-03: Miễn Trừ Macro Veto Cho Climax Reversal (Task REV-02)
+### 🔴 TASK-ARB-03: Xóa Bỏ Macro Veto Trùng Lặp Khỏi Arbiter (Giải Quyết REV-02)
 - **Mã lỗi liên đới:** `VULN-ARB-03`, `FLAW-REV.02`, `REV-02`.
 - **Hành động:**
-  - Cập nhật logic trong `arbiter.rs`: Nếu `proposal.scanner_id == ScannerId::ClimaxReversal`, chỉ Veto khi xu hướng cuồng loạn cực đoan ($\text{slope}.abs() > 0.60 \land \text{trend\_axis} \ge 0.85$).
-  - Các scanner khác (`TrendPullback`, `MomentumIgnition`, `Absorption`) vẫn tuân thủ Macro Veto nghiêm ngặt.
+  - Xóa bỏ hoàn toàn hàm `is_direction_vetoed` và lời gọi kiểm tra trong `process_tick` của `arbiter.rs`.
+  - Trả lại quyền kiểm soát xu hướng cho từng Scanner: `TrendPB`, `Momentum`, `Absorption` đều đã có trend guard nội tại, trong khi `Reversal` được bảo vệ bởi CLV Guard và MFI Filter.
+  - Lưu ý liên đới: Dị tật `chaos_index` (xem Mục 5) cần được làm mềm để không bóp chết `ClimaxReversal` khi thị trường có biến động mạnh.
 - **Tiêu chuẩn nghiệm thu:**
-  - [ ] Tín hiệu ClimaxReversal không còn bị VETO trong các đợt sập/bơm có `kama_slope = 0.13 ~ 0.50` và `trend_axis = 0.62`.
+  - [x] `arbiter.rs` không còn bất kỳ dòng code nào cấm mở Long/Short theo hướng vĩ mô (thuần túy làm nhiệm vụ đấu thầu Two-Stage Auction).
+  - [x] Tín hiệu ClimaxReversal không còn bị VETO trong các đợt sập/bơm có `kama_slope = 0.13 ~ 0.50` và `trend_axis = 0.62`.
 
 ---
 
@@ -105,12 +107,10 @@ Dưới đây là các đề xuất thiết kế ban đầu đã được bóc t
 - **Mã lỗi liên đới:** `VULN-ARB-04`, `ARB-HARDCODE`.
 - **Hành động:**
   - Bổ sung vào `ArbiterConfig` trong `config.rs`:
-    + `macro_veto_slope_threshold: f64` (mặc định $0.10$).
-    + `macro_veto_trend_axis_min: f64` (mặc định $0.40$).
-    + `conflict_confidence_margin: f64` (mặc định $0.15$).
-  - Truyền các giá trị này vào `arbiter.process_tick(...)`.
+    + `conflict_confidence_margin: f64` (mặc định $0.15$, biên độ phân xử Long vs Short).
+  - Loại bỏ các magic numbers `macro_thresh = 0.10` và `trend_axis >= 0.40` không còn sử dụng sau khi gỡ bỏ `is_direction_vetoed`.
 - **Tiêu chuẩn nghiệm thu:**
-  - [ ] Không còn bất kỳ hằng số ma thuật nào bị hardcode trong `arbiter.rs`.
+  - [x] Không còn bất kỳ hằng số ma thuật nào bị hardcode trong `arbiter.rs`.
 
 ---
 
@@ -133,21 +133,37 @@ Dưới đây là các đề xuất thiết kế ban đầu đã được bóc t
       if raw_score.is_nan() || chaos_index.is_nan() || raw_score <= 0.0 {
           return 0.0;
       }
-      let penalty = chaos_index.max(0.0).min(1.0);
+      let penalty = (chaos_index.max(0.0) * 0.50).min(0.50);
       (raw_score * (1.0 - penalty)).max(0.0).min(1.0)
   }
   ```
 - **Tiêu chuẩn nghiệm thu:**
-  - [ ] `compute_confidence(f64::NAN, 0.2) == 0.0`
-  - [ ] `compute_confidence(0.8, f64::NAN) == 0.0`
+  - [x] `compute_confidence(f64::NAN, 0.2) == 0.0`
+  - [x] `compute_confidence(0.8, f64::NAN) == 0.0`
 
 ---
 
 ### 🔵 TASK-ARB-07: Xây Dựng Suite Unit Tests Toàn Diện Cho Arbiter
 - **Danh mục test cases cần viết:**
-  1. `test_confidence_first_beats_narrow_sl`: Confidence $0.85$ (SL $1.8$ ATR) thắng Confidence $0.40$ (SL $0.5$ ATR).
-  2. `test_two_stage_auction_commutativity`: Hoán vị thứ tự scanner cho ra cùng kết quả.
-  3. `test_macro_veto_reversal_exception`: Reversal được thông qua trong khi TrendPB bị chặn.
-  4. `test_nan_safety_in_confidence`: Kiểm chứng an toàn tuyệt đối với NaN.
+  1. `test_conflict_resolution_higher_confidence_wins`: Đã hoàn thành (Khối 1).
+  2. `test_two_stage_auction_commutativity`: Đã hoàn thành (Khối 1).
+  3. `test_conflict_resolution_tie_breaker_uses_raw_score`: Đã hoàn thành (Khối 1).
+  4. `test_conflict_resolution_opposite_signals_flat`: Đã hoàn thành (Khối 1).
+  5. `test_conflict_resolution_opposite_signals_decisive_win`: Đã hoàn thành (Khối 1).
+  6. `test_nan_safety_in_confidence`: Đã hoàn thành (Khối 2).
+  7. `test_soft_chaos_penalty_preserves_strong_signals`: Đã hoàn thành (Khối 2).
 - **Tiêu chuẩn nghiệm thu:**
-  - [ ] $100\%$ các test cases pass không có cảnh báo.
+  - [x] $100\%$ các test cases pass không có cảnh báo.
+
+---
+
+## 🧭 5. BẢNG TỔNG KẾT 5 ĐIỂM YẾU CỐT TỬ CỦA ARBITER (PHÁT HIỆN BỔ SUNG)
+
+| STT | Điểm Yếu Cốt Tử | Bản Chất Gốc Rễ | Mức Độ | Trạng Thái |
+| :---: | :--- | :--- | :---: | :---: |
+| **1** | **Ảo tưởng Trọng số Playbook (The Phantom DNA Trap)** | Arbiter đấu thầu 1:1 thô, không có DNA `playbook_weight` điều tiết; Scanner chấm dễ dãi sẽ luôn đè bẹp Scanner khắt khe. | 🔴 **CRITICAL** | ⏳ Lên kế hoạch xử lý sau |
+| **2** | **Dị tật `chaos_index`** | Đánh đồng biến động mạnh (NATR cao, Z cao) với bão Whipsaw; bóp chết cả Momentum và Reversal khi có sóng mạnh. | 🔴 **CRITICAL** | ⏳ Lên kế hoạch xử lý sau (tại `matrix.rs` & Arbiter) |
+| **3** | **Phạt Tuyến Tính Bờ Vực (Linear Penalty Cliff)** | $(1 - \text{chaos})$ dìm chết $100\%$ tín hiệu khi chaos $\ge 0.80$ dù setup hoàn hảo. | 🟡 **HIGH** | ⏳ Lên kế hoạch xử lý sau |
+| **4** | **Trùng lặp 2 tầng cổng lọc** | `min_activation_score` nội tại của Scanner dẫm chân lên `min_confidence_threshold` tĩnh của Arbiter. | 🟡 **HIGH** | ⏳ Lên kế hoạch xử lý sau |
+| **5** | **Lãng phí Heap Allocation mỗi tick** | `Box::new()` 4 lần/nến tại `mod.rs:338–345` gây lãng phí CPU và RAM. | 🟡 **HIGH** | ⏳ Chờ xử lý (`TASK-ARB-05` Khối 3) |
+

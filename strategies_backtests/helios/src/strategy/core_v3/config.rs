@@ -303,6 +303,10 @@ pub struct ArbiterConfig {
     #[serde(default = "default_min_confidence_threshold")]
     pub min_confidence_threshold: f64,
 
+    /// ⚖️ BIÊN ĐỘ PHÂN XỬ XUNG ĐỘT LONG VS SHORT (Mặc định 0.15)
+    #[serde(default = "default_conflict_confidence_margin")]
+    pub conflict_confidence_margin: f64,
+
     // =========================================================================
     // 🧹 CÁC TRƯỜNG CŨ ĐÃ BỎ GEN DNA (COMMENT OUT #[dna(...)]) ĐỂ DE-OVERENGINEER
     // Tạm thời giữ lại để tương thích mã nguồn cho đến khi Bước 4 (Arbiter) hoàn tất.
@@ -327,6 +331,7 @@ pub struct ArbiterConfig {
 }
 
 fn default_min_confidence_threshold() -> f64 { 0.20 }
+fn default_conflict_confidence_margin() -> f64 { 0.15 }
 fn default_min_multiplier_veto() -> f64 { 0.01 }
 fn default_scanner_weight() -> f64 { 0.50 }
 fn default_min_confidence_trending() -> f64 { 0.20 }

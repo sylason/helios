@@ -4,7 +4,6 @@ use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
-use tracing::warn;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalType {
@@ -92,28 +91,19 @@ impl HeliosArbiter {
         self.scanners.push(scanner);
     }
 
-    /// Tính điểm tự tin đấu thầu tuyến tính O(1):
-    /// Confidence = raw_score * (1.0 - chaos_penalty)
-    /// Khi thị trường bão Whipsaw (chaos_index cao), điểm tự tin tự động bị hạ thấp để phòng thủ.
+    /// Tính điểm tự tin đấu thầu tuyến tính O(1) với Phạt Mềm Có Chặn Trần (Soft Capped Penalty):
+    /// Confidence = raw_score * (1.0 - penalty)
+    /// Trong đó: penalty = (chaos_index * 0.50).min(0.50)
+    /// - Khi thị trường bão Whipsaw cực đại (chaos_index = 1.0), điểm tự tin tối đa chỉ bị trừ 50%
+    ///   nhằm bảo vệ các setup xuất sắc (Momentum, Reversal) không bị bóp nghẹt khi có sóng lớn.
+    /// - An toàn tuyệt đối với NaN: Trả về 0.0 nếu raw_score hoặc chaos_index là NaN.
     #[inline]
     pub fn compute_confidence(raw_score: f64, chaos_index: f64) -> f64 {
-        if raw_score <= 0.0 {
+        if raw_score.is_nan() || chaos_index.is_nan() || raw_score <= 0.0 {
             0.0
         } else {
-            let penalty = chaos_index.max(0.0).min(1.0);
+            let penalty = (chaos_index.max(0.0) * 0.50).min(0.50);
             (raw_score * (1.0 - penalty)).max(0.0).min(1.0)
-        }
-    }
-
-    /// 🧭 DIRECTIONAL MACRO VETO: Kiểm tra bộ lọc xu hướng vĩ mô đối xứng 2 chiều
-    /// - Khi KAMA dốc xuống âm sâu (< -thresh) và trend_axis >= 0.40: CẤM TUYỆT ĐỐI MỞ LONG (Chống bắt dao rơi).
-    /// - Khi KAMA dốc lên dương lớn (> +thresh) và trend_axis >= 0.40: CẤM TUYỆT ĐỐI MỞ SHORT (Chống cản đầu xe tăng).
-    #[inline]
-    pub fn is_direction_vetoed(signal: SignalType, kama_slope_atr: f64, trend_axis: f64, threshold: f64) -> bool {
-        let thresh = if threshold <= 0.0 { 0.10 } else { threshold };
-        match signal {
-            SignalType::Long => kama_slope_atr < -thresh && trend_axis >= 0.40,
-            SignalType::Short => kama_slope_atr > thresh && trend_axis >= 0.40,
         }
     }
 
@@ -122,26 +112,13 @@ impl HeliosArbiter {
         
         let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
         let min_threshold = config.arbiter.min_confidence_threshold;
-        let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
-        let trend_axis = matrix.trend_axis.get(i).copied().unwrap_or(0.0);
-        let macro_thresh = 0.10;
+        let conflict_margin = config.arbiter.conflict_confidence_margin;
 
         let mut approved_proposals: Vec<(Proposal, f64)> = Vec::new();
 
-        // 1. THU THẬP, LỌC MACRO VETO & CHẤM ĐIỂM TỰ TIN TUYẾN TÍNH O(1) CHO CÁC PROPOSALS
+        // 1. THU THẬP & CHẤM ĐIỂM TỰ TIN TUYẾN TÍNH O(1) CHO CÁC PROPOSALS
         for scanner in &self.scanners {
             if let Some(proposal) = scanner.scan(tick, sensors, matrix, config) {
-                // 🧭 DIRECTIONAL MACRO VETO (CHỐNG BẮT DAO RƠI & CẢN ĐẦU XE TĂNG)
-                if Self::is_direction_vetoed(proposal.signal_type, kama_slope, trend_axis, macro_thresh) {
-                    if _debug_mode {
-                        warn!(
-                            "🛑 [MACRO VETO] Bar: {} | Scanner: {:?} | Signal: {:?} | KAMA Slope: {:.3} | TrendAxis: {:.2} -> VETOED in extreme unidirectional trend!",
-                            i, proposal.scanner_id, proposal.signal_type, kama_slope, trend_axis
-                        );
-                    }
-                    continue;
-                }
-
                 let confidence = Self::compute_confidence(proposal.raw_score, chaos_val);
                 if confidence >= min_threshold {
                     approved_proposals.push((proposal, confidence));
@@ -161,7 +138,7 @@ impl HeliosArbiter {
         }
 
         // 2. GIẢI QUYẾT XUNG ĐỘT TÍN HIỆU QUA TWO-STAGE AUCTION (O(N), COMMUTATIVE, CONFIDENCE-FIRST)
-        let winner = Self::resolve_conflicts(approved_proposals);
+        let winner = Self::resolve_conflicts(approved_proposals, conflict_margin);
 
         if let Some((proposal, confidence)) = winner {
             ArbiterDecision {
@@ -187,7 +164,7 @@ impl HeliosArbiter {
     /// ⚔️ TWO-STAGE AUCTION: Giải quyết xung đột tín hiệu O(N), Commutative, Confidence-First
     /// Tầng 1: Đấu thầu nội bộ từng chiều (Intra-Side Auction: tìm Long mạnh nhất và Short mạnh nhất)
     /// Tầng 2: Phân xử đối đầu liên chiều (Inter-Side Face-Off: Long vs Short)
-    pub fn resolve_conflicts(approved_proposals: Vec<(Proposal, f64)>) -> Option<(Proposal, f64)> {
+    pub fn resolve_conflicts(approved_proposals: Vec<(Proposal, f64)>, conflict_margin: f64) -> Option<(Proposal, f64)> {
         let mut best_long: Option<(Proposal, f64)> = None;
         let mut best_short: Option<(Proposal, f64)> = None;
 
@@ -220,12 +197,12 @@ impl HeliosArbiter {
             (None, Some(short_candidate)) => Some(short_candidate),
             (Some((l_prop, l_conf)), Some((s_prop, s_conf))) => {
                 let diff = l_conf - s_conf;
-                if diff > 0.15 {
+                if diff > conflict_margin {
                     Some((l_prop, l_conf))
-                } else if diff < -0.15 {
+                } else if diff < -conflict_margin {
                     Some((s_prop, s_conf))
                 } else {
-                    // Xung đột giằng co không bên nào vượt trội (|diff| <= 0.15):
+                    // Xung đột giằng co không bên nào vượt trội (|diff| <= conflict_margin):
                     // Triệt tiêu cả 2 (Flat - Cash is King để bảo vệ tài khoản)
                     None
                 }
@@ -244,30 +221,38 @@ mod tests {
         // Scanner không có tín hiệu (raw_score <= 0.0) -> confidence = 0.0
         assert_eq!(HeliosArbiter::compute_confidence(0.0, 0.2), 0.0);
         assert_eq!(HeliosArbiter::compute_confidence(-0.5, 0.2), 0.0);
-
-        // Bão Whipsaw cực đại (chaos_index >= 1.0) -> confidence = 0.0
-        assert_eq!(HeliosArbiter::compute_confidence(0.9, 1.0), 0.0);
-        assert_eq!(HeliosArbiter::compute_confidence(0.9, 1.2), 0.0);
     }
 
     #[test]
-    fn test_chaos_penalty_scales_down_confidence() {
-        // Thị trường êm ả: confidence = raw_score
+    fn test_nan_safety_in_confidence() {
+        assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, 0.2), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(0.8, f64::NAN), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, f64::NAN), 0.0);
+    }
+
+    #[test]
+    fn test_soft_chaos_penalty_preserves_strong_signals() {
+        // Thị trường êm ả (chaos = 0.0): confidence = raw_score
         let conf_calm = HeliosArbiter::compute_confidence(0.80, 0.0);
         assert_eq!(conf_calm, 0.80);
 
-        // Bắt đầu nhiễu (chaos = 0.50): confidence giảm 50%
+        // Bắt đầu nhiễu (chaos = 0.50): penalty = 0.25 (giảm 25% tự tin)
         let conf_choppy = HeliosArbiter::compute_confidence(0.80, 0.50);
-        assert!((conf_choppy - 0.40).abs() < 1e-6);
+        assert!((conf_choppy - 0.60).abs() < 1e-6);
 
-        // Bão Whipsaw (chaos = 0.80): confidence chỉ còn 0.16 (dưới ngưỡng phê duyệt 0.20)
-        let conf_storm = HeliosArbiter::compute_confidence(0.80, 0.80);
-        assert!((conf_storm - 0.16).abs() < 1e-6);
-        assert!(conf_storm < 0.20, "Bão Whipsaw phải triệt tiêu tự tin để không vào lệnh!");
+        // Bão Whipsaw cực đại (chaos = 1.0): penalty chặn trần ở 50%, confidence vẫn còn 0.40 >= 0.20
+        let conf_storm = HeliosArbiter::compute_confidence(0.80, 1.0);
+        assert!((conf_storm - 0.40).abs() < 1e-6);
+        assert!(conf_storm >= 0.20, "Setup đẹp (0.80) khi bão cực đại vẫn phải sống sót!");
+
+        // Setup cực hạn (chaos = 1.5): penalty vẫn bị kẹp ở 50%
+        let conf_extreme = HeliosArbiter::compute_confidence(0.90, 1.5);
+        assert!((conf_extreme - 0.45).abs() < 1e-6);
     }
 
     #[test]
     fn test_conflict_resolution_higher_confidence_wins() {
+        let margin = 0.15;
         // Đề xuất 1: TrendPB Long, confidence 0.85, SL xa ($2450)
         let p1 = Proposal {
             signal_type: SignalType::Long,
@@ -286,7 +271,7 @@ mod tests {
         };
 
         // Theo nguyên tắc Confidence-First: p1 (0.85) phải thắng p2 (0.50) dù SL của p1 xa hơn!
-        let winner = HeliosArbiter::resolve_conflicts(vec![(p1, 0.85), (p2, 0.50)]);
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p1, 0.85), (p2, 0.50)], margin);
         assert!(winner.is_some());
         let (winning_prop, winning_conf) = winner.unwrap();
         assert_eq!(winning_prop.scanner_id, ScannerId::TrendPullback);
@@ -295,6 +280,7 @@ mod tests {
 
     #[test]
     fn test_conflict_resolution_tie_breaker_uses_raw_score() {
+        let margin = 0.15;
         let p1 = Proposal {
             signal_type: SignalType::Long,
             raw_score: 0.82,
@@ -311,7 +297,7 @@ mod tests {
         };
 
         // Cả 2 cùng có confidence = 0.80 sau khi trừ penalty, nhưng p2 có raw_score cao hơn (0.88 > 0.82)
-        let winner = HeliosArbiter::resolve_conflicts(vec![(p1, 0.80), (p2, 0.80)]);
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p1, 0.80), (p2, 0.80)], margin);
         assert!(winner.is_some());
         let (winning_prop, _) = winner.unwrap();
         assert_eq!(winning_prop.scanner_id, ScannerId::AbsorptionScout);
@@ -319,6 +305,7 @@ mod tests {
 
     #[test]
     fn test_conflict_resolution_opposite_signals_flat() {
+        let margin = 0.15;
         let p_long = Proposal {
             signal_type: SignalType::Long,
             raw_score: 0.70,
@@ -335,12 +322,13 @@ mod tests {
         };
 
         // Xung đột giằng co (0.72 - 0.70 = 0.02 <= 0.15) -> Triệt tiêu (Flat)
-        let winner = HeliosArbiter::resolve_conflicts(vec![(p_long, 0.70), (p_short, 0.72)]);
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p_long, 0.70), (p_short, 0.72)], margin);
         assert!(winner.is_none(), "Xung đột căng thẳng không vượt trội phải hủy lệnh để bảo toàn vốn!");
     }
 
     #[test]
     fn test_conflict_resolution_opposite_signals_decisive_win() {
+        let margin = 0.15;
         let p_long = Proposal {
             signal_type: SignalType::Long,
             raw_score: 0.85,
@@ -357,7 +345,7 @@ mod tests {
         };
 
         // Long vượt trội Short (0.85 - 0.60 = 0.25 > 0.15) -> Long chiến thắng
-        let winner = HeliosArbiter::resolve_conflicts(vec![(p_long, 0.85), (p_short, 0.60)]);
+        let winner = HeliosArbiter::resolve_conflicts(vec![(p_long, 0.85), (p_short, 0.60)], margin);
         assert!(winner.is_some());
         let (winning_prop, winning_conf) = winner.unwrap();
         assert_eq!(winning_prop.signal_type, SignalType::Long);
@@ -366,6 +354,7 @@ mod tests {
 
     #[test]
     fn test_two_stage_auction_commutativity() {
+        let margin = 0.15;
         let p_long = Proposal {
             signal_type: SignalType::Long,
             raw_score: 0.90,
@@ -382,37 +371,13 @@ mod tests {
         };
 
         // Thứ tự 1: [Long, Short]
-        let w1 = HeliosArbiter::resolve_conflicts(vec![(p_long.clone(), 0.90), (p_short.clone(), 0.60)]);
+        let w1 = HeliosArbiter::resolve_conflicts(vec![(p_long.clone(), 0.90), (p_short.clone(), 0.60)], margin);
         // Thứ tự 2: [Short, Long]
-        let w2 = HeliosArbiter::resolve_conflicts(vec![(p_short, 0.60), (p_long, 0.90)]);
+        let w2 = HeliosArbiter::resolve_conflicts(vec![(p_short, 0.60), (p_long, 0.90)], margin);
 
         assert!(w1.is_some());
         assert!(w2.is_some());
         assert_eq!(w1.as_ref().unwrap().0.scanner_id, w2.as_ref().unwrap().0.scanner_id);
         assert_eq!(w1.unwrap().0.scanner_id, ScannerId::TrendPullback);
-    }
-
-    #[test]
-    fn test_directional_macro_veto_logic() {
-        let thresh = 0.10;
-
-        // 1. Thác đổ (KAMA slope = -0.25, trend_axis = 0.60):
-        // Long bị VETO, Short được PHÉP
-        assert!(HeliosArbiter::is_direction_vetoed(SignalType::Long, -0.25, 0.60, thresh), "Thác đổ mạnh phải cấm Long!");
-        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Short, -0.25, 0.60, thresh), "Thác đổ mạnh phải cho phép Short!");
-
-        // 2. Dựng cột (KAMA slope = +0.30, trend_axis = 0.55):
-        // Short bị VETO, Long được PHÉP
-        assert!(HeliosArbiter::is_direction_vetoed(SignalType::Short, 0.30, 0.55, thresh), "Dựng cột mạnh phải cấm Short!");
-        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Long, 0.30, 0.55, thresh), "Dựng cột mạnh phải cho phép Long!");
-
-        // 3. Sideway / Trung hòa (KAMA slope = -0.05, trend_axis = 0.20):
-        // Cả Long và Short đều KHÔNG bị Veto
-        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Long, -0.05, 0.20, thresh), "Sideway không được cấm Long!");
-        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Short, -0.05, 0.20, thresh), "Sideway không được cấm Short!");
-
-        // 4. KAMA dốc nhưng ADX yếu (KAMA slope = -0.30 nhưng trend_axis = 0.30 < 0.40):
-        // Chưa đủ xác nhận xu hướng vĩ mô mạnh -> Không cấm
-        assert!(!HeliosArbiter::is_direction_vetoed(SignalType::Long, -0.30, 0.30, thresh), "Trend axis yếu không được kích hoạt Veto!");
     }
 }
