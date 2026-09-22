@@ -15,6 +15,7 @@
 
 use std::env;
 use std::fs;
+use std::sync::Arc;
 use std::time::Duration;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -22,12 +23,13 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use tokio::sync::Mutex;
 use tracing::{info, warn, error};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-use binance_sdk::config::{ConfigurationWebsocketApi, ConfigurationRestApi};
+use binance_sdk::config::{ConfigurationWebsocketApi, ConfigurationRestApi, ConfigurationWebsocketStreams};
 use binance_sdk::derivatives_trading_usds_futures::{
-    DerivativesTradingUsdsFuturesWsApi, DerivativesTradingUsdsFuturesRestApi,
+    DerivativesTradingUsdsFuturesWsApi, DerivativesTradingUsdsFuturesRestApi, DerivativesTradingUsdsFuturesWsStreams,
     websocket_api::{
         WebsocketApi,
         NewAlgoOrderAlgoTypeEnum, NewAlgoOrderParams, NewAlgoOrderSideEnum, NewAlgoOrderTypeEnum,
@@ -36,6 +38,7 @@ use binance_sdk::derivatives_trading_usds_futures::{
         NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum,
         PositionInformationV2Params,
     },
+    websocket_streams::UserDataStreamEventsResponse,
     rest_api::{
         CancelAllAlgoOpenOrdersParams,
         CurrentAllAlgoOpenOrdersParams,
@@ -47,6 +50,13 @@ use binance_sdk::derivatives_trading_usds_futures::{
 
 const SYMBOL: &str = "ETHUSDT";
 const ORDER_QTY: f64 = 0.01; // 0.01 ETH (~$25 USDT)
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserDataStreamEventAudit {
+    pub received_at_iso: String,
+    pub event_type: String,
+    pub payload: Value,
+}
 
 fn format_price(price: f64) -> Decimal {
     Decimal::from_f64((price * 100.0).round() / 100.0).unwrap().round_dp(2)
@@ -179,8 +189,87 @@ async fn main() -> Result<()> {
     info!("✅ Kết nối WebSocket API thành công!");
 
     // ============================================================================
-    // 🧹 PHA 0: PRE-CLEAN TRIỆT ĐỂ
+    // 📡 KHỞI TẠO USER DATA STREAM (EVENT-DRIVEN MONITOR)
     // ============================================================================
+    info!("🔑 Đang xin listenKey từ Binance REST API để mở User Data Stream...");
+    let resp_listen_key = rest_client.start_user_data_stream().await?;
+    let listen_key_data = resp_listen_key.data().await?;
+    let listen_key = listen_key_data.listen_key.context("Không nhận được listenKey từ Binance")?;
+    let short_key = if listen_key.len() > 12 { &listen_key[..12] } else { &listen_key };
+    info!("✅ Nhận listenKey thành công: {}...", short_key);
+
+    let ws_streams_conf = ConfigurationWebsocketStreams::builder().build()?;
+    let ws_streams_handle = DerivativesTradingUsdsFuturesWsStreams::testnet(ws_streams_conf);
+    let ws_streams = ws_streams_handle.connect().await.context("Không thể kết nối WebSocket Streams")?;
+    let user_data_stream = ws_streams.user_data(listen_key.clone(), None).await.context("Không thể mở User Data Stream")?;
+    info!("✅ Đã kết nối User Data Stream thành công! Bắt đầu lắng nghe sự kiện tài khoản.");
+
+    let stream_events: Arc<Mutex<Vec<UserDataStreamEventAudit>>> = Arc::new(Mutex::new(Vec::new()));
+    let stream_events_clone = stream_events.clone();
+
+    user_data_stream.on_message(move |event: UserDataStreamEventsResponse| {
+        let events_vec = stream_events_clone.clone();
+        tokio::spawn(async move {
+            let received_at = Utc::now().to_rfc3339();
+            let (evt_type, val) = match &event {
+                UserDataStreamEventsResponse::OrderTradeUpdate(b) => {
+                    let v = serde_json::to_value(b).unwrap_or_default();
+                    let status = v.get("o").and_then(|o| o.get("X")).and_then(|x| x.as_str()).unwrap_or("?");
+                    let side = v.get("o").and_then(|o| o.get("S")).and_then(|s| s.as_str()).unwrap_or("?");
+                    let order_id = v.get("o").and_then(|o| o.get("i")).and_then(|x| x.as_i64()).unwrap_or(0);
+                    info!("📡 [UDS ORDER_TRADE_UPDATE]: OrderID: {}, Side: {}, Status: {}", order_id, side, status);
+                    ("ORDER_TRADE_UPDATE".to_string(), v)
+                },
+                UserDataStreamEventsResponse::AccountUpdate(b) => {
+                    let v = serde_json::to_value(b).unwrap_or_default();
+                    info!("📡 [UDS ACCOUNT_UPDATE]: Số dư hoặc vị thế đã thay đổi!");
+                    ("ACCOUNT_UPDATE".to_string(), v)
+                },
+                UserDataStreamEventsResponse::AlgoUpdate(b) => {
+                    let v = serde_json::to_value(b).unwrap_or_default();
+                    let algo_status = v.get("o").and_then(|o| o.get("X")).and_then(|x| x.as_str()).unwrap_or("?");
+                    let algo_id = v.get("o").and_then(|o| o.get("si")).and_then(|x| x.as_i64()).unwrap_or(0);
+                    let order_type = v.get("o").and_then(|o| o.get("ot")).and_then(|x| x.as_str()).unwrap_or("?");
+                    info!("📡 [UDS ALGO_UPDATE]: AlgoID: {}, Type: {}, Status: {}", algo_id, order_type, algo_status);
+                    ("ALGO_UPDATE".to_string(), v)
+                },
+                UserDataStreamEventsResponse::ConditionalOrderTriggerReject(b) => {
+                    let v = serde_json::to_value(b).unwrap_or_default();
+                    warn!("⚠️ [UDS CONDITIONAL_ORDER_TRIGGER_REJECT]: {:?}", v);
+                    ("CONDITIONAL_ORDER_TRIGGER_REJECT".to_string(), v)
+                },
+                UserDataStreamEventsResponse::MarginCall(b) => {
+                    let v = serde_json::to_value(b).unwrap_or_default();
+                    warn!("🚨 [UDS MARGIN_CALL]: {:?}", v);
+                    ("MARGIN_CALL".to_string(), v)
+                },
+                UserDataStreamEventsResponse::AccountConfigUpdate(b) => {
+                    ("ACCOUNT_CONFIG_UPDATE".to_string(), serde_json::to_value(b).unwrap_or_default())
+                },
+                UserDataStreamEventsResponse::ListenKeyExpired(b) => {
+                    warn!("⚠️ [UDS LISTEN_KEY_EXPIRED]");
+                    ("listenKeyExpired".to_string(), serde_json::to_value(b).unwrap_or_default())
+                },
+                UserDataStreamEventsResponse::TradeLite(b) => {
+                    ("TRADE_LITE".to_string(), serde_json::to_value(b).unwrap_or_default())
+                },
+                UserDataStreamEventsResponse::StrategyUpdate(b) => {
+                    ("STRATEGY_UPDATE".to_string(), serde_json::to_value(b).unwrap_or_default())
+                },
+                UserDataStreamEventsResponse::GridUpdate(b) => {
+                    ("GRID_UPDATE".to_string(), serde_json::to_value(b).unwrap_or_default())
+                },
+                UserDataStreamEventsResponse::Other(v) => {
+                    ("OTHER".to_string(), v.clone())
+                }
+            };
+            events_vec.lock().await.push(UserDataStreamEventAudit {
+                received_at_iso: received_at,
+                event_type: evt_type,
+                payload: val,
+            });
+        });
+    });
     info!("--------------------------------------------------------------------------------");
     info!("🧹 [PHA 0] Pre-Clean triệt để tài khoản...");
     let p_cancel_all = CancelAllAlgoOpenOrdersParams::builder(SYMBOL.to_string()).build().unwrap();
@@ -445,6 +534,14 @@ async fn main() -> Result<()> {
     // 5. Query trạng thái Position sau khi đóng
     let (pos_final_check, _) = get_position_amt(&connection).await;
 
+    // 6. Trích xuất toàn bộ sự kiện thu thập được từ User Data Stream
+    let uds_events = stream_events.lock().await.clone();
+    let order_updates_count = uds_events.iter().filter(|e| e.event_type == "ORDER_TRADE_UPDATE").count();
+    let account_updates_count = uds_events.iter().filter(|e| e.event_type == "ACCOUNT_UPDATE").count();
+    let algo_updates_count = uds_events.iter().filter(|e| e.event_type == "ALGO_UPDATE").count();
+    info!("   5️⃣ Đã thu thập {} sự kiện từ User Data Stream thời gian thực (ORDER: {}, ACCOUNT: {}, ALGO: {})",
+        uds_events.len(), order_updates_count, account_updates_count, algo_updates_count);
+
     // Phân tích kết luận
     let tp_status_str = tp_algo_audit_json.get("algoStatus").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
     let tp_auto_canceled = tp_status_str == "CANCELED" || tp_status_str == "EXPIRED";
@@ -452,12 +549,18 @@ async fn main() -> Result<()> {
         arr.iter().any(|item| item.get("algoId").and_then(|v| v.as_i64()) == Some(tp_algo_id))
     }).unwrap_or(false);
 
+    // Kiểm tra xem User Data Stream có bắn event ALGO_UPDATE cho lệnh TP không
+    let tp_uds_event = uds_events.iter().find(|e| {
+        e.event_type == "ALGO_UPDATE" && e.payload.get("o").and_then(|o| o.get("si")).and_then(|si| si.as_i64()) == Some(tp_algo_id)
+    });
+
     info!("================================================================================");
     info!("🎯🎯🎯 KẾT LUẬN THỰC CHỨNG TỪ SÀN BINANCE:");
     info!("   - Trạng thái Algo SL: {:?}", sl_algo_audit_json.get("algoStatus"));
     info!("   - Lệnh Market thực tế đóng vị thế: {:?}", actual_order_id);
-    info!("   - Trạng thái Lệnh TP còn lại: {}", tp_status_str);
+    info!("   - Trạng thái Lệnh TP còn lại (REST): {}", tp_status_str);
     info!("   - Lệnh TP có còn nằm trong Open Algo Orders không? {}", is_tp_still_in_open_list);
+    info!("   - User Data Stream có bắn event ALGO_UPDATE cho TP không? {}", tp_uds_event.is_some());
     if tp_auto_canceled {
         info!("   ✅ SÀN BINANCE TỰ ĐỘNG HỦY LỆNH TP SAU KHI VỊ THẾ VỀ 0!");
     } else {
@@ -475,7 +578,8 @@ async fn main() -> Result<()> {
             "timestamp_iso": Utc::now().to_rfc3339(),
             "symbol": SYMBOL,
             "order_qty": ORDER_QTY,
-            "log_file": log_file_name
+            "log_file": log_file_name,
+            "user_data_stream_active": true
         }),
         phases: json!({
             "phase_0_pre_clean": pre_clean_report,
@@ -496,7 +600,8 @@ async fn main() -> Result<()> {
                 "actual_market_order_execution": actual_order_execution_json,
                 "tp_algo_order_status": tp_algo_audit_json,
                 "open_algo_orders_list": open_algo_list_json,
-                "position_amt_after_fill": pos_final_check
+                "position_amt_after_fill": pos_final_check,
+                "user_data_stream_events": uds_events
             }
         }),
         scientific_conclusions: json!({
@@ -506,8 +611,9 @@ async fn main() -> Result<()> {
             "tp_status_after_sl_filled": tp_status_str,
             "tp_auto_canceled_by_binance": tp_auto_canceled,
             "tp_still_in_open_orders_list": is_tp_still_in_open_list,
+            "user_data_stream_captured_tp_event": tp_uds_event.is_some(),
             "architectural_recommendation": if tp_auto_canceled {
-                "Binance automatically purges remaining TP order. Safe to leave on exchange."
+                "Binance automatically purges remaining TP order. User Data Stream provides realtime notification. Safe to leave on exchange."
             } else {
                 "CRITICAL: OrderExecutor MUST explicitly issue cancel_algo_order(tp_algo_id) upon position closure to prevent phantom fills on future trades!"
             }

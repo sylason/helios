@@ -37,8 +37,9 @@ mod common;
 const SYMBOL: &str = "ETHUSDT";
 const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
+
 // 2. Dữ liệu & Cửa sổ thời gian
-const TOTAL_FETCH_DAYS: i64 = 18;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
+const TOTAL_FETCH_DAYS: i64 = 22;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
 const TRAIN_WINDOW_DAYS: i64 = 14;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
 
 // 3. Chu kỳ Vòng lặp Tịnh tiến
@@ -114,6 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🧬 [INITIAL OPTIMIZE] Chạy GA Optimizer huấn luyện ban đầu trên 30 ngày...");
 
     let prospector_db = format!("examples/storage/{}_prospector.db", STRATEGY_ID);
+    let walk_forward_smart_seed_db = format!("examples/storage/{}.db", STRATEGY_ID);
     if Path::new(&prospector_db).exists() {
         let _ = std::fs::remove_file(&prospector_db);
     }
@@ -303,6 +305,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Dọn dẹp cache đệm prospector_db cũ để 99.5% quần thể được làm mới ngẫu nhiên (LHS Sampling)
             if Path::new(&prospector_db).exists() {
                 let _ = std::fs::remove_file(&prospector_db);
+                let _ = std::fs::remove_file(&walk_forward_smart_seed_db);
                 debug!("🧹 [SMART SEEDING] Đã reset prospector_db để làm mới 99.5% quần thể còn lại.");
             }
 

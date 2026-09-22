@@ -279,7 +279,7 @@ impl HeliosBridge {
     }
 
     /// Chuyển đổi danh sách Candle (shared model) sang DataFrame (ferro_trade format)
-    fn candles_to_df(candles: &[Candle]) -> PolarsResult<DataFrame> {
+    pub fn candles_to_df(candles: &[Candle]) -> PolarsResult<DataFrame> {
         let n = candles.len();
         let mut dt_vec = Vec::with_capacity(n);
         let mut open_vec = Vec::with_capacity(n);

@@ -333,14 +333,17 @@ impl ProspectorRunner {
                             let val_win_rate = val_res.stats.win_rate_pct;
 
                             // TIÊU CHUẨN THẨM ĐỊNH (WFE GATE CRITERIA):
-                            // 1. Nếu có trade trong OOS: Return OOS bắt buộc phải dương (> 0.0%) và Max DD <= 15.0%
-                            // 2. Nếu có trade nhưng Return <= 0.0%: Overfit phát hiện! Bắn log chi tiết để debug và từ chối deploy!
-                            if val_trades > 0 && (val_ret <= 0.0 || val_dd > 15.0) {
+                            // 1. In-Sample bắt buộc phải có lệnh và Return > 0.0%
+                            // 2. Out-Of-Sample Validation bắt buộc phải có ít nhất 1 lệnh (val_trades >= 1), Return OOS phải dương (> 0.0%) và Max DD <= 15.0%
+                            let is_in_sample_invalid = trades == 0 || ret <= 0.0;
+                            let is_oos_invalid = val_trades == 0 || val_ret <= 0.0 || val_dd > 15.0;
+
+                            if is_in_sample_invalid || is_oos_invalid {
                                 warn!(
-                                    "🚨 [WFE GATE: REJECTED - OVERFIT DETECTED] Symbol: {} | Candidate DNA Overfit! \
-                                    In-Sample Return: {:.2}% BUT OOS Val Return: {:+.2}% (Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
+                                    "🚨 [WFE GATE: REJECTED - INVALID OR OVERFIT] Symbol: {} | Candidate DNA Rejected! \
+                                    In-Sample Return: {:.2}% (Trades: {}) | OOS Val Return: {:+.2}% (Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
                                     -> REJECTED! Preserving active Champion DNA in DB & Actor to protect capital!",
-                                    symbol, ret, val_ret, val_dd, val_trades, val_win_rate
+                                    symbol, ret, trades, val_ret, val_dd, val_trades, val_win_rate
                                 );
                                 return Ok(()); // 🛑 DỪNG LẠI, KHÔNG LƯU DB, KHÔNG BROADCAST!
                             }

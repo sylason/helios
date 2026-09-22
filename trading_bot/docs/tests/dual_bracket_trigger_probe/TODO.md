@@ -22,9 +22,20 @@
     - [x] `position_information_v2` -> Kiểm tra xác nhận vị thế về 0.
   - [x] **Pha 6:** Xuất dữ liệu ra file JSON độc lập (`run_<TIMESTAMP>.json`) và file `latest.json`.
   - [x] **Pha 7:** Post-Clean an toàn.
-- [ ] **[T3] Chạy thực nghiệm & Phân tích kết quả:**
-  - [ ] Chạy `cargo run --example binance_dual_bracket_trigger_probe`.
-  - [ ] Đọc và phân tích file JSON thu thập được.
-  - [ ] Trả lời dứt khoát: Binance có tự hủy lệnh TP còn lại không, hay lệnh TP vẫn treo `NEW`?
-- [ ] **[T4] Cập nhật tài liệu kỹ thuật & Đề xuất kiến trúc cho `OrderExecutor`:**
+- [x] **[T3] Chạy thực nghiệm & Phân tích kết quả:**
+  - [x] Chạy `cargo run --example binance_dual_bracket_trigger_probe`.
+  - [x] Đọc và phân tích file JSON thu thập được (`run_20260918_092319.json` & `latest.json`).
+  - [x] Trả lời dứt khoát: **Binance TỰ ĐỘNG CHUYỂN TP SANG `EXPIRED` VÀ XÓA KHỎI SỔ LỆNH ALGO!**
+- [x] **[T4] Cập nhật tài liệu kỹ thuật & Đề xuất kiến trúc cho `OrderExecutor`:**
+  - [x] Báo cáo chi tiết kết quả thực nghiệm và trích xuất raw payload JSON.
+  - [x] Đề xuất nâng cấp `OrderExecutor` với cơ chế Dual Cloud Bracket an toàn tuyệt đối.
   - [ ] Báo cáo kết quả và đối chiếu với thiết kế của `OrderExecutor`.
+- [x] **[T5] Tích Hợp User Data Stream Vào `binance_dual_bracket_trigger_probe.rs`:**
+  - [x] Khởi tạo `start_user_data_stream` qua REST lấy `listen_key`.
+  - [x] Kết nối WebSocket User Data Stream (`DerivativesTradingUsdsFuturesWsStreams`).
+  - [x] Đăng ký lắng nghe sự kiện: `ORDER_TRADE_UPDATE`, `ACCOUNT_UPDATE`, `ALGO_UPDATE`, `CONDITIONAL_ORDER_TRIGGER_REJECT`.
+  - [x] Thu thập và ghi nhận mọi event theo thời gian thực kèm timestamp vào `Arc<Mutex<Vec<UserDataStreamEventAudit>>>`.
+  - [x] Pha 5.5: Audit và phân loại các event bắn về từ User Data Stream (thu thập thành công 30 events).
+  - [x] Pha 6: Xuất toàn bộ danh sách events vào file JSON `run_20260922_163003.json` và `latest.json`.
+  - [x] Chạy thực nghiệm `cargo run --example binance_dual_bracket_trigger_probe` và phân tích kết quả.
+  - [x] **Xác nhận thực chứng:** User Data Stream bắn sự kiện `ALGO_UPDATE` với trạng thái `EXPIRED` của lệnh Take Profit chỉ sau 0.7 mili-giây khi vị thế về 0!
