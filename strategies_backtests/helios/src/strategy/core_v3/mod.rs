@@ -1174,11 +1174,15 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 107, "DNA_WIDTH phải là chính xác 107 chiều sau khi bổ sung 4 gen cho Reversal!");
+        assert_eq!(width, 104, "DNA_WIDTH phải là chính xác 104 chiều sau khi thêm max_chaos_penalty (+1) và chuyển min_activation_score của 4 Scanner sang sàn kỹ thuật (-4)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
         let has_min_conf = defs.iter().any(|(name, _)| name.contains("min_confidence_threshold"));
+        let has_max_chaos = defs.iter().any(|(name, _)| name.contains("max_chaos_penalty"));
+        let has_act_score = defs.iter().any(|(name, _)| name.contains("min_activation_score"));
+        assert!(has_max_chaos, "defs phải chứa max_chaos_penalty trong ArbiterConfig!");
+        assert!(!has_act_score, "defs KHÔNG được chứa min_activation_score ở các Tactical Scanners!");
         let has_matrix_adx = defs.iter().any(|(name, _)| name.contains("adx_trend_threshold"));
         let has_matrix_kama_scale = defs.iter().any(|(name, _)| name.contains("kama_slope_scale_atr"));
         let has_matrix_vol_z = defs.iter().any(|(name, _)| name.contains("vol_z_sensitivity"));

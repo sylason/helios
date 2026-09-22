@@ -147,3 +147,36 @@
 - **Tiêu chí nghiệm thu:**
   - Mã nguồn sạch sẽ, không còn cảnh báo dead code khi biên dịch `cargo check`.
   - Giảm áp lực Garbage Collection / Heap Allocation trên luồng chính.
+
+---
+
+## 🆕 PHÁT HIỆN MỚI TỪ LOG AUDIT (2026-09-22) — Nguồn: `WFSS_arbiter_weakpoint2.log`
+
+> **Xác nhận bởi:** Đọc trực tiếp `asset_actor.rs:73-101, 655, 676, 729-736`
+
+---
+
+### [P0-3] 🔥 Same-Side Price Guard Deadlock Vĩnh Viễn (VULN-AA-09) — MỚI
+
+- **File:** [`asset_actor.rs:73-85`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L73-L85)
+- **Bản chất:** Khối 1 (`Same-Side Price Guard`) trong `should_veto` không có điều kiện `current_bar_idx < locked_until_bar`, chạy vĩnh viễn sau cooldown. Tạo vòng khóa chết: SL → Khối 1 chặn LONG → không có lệnh thắng → không reset `consecutive_losses` → Khối 1 tiếp tục chặn mãi mãi.
+- **Bằng chứng:** VETO 2.64 ngày / 280 lần liên tiếp, bỏ lỡ ETH pump +7.5%.
+- **Log sai:** Dòng 676 hardcode ký tự `<` → in `+55.28 < 4.45` (misleading). Thực tế Khối 2 không chạy, Khối 1 mới là thủ phạm.
+- **Giải pháp:** Đưa Khối 1 vào TRONG `if current_bar_idx < locked_until_bar`. Dùng `enum CooldownVetoReason` để log đúng lý do.
+- **Acceptance:** Sau hết cooldown (`Remaining: 0`), bot PHẢI mở được lệnh dù giá < `last_losing_price`.
+
+---
+
+### [P1-4] ATR Mismatch Engine vs Helios (VULN-AA-10) — MỚI
+
+- **File:** [`asset_actor.rs:655`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L655)
+- **Bản chất:** Engine dùng `rolling_atr(14 nến 1m) ≈ 2–5 USDT`. Helios dùng `sensors.atr_sl` (thường 14 nến 4h ≈ 50–100 USDT). Ngưỡng Early Release Engine thấp hơn ~10–20x so với ATR Helios. Gây bất nhất giữa 2 tầng và đây là lý do log hiện ra các số ATR nhỏ bất thường.
+- **Giải pháp:** Truyền `current_atr` từ `HeliosBridge` (cùng nguồn `sensors.atr_sl`) xuống `EngineCooldownGuard`.
+
+---
+
+### [P1-5] `ClosePosition` Không Dùng Exponential Cooldown (VULN-AA-11) — MỚI
+
+- **File:** [`asset_actor.rs:729-736`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L729-L736)
+- **Bản chất:** Nhánh đóng lệnh qua `Action::ClosePosition` chỉ gán thẳng `locked_until_bar = current_bar_idx + base_bars` mà không gọi `calculate_exponential_cooldown`, không tăng `consecutive_losses`, không cập nhật `last_losing_price`. Lệch pha hoàn toàn với nhánh `intra-candle exit`.
+- **Giải pháp:** Trích xuất hàm `trigger_engine_cooldown(pnl, side, exit_price)` và gọi thống nhất từ cả 2 nhánh.

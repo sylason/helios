@@ -110,19 +110,22 @@ impl HeliosArbiter {
         self.scanners.push(scanner);
     }
 
-    /// Tính điểm tự tin đấu thầu tuyến tính O(1) với Phạt Mềm Có Chặn Trần (Soft Capped Penalty):
+    /// Tính điểm tự tin đấu thầu phi tuyến bậc 2 (Quadratic) với Phạt Mềm Có Chặn Trần (Soft Capped Penalty):
     /// Confidence = raw_score * (1.0 - penalty)
-    /// Trong đó: penalty = (chaos_index * 0.50).min(0.50)
-    /// - Khi thị trường bão Whipsaw cực đại (chaos_index = 1.0), điểm tự tin tối đa chỉ bị trừ 50%
-    ///   nhằm bảo vệ các setup xuất sắc (Momentum, Reversal) không bị bóp nghẹt khi có sóng lớn.
-    /// - An toàn tuyệt đối với NaN: Trả về 0.0 nếu raw_score hoặc chaos_index là NaN.
+    /// Trong đó: penalty = min(cap, cap * chaos_index^2) với cap = max_chaos_penalty
+    /// - Khi thị trường chớm nhiễu (chaos_index = 0.50): mức phạt rất êm ái (chỉ 12.5% với cap 0.50),
+    ///   giúp bảo vệ các setup chất lượng khi thị trường mới chỉ hơi gợn sóng.
+    /// - Khi thị trường bão Whipsaw cực đại (chaos_index = 1.0), điểm tự tin bị trừ tối đa đúng bằng cap (DNA [0.10, 0.90]).
+    /// - An toàn tuyệt đối với NaN: Trả về 0.0 nếu raw_score, chaos_index hoặc max_chaos_penalty là NaN.
     #[inline]
-    pub fn compute_confidence(raw_score: f64, chaos_index: f64) -> f64 {
-        if raw_score.is_nan() || chaos_index.is_nan() || raw_score <= 0.0 {
+    pub fn compute_confidence(raw_score: f64, chaos_index: f64, max_chaos_penalty: f64) -> f64 {
+        if raw_score.is_nan() || chaos_index.is_nan() || max_chaos_penalty.is_nan() || raw_score <= 0.0 {
             0.0
         } else {
-            let penalty = (chaos_index.max(0.0) * 0.50).min(0.50);
-            (raw_score * (1.0 - penalty)).max(0.0).min(1.0)
+            let cap = max_chaos_penalty.clamp(0.0, 1.0);
+            let c_clamped = chaos_index.clamp(0.0, 1.0);
+            let penalty = (cap * c_clamped * c_clamped).min(cap);
+            (raw_score * (1.0 - penalty)).clamp(0.0, 1.0)
         }
     }
 
@@ -132,13 +135,14 @@ impl HeliosArbiter {
         let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
         let min_threshold = config.arbiter.min_confidence_threshold;
         let conflict_margin = config.arbiter.conflict_confidence_margin;
+        let max_chaos_penalty = config.arbiter.max_chaos_penalty;
 
         let mut approved_proposals: Vec<(Proposal, f64)> = Vec::new();
 
-        // 1. THU THẬP & CHẤM ĐIỂM TỰ TIN TUYẾN TÍNH O(1) CHO CÁC PROPOSALS
+        // 1. THU THẬP & CHẤM ĐIỂM TỰ TIN PHI TUYẾN O(1) CHO CÁC PROPOSALS
         for scanner in &self.scanners {
             if let Some(proposal) = scanner.scan(tick, sensors, matrix, config) {
-                let confidence = Self::compute_confidence(proposal.raw_score, chaos_val);
+                let confidence = Self::compute_confidence(proposal.raw_score, chaos_val, max_chaos_penalty);
                 if confidence >= min_threshold {
                     approved_proposals.push((proposal, confidence));
                 }
@@ -238,35 +242,42 @@ mod tests {
     #[test]
     fn test_zero_guard_prevents_false_signals() {
         // Scanner không có tín hiệu (raw_score <= 0.0) -> confidence = 0.0
-        assert_eq!(HeliosArbiter::compute_confidence(0.0, 0.2), 0.0);
-        assert_eq!(HeliosArbiter::compute_confidence(-0.5, 0.2), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(0.0, 0.2, 0.50), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(-0.5, 0.2, 0.50), 0.0);
     }
 
     #[test]
     fn test_nan_safety_in_confidence() {
-        assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, 0.2), 0.0);
-        assert_eq!(HeliosArbiter::compute_confidence(0.8, f64::NAN), 0.0);
-        assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, f64::NAN), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, 0.2, 0.50), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(0.8, f64::NAN, 0.50), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(0.8, 0.2, f64::NAN), 0.0);
+        assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, f64::NAN, f64::NAN), 0.0);
     }
 
     #[test]
     fn test_soft_chaos_penalty_preserves_strong_signals() {
         // Thị trường êm ả (chaos = 0.0): confidence = raw_score
-        let conf_calm = HeliosArbiter::compute_confidence(0.80, 0.0);
+        let conf_calm = HeliosArbiter::compute_confidence(0.80, 0.0, 0.50);
         assert_eq!(conf_calm, 0.80);
 
-        // Bắt đầu nhiễu (chaos = 0.50): penalty = 0.25 (giảm 25% tự tin)
-        let conf_choppy = HeliosArbiter::compute_confidence(0.80, 0.50);
-        assert!((conf_choppy - 0.60).abs() < 1e-6);
+        // Bắt đầu nhiễu (chaos = 0.50): penalty = 0.50 * (0.50)^2 = 0.125 (giảm 12.5% tự tin)
+        // conf = 0.80 * (1.0 - 0.125) = 0.80 * 0.875 = 0.70
+        let conf_choppy = HeliosArbiter::compute_confidence(0.80, 0.50, 0.50);
+        assert!((conf_choppy - 0.70).abs() < 1e-6);
 
         // Bão Whipsaw cực đại (chaos = 1.0): penalty chặn trần ở 50%, confidence vẫn còn 0.40 >= 0.20
-        let conf_storm = HeliosArbiter::compute_confidence(0.80, 1.0);
+        let conf_storm = HeliosArbiter::compute_confidence(0.80, 1.0, 0.50);
         assert!((conf_storm - 0.40).abs() < 1e-6);
         assert!(conf_storm >= 0.20, "Setup đẹp (0.80) khi bão cực đại vẫn phải sống sót!");
 
         // Setup cực hạn (chaos = 1.5): penalty vẫn bị kẹp ở 50%
-        let conf_extreme = HeliosArbiter::compute_confidence(0.90, 1.5);
+        let conf_extreme = HeliosArbiter::compute_confidence(0.90, 1.5, 0.50);
         assert!((conf_extreme - 0.45).abs() < 1e-6);
+
+        // Kiểm tra với trần phạt 90% (max_chaos_penalty = 0.90):
+        // Khi chaos = 1.0 -> penalty = 0.90 -> conf = 0.80 * (1.0 - 0.90) = 0.08
+        let conf_severe = HeliosArbiter::compute_confidence(0.80, 1.0, 0.90);
+        assert!((conf_severe - 0.08).abs() < 1e-6);
     }
 
     #[test]

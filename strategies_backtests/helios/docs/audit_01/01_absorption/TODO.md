@@ -228,6 +228,41 @@
   - **Trạng thái**: 🔄 **CHUYỂN SANG `risk.rs`** (Theo đúng ranh giới phân tách trách nhiệm - Separation of Concerns: Scanner chỉ phát hiện cơ hội & SL cấu trúc, Risk Manager độc quyền quản lý Take Profit và Trailing Stop).
   - **Kế hoạch**: Sẽ xử lý trong mô-đun kiểm toán Risk Management (`06_risk`).
 
+- [ ] **TASK-ABS-14: Sửa SL Double Padding gây R:R Âm (CRITICAL — Phát hiện từ WFSS Log 2026-09-22)**
+  - **Mức độ**: 🔴 **CRITICAL**
+  - **Bằng chứng:** Log `WFSS_arbiter_weakpoint2.log` — ROE thua trung bình **-26.1%** vs ROE thắng **+14.6%** → R:R ≈ 1:0.43.
+  - **Vấn đề (`absorption.rs:122-133`):**
+    ```rust
+    let base_support = low.min(bb_lower); // Tầng 1: neo tận biên dưới BB
+    let sl = base_support - buffer;        // Tầng 2: lại trừ thêm buffer ATR (tới 2.5 ATR)!
+    ```
+    Kết quả: SL = `min(low, bb_lower) - 2.5 ATR` → cách entry **4–5 ATR**. Kết hợp `max_initial_sl_pct` trần 40% ROE trên 20x đòn bẩy → lỗ tối đa 1 lệnh lên đến 40% vốn ký quỹ.
+  - **Giải pháp (chọn 1 trong 2):**
+    - **Phương án A (đơn giản):** Bỏ `bb_lower`, chỉ neo theo `low - buffer` (như `TrendPB`). SL = `low - (struct_sl_buffer_atr * ATR)`.
+    - **Phương án B (giữ nguyên neo BB nhưng không cộng đệm):** `sl = bb_lower - (0.1 * ATR)` (buffer tối thiểu chống quét sát biên).
+  - **Sửa thêm:** Giảm trần DNA `max_initial_sl_pct` từ `[0.04, 0.40]` xuống `[0.04, 0.20]` (tương đương 20% ROE tối đa trên 20x = 1% giá).
+  - **Definition of Done:**
+    - ROE thua trung bình của lệnh Absorption < 20% trên backtest ETH 30 ngày.
+    - Profit Factor của Absorption > 1.0.
+
+- [ ] **TASK-ABS-15: Siết Chặt Cận Dưới DNA Absorption Chống Playbook Bias (HIGH — Phát hiện từ WFSS Log 2026-09-22)**
+  - **Mức độ**: 🟡 **HIGH**
+  - **Bằng chứng:** Log `WFSS_arbiter_weakpoint2.log` — ABSORPTION chiếm **90% lệnh** (9/10), 5 playbook còn lại 0 lệnh.
+  - **Nguyên nhân gốc rễ (xác nhận bởi đọc `config.rs`):**
+    - `min_clv: 0.00 → 0.60` (DNA min = 0.00 → không cần CLV nến hấp thụ)
+    - `vol_z_threshold: 0.20 → 5.00` (DNA min = 0.20 → gần như volume bình thường cũng đủ)
+    - `min_activation_score: 0.01 → 0.99` (DNA min = 0.01 → GA tối ưu về cận dưới → spam tín hiệu)
+    - `max_boundary_pct_b: 0.15 → 0.48` (DNA max = 0.48 → cho phép nến ở nửa trên dải BB vẫn kích hoạt)
+    GA kẹt cực trị cục bộ do Smart Seeding → tiến hóa tăng cường ABSORPTION thêm thay vì đa dạng.
+  - **Giải pháp — Siết cận dưới:**
+    ```toml
+    min_activation_score: [0.20 → 0.90]  # Thay vì [0.01 → 0.99]
+    min_clv:              [0.15 → 0.60]  # Thay vì [0.00 → 0.60]
+    vol_z_threshold:      [1.00 → 5.00]  # Thay vì [0.20 → 5.00]
+    ```
+  - **Definition of Done:**
+    - Trên backtest ETH 30 ngày, không có playbook nào chiếm > 60% lệnh.
+    - Ít nhất 3 playbook có ≥ 1 lệnh trong paper trading 7 ngày.
+
 ---
 *Kế hoạch hành động này là tài liệu chuẩn hướng dẫn lập trình viên sửa đổi mã nguồn Helios V3.*
-

@@ -163,7 +163,7 @@ Dưới đây là các đề xuất thiết kế ban đầu đã được bóc t
 | :---: | :--- | :--- | :---: | :---: |
 | **1** | **Ảo tưởng Trọng số Playbook (The Phantom DNA Trap)** | Arbiter đấu thầu 1:1 thô, không có DNA `playbook_weight` điều tiết; Scanner chấm dễ dãi sẽ luôn đè bẹp Scanner khắt khe. | 🔴 **CRITICAL** | ✅ Hoàn thành (Unified Normalization Engine) |
 | **2** | **Dị tật `chaos_index`** | Đánh đồng biến động mạnh (NATR cao, Z cao) với bão Whipsaw; bóp chết cả Momentum và Reversal khi có sóng mạnh. | 🔴 **CRITICAL** | ✅ Hoàn thành (`TASK-MAT-10`: ER-Based `chaos_index`) |
-| **3** | **Phạt Tuyến Tính Bờ Vực (Linear Penalty Cliff)** | $(1 - \text{chaos})$ dìm chết $100\%$ tín hiệu khi chaos $\ge 0.80$ dù setup hoàn hảo. | 🟡 **HIGH** | ⏳ Lên kế hoạch xử lý sau |
-| **4** | **Trùng lặp 2 tầng cổng lọc** | `min_activation_score` nội tại của Scanner dẫm chân lên `min_confidence_threshold` tĩnh của Arbiter. | 🟡 **HIGH** | ⏳ Lên kế hoạch xử lý sau |
+| **3** | **Phạt Tuyến Tính Bờ Vực (Linear Penalty Cliff)** | $(1 - \text{chaos})$ dìm chết $100\%$ tín hiệu khi chaos $\ge 0.80$ dù setup hoàn hảo. | 🟡 **HIGH** | ✅ Hoàn thành (`max_chaos_penalty` Dynamic $[0.10, 0.90]$ + Quadratic) |
+| **4** | **Trùng lặp 2 tầng cổng lọc** | `min_activation_score` nội tại của Scanner dẫm chân lên `min_confidence_threshold` tĩnh của Arbiter. | 🟡 **HIGH** | ✅ Hoàn thành (Single-Gate tại Arbiter, DNA_WIDTH = 104) |
 | **5** | **Lãng phí Heap Allocation mỗi tick** | `Box::new()` 4 lần/nến tại `mod.rs:338–345` gây lãng phí CPU và RAM. | 🟡 **HIGH** | ✅ Hoàn thành (`TASK-ARB-05` Khối 3) |
 

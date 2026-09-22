@@ -572,3 +572,15 @@ Trong `config.rs`, loại bỏ gen `timeframe` độc lập của `KeltnerParams
   - Khi có **Super Trend** ($c\_r \to 1.0$ nhưng $\text{entropy} \to 1.0$): $\text{chaos\_index} \to \mathbf{0.0}$ (Bảo toàn $100\%$ điểm tự tin).
   - Khi có **Bão Whipsaw** ($c\_r \to 1.0$ nhưng $\text{entropy} \to 0.0$): $\text{chaos\_index} \to \mathbf{1.0}$ (Phạt mạnh điểm, co hẹp khoảng cách phân xử để Arbiter chọn FLAT).
   - **Khử hoàn toàn hằng số ma thuật:** Trong giai đoạn Warmup (`is_nan()`), trả về $0.0$ (chưa đủ dữ liệu đo bão thì không phạt điểm), không dùng hằng số giả định $0.5$.
+
+---
+
+### 9.7 Tầm Nhìn Kiến Trúc Tương Lai: Mô Hình C (Regime-Playbook Affinity Matrix)
+- **Ranh giới trách nhiệm (Separation of Concerns):**
+  Qua thảo luận đối chất kiến trúc (ngày 23/09/2026), xác định rõ:
+  - **Scanner:** Chỉ nhận diện cơ hội ($raw\_score \in [0, 1]$).
+  - **Arbiter:** Chỉ làm nhiệm vụ đấu thầu hai tầng (Two-Stage Auction) và cổng gác vốn tối thiểu. Tuyệt đối không biến Arbiter thành "Hộp đen Meta-Controller" ôm đồm việc định giá bối cảnh vĩ mô.
+  - **Matrix Layer:** Là nơi thích hợp nhất nếu trong tương lai hệ thống muốn xây dựng cơ chế ánh xạ giữa Chế độ thị trường ($\vec{R} = [w_{trend}, w_{range}, w_{compress}, w_{chaos}]$) và từng Playbook chiến thuật ($Affinity(Playbook_i, \vec{R})$).
+- **Tránh bẫy Double-Counting:**
+  Nếu Scanner đã kiểm tra điều kiện bối cảnh nội tại (ví dụ TrendPB đã kiểm tra Trend, Absorption đã kiểm tra Squeeze), việc Arbiter nhân thêm một lần nữa sẽ gây bẫy tính trùng lặp (Double-Counting) và bóp nghẹt tín hiệu. Do đó, việc nghiên cứu Mô hình C được quy hoạch nằm tại tầng Ma trận/Nhận thức, không đặt tại tầng Trọng tài (Arbiter).
+

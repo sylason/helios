@@ -303,6 +303,11 @@ pub struct ArbiterConfig {
     #[serde(default = "default_min_confidence_threshold")]
     pub min_confidence_threshold: f64,
 
+    /// 🌪️ TRẦN PHẠT BÃO HỖN LOẠN PHI TUYẾN (0.10 -> 0.90, Step 0.05 -> 17 nấc)
+    #[dna(min = 0.10, max = 0.90, step = 0.05)]
+    #[serde(default = "default_max_chaos_penalty")]
+    pub max_chaos_penalty: f64,
+
     /// ⚖️ BIÊN ĐỘ PHÂN XỬ XUNG ĐỘT LONG VS SHORT (Mặc định 0.15)
     #[serde(default = "default_conflict_confidence_margin")]
     pub conflict_confidence_margin: f64,
@@ -331,6 +336,7 @@ pub struct ArbiterConfig {
 }
 
 fn default_min_confidence_threshold() -> f64 { 0.20 }
+fn default_max_chaos_penalty() -> f64 { 0.50 }
 fn default_conflict_confidence_margin() -> f64 { 0.15 }
 fn default_min_multiplier_veto() -> f64 { 0.01 }
 fn default_scanner_weight() -> f64 { 0.50 }
@@ -338,6 +344,7 @@ fn default_min_confidence_trending() -> f64 { 0.20 }
 fn default_min_confidence_ranging() -> f64 { 0.20 }
 fn default_min_confidence_compression() -> f64 { 0.20 }
 fn default_min_confidence_chaos() -> f64 { 0.20 }
+fn default_min_activation_score() -> f64 { 0.05 }
 
 /// ============================================================================
 /// PHẦN 4: BỘ 6 CHIẾN ĐỘI TÁC CHIẾN BẮN TỈA (TACTICAL SNIPER CONFIG)
@@ -392,8 +399,8 @@ pub struct TacticalPullbackParams {
     #[serde(default = "default_pullback_invalidation_buffer_atr")]
     pub invalidation_buffer_atr: f64,
 
-    /// Ngưỡng kích hoạt mềm Trend Pullback (0.10 -> 0.90, Step 0.05 -> 17 nấc)
-    #[dna(min = 0.10, max = 0.90, step = 0.05)]
+    /// Ngưỡng kích hoạt mềm Trend Pullback (Sàn kỹ thuật 0.05)
+    #[serde(default = "default_min_activation_score")]
     pub min_activation_score: f64,
 
     /// Đệm ATR bảo vệ qua KAMA / đáy nhịp hồi (0.10 -> 3.00 ATR, Step 0.15 -> 20 nấc)
@@ -417,8 +424,8 @@ pub struct TacticalMomentumParams {
     #[dna(min = 1.00, max = 3.50, step = 0.10)]
     pub vol_z_threshold: f64,
 
-    /// Ngưỡng kích hoạt mềm Momentum Ignition (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    /// Ngưỡng kích hoạt mềm Momentum Ignition (Sàn kỹ thuật 0.05)
+    #[serde(default = "default_min_activation_score")]
     pub min_activation_score: f64,
 
     /// Đệm ATR dưới đáy nến bùng nổ xung lực (0.20 -> 2.00 ATR, Step 0.10 -> 19 nấc)
@@ -528,8 +535,8 @@ pub struct TacticalReversalParams {
     #[dna(min = 0.20, max = 6.00, step = 0.20)]
     pub wick_sl_buffer_atr: f64,
 
-    /// Ngưỡng kích hoạt mềm Climax Reversal (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    /// Ngưỡng kích hoạt mềm Climax Reversal (Sàn kỹ thuật 0.05)
+    #[serde(default = "default_min_activation_score")]
     pub min_activation_score: f64,
 
     /// 🎯 Ngưỡng lực nến rút chân/đè đầu CLV tối thiểu (0.05 -> 0.60, Step 0.05 -> 12 nấc)
@@ -593,8 +600,8 @@ pub struct TacticalAbsorptionParams {
     #[dna(min = 0.20, max = 5.00, step = 0.20)]
     pub vol_z_threshold: f64,
 
-    /// Ngưỡng kích hoạt mềm Absorption Scout (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
+    /// Ngưỡng kích hoạt mềm Absorption Scout (Sàn kỹ thuật 0.05)
+    #[serde(default = "default_min_activation_score")]
     pub min_activation_score: f64,
 
     /// Đệm ATR dưới vùng nén hấp thụ thanh khoản (0.10 -> 2.50 ATR, Step 0.10 -> 25 nấc)

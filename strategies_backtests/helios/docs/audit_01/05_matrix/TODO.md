@@ -210,3 +210,19 @@
   - `test_super_trend_low_chaos`: Đạt chuẩn (khi entropy $\ge 0.95$, chaos_index $\le 0.03$, không bị phạt oan).
   - `test_whipsaw_discrimination_chaos_index`: Đạt chuẩn (khi bão Whipsaw bùng nổ, chaos_index $> 0.50$ và duy trì $> 0.35$).
   - 65/65 tests trong `helios` passed. `bot_engine` check sạch sẽ.
+
+---
+
+### 🔮 TASK-MAT-11: Nghiên cứu Kiến trúc Mô hình C (Regime-Playbook Affinity Matrix) (Định hướng tương lai)
+- **Bản chất kiến trúc:**
+  - Qua phân tích phản biện First-Principles (ngày 23/09/2026), xác định ranh giới: **Arbiter là sàn đấu thầu phân xử khách quan (Auctioneer), KHÔNG được ôm đồm logic bối cảnh vĩ mô để trở thành hộp đen Meta-Controller.**
+  - Việc đánh giá tương thích giữa Playbook và Chế độ thị trường thuộc về **Tầng Nhận Thức Thị Trường (Market Matrix Layer)** hoặc nội tại từng Scanner, không thuộc về Arbiter.
+- **Đặc tả Mô hình C (Regime-Playbook Affinity Matrix):**
+  - Ma trận $4 \times 4$ ánh xạ giữa Véc-tơ Trạng Thái Thị Trường 4 Chiều (4-State Simplex $\vec{R} = [w_{trend}, w_{range}, w_{compress}, w_{chaos}]$) và từng Playbook:
+    $$\text{Confidence}_i = \text{raw\_score}_i \times \text{Affinity}(\text{Playbook}_i, \vec{R})$$
+    + $\text{TrendPB, Momentum} \implies \text{Affinity cao với } w_{trend}$
+    + $\text{Absorption} \implies \text{Affinity cao với } w_{compress}$
+    + $\text{RangeOsc} \implies \text{Affinity cao với } w_{range}$
+    + $\text{Reversal} \implies \text{Affinity cao với } w_{chaos} \land \text{kiệt sức}$
+- **Trạng thái:** 💡 Đã ghi nhận kiến trúc vào tài liệu thiết kế. Tạm thời hoãn triển khai để giữ Arbiter tinh gọn, tập trung xử lý Điểm Yếu 3 & 4 của Arbiter theo chuẩn Single-Gate.
+
