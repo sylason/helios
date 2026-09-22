@@ -36,6 +36,10 @@ impl TacticalScanner for ReversalScanner {
         ScannerId::ClimaxReversal
     }
 
+    fn clone_box(&self) -> Box<dyn TacticalScanner> {
+        Box::new(ReversalScanner)
+    }
+
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, _matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
         let rev_cfg = &config.tactical_sniper.reversal;

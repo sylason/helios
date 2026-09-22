@@ -32,6 +32,10 @@ impl TacticalScanner for AnomalyScanner {
         ScannerId::AnomalyFade
     }
 
+    fn clone_box(&self) -> Box<dyn TacticalScanner> {
+        Box::new(AnomalyScanner)
+    }
+
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, _matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
         let ano_cfg = &config.tactical_sniper.anomaly;

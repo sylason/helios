@@ -33,6 +33,10 @@ impl TacticalScanner for RangeOscScanner {
         ScannerId::RangeOscillator
     }
 
+    fn clone_box(&self) -> Box<dyn TacticalScanner> {
+        Box::new(RangeOscScanner)
+    }
+
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
         let range_cfg = &config.tactical_sniper.range;

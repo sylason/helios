@@ -35,6 +35,10 @@ impl TacticalScanner for AbsorptionScanner {
         ScannerId::AbsorptionScout
     }
 
+    fn clone_box(&self) -> Box<dyn TacticalScanner> {
+        Box::new(AbsorptionScanner)
+    }
+
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
         let abs_cfg = &config.tactical_sniper.absorption;

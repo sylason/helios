@@ -59,7 +59,7 @@ Dưới đây là các đề xuất thiết kế ban đầu đã được bóc t
 | **2** | `TASK-ARB-02` | **Tái cấu trúc Two-Stage Auction (Đấu thầu 2 tầng)** | 🔴 **CRITICAL** | ✅ Hoàn thành | [`arbiter.rs:164–205`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L164-L205) |
 | **3** | `TASK-ARB-03` | **Xóa bỏ Macro Veto trùng lặp khỏi Arbiter (Giải quyết REV-02)** | 🔴 **CRITICAL** | ✅ Hoàn thành | [`arbiter.rs:95–160`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L95-L160) |
 | **4** | `TASK-ARB-04` | **Khử Magic Numbers, cấu hình hóa vào `ArbiterConfig`** | 🟡 **HIGH** | ✅ Hoàn thành | [`config.rs:300–335`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L300-L335), [`arbiter.rs:122`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L122) |
-| **5** | `TASK-ARB-05` | **Tối ưu hóa Zero-Allocation cho Arbiter trong Strategy** | 🟡 **HIGH** | ⏳ Chờ xử lý | [`core_v3/mod.rs:338–346`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L338-L346) |
+| **5** | `TASK-ARB-05` | **Tối ưu hóa Zero-Allocation cho Arbiter trong Strategy** | 🟡 **HIGH** | ✅ Hoàn thành | [`core_v3/mod.rs:338–346`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L338-L346) |
 | **6** | `TASK-ARB-06` | **Vá an toàn `NaN` tường minh cho `compute_confidence`** | 🟢 **MEDIUM** | ✅ Hoàn thành | [`arbiter.rs:99–108`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L99-L108) |
 | **7** | `TASK-ARB-07` | **Xây dựng Suite Unit Tests Toàn Diện Cho Arbiter** | 🔵 **TESTING** | ✅ Hoàn thành | [`arbiter.rs:220–360`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L220-L360) |
 
@@ -121,7 +121,7 @@ Dưới đây là các đề xuất thiết kế ban đầu đã được bóc t
   - Khởi tạo và nạp scanners 1 lần duy nhất trong `HeliosStrategyV3::new(...)`.
   - Trong hàm `next()`, chỉ gọi `self.arbiter.process_tick(...)`.
 - **Tiêu chuẩn nghiệm thu:**
-  - [ ] Zero heap allocation ở mỗi tick cho Arbiter.
+  - [x] Zero heap allocation ở mỗi tick cho Arbiter.
 
 ---
 

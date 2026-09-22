@@ -57,7 +57,7 @@ pub struct ArbiterDecision {
     pub final_tp: Option<f64>,
 }
 
-pub trait TacticalScanner {
+pub trait TacticalScanner: Send + Sync {
     /// Tên định danh của Scanner (Type-Safe Enum)
     fn id(&self) -> ScannerId;
     
@@ -68,10 +68,29 @@ pub trait TacticalScanner {
             sensors: &HeliosSensors, 
             matrix: &MarketMatrixV3,
             config: &HeliosConfigV3) -> Option<Proposal>;
+
+    /// Hỗ trợ clone trait object theo chuẩn idiomatic Rust
+    fn clone_box(&self) -> Box<dyn TacticalScanner>;
 }
 
+impl Clone for Box<dyn TacticalScanner> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+#[derive(Clone)]
 pub struct HeliosArbiter {
     pub scanners: Vec<Box<dyn TacticalScanner>>,
+}
+
+impl std::fmt::Debug for HeliosArbiter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let scanner_names: Vec<&'static str> = self.scanners.iter().map(|s| s.id().as_str()).collect();
+        f.debug_struct("HeliosArbiter")
+            .field("scanners", &scanner_names)
+            .finish()
+    }
 }
 
 impl Default for HeliosArbiter {

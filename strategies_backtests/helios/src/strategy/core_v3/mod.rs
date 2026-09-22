@@ -103,10 +103,18 @@ pub struct HeliosStrategyV3 {
     pub debug_mode: bool,
     pub cooldown_tracker: CooldownTracker,
     pub prev_open_trade: Option<Trade>,
+    pub arbiter: HeliosArbiter,
 }
 
 impl Strategy for HeliosStrategyV3 {
     fn new(_params: &HashMap<String, ParamValue>) -> Self {
+        let mut arbiter = HeliosArbiter::new();
+        // 🎯 4 PLAYBOOK CHỦ LỰC V3.3: Khởi tạo sẵn 1 lần duy nhất (Zero-Allocation ở runtime)
+        arbiter.add_scanner(Box::new(scanners::trend_pb::TrendPBScanner));
+        arbiter.add_scanner(Box::new(scanners::momentum_ignition::MomentumIgnitionScanner));
+        arbiter.add_scanner(Box::new(scanners::reversal::ReversalScanner));
+        arbiter.add_scanner(Box::new(scanners::absorption::AbsorptionScanner));
+
         Self {
             config: HeliosConfigV3::default(),
             sensors: HeliosSensors::default(),
@@ -114,6 +122,7 @@ impl Strategy for HeliosStrategyV3 {
             debug_mode: std::env::var("HELIOS_DEBUG").is_ok(),
             cooldown_tracker: CooldownTracker::default(),
             prev_open_trade: None,
+            arbiter,
         }
     }
 
@@ -335,15 +344,8 @@ impl Strategy for HeliosStrategyV3 {
             return; 
         }
 
-        let mut arbiter = HeliosArbiter::new(); 
-        
-        // 🎯 4 PLAYBOOK CHỦ LỰC V3.3: Loại bỏ Anomaly (bắt dao rơi) và RangeOsc (nhiễu sideway)
-        arbiter.add_scanner(Box::new(scanners::trend_pb::TrendPBScanner));
-        arbiter.add_scanner(Box::new(scanners::momentum_ignition::MomentumIgnitionScanner));
-        arbiter.add_scanner(Box::new(scanners::reversal::ReversalScanner));
-        arbiter.add_scanner(Box::new(scanners::absorption::AbsorptionScanner));
-
-        let decision = arbiter.process_tick(tick, &self.sensors, &self.matrix, &self.config, self.debug_mode);
+        // 🎯 KHỐI 3 (TASK-ARB-05): Tối ưu Zero-Allocation - Sử dụng arbiter đã khởi tạo sẵn
+        let decision = self.arbiter.process_tick(tick, &self.sensors, &self.matrix, &self.config, self.debug_mode);
 
         if decision.is_approved {
             if let Some(signal) = decision.final_signal {
