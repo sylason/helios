@@ -28,6 +28,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use crate::strategy::core_v3::normalization::{sat_unbounded, sat_proximity, convex_combine};
 
 pub struct ReversalScanner;
 
@@ -98,22 +99,17 @@ impl TacticalScanner for ReversalScanner {
         let z_thresh = if rev_cfg.z_score_threshold <= 0.0 { 2.0 } else { rev_cfg.z_score_threshold.max(0.1) };
         let exhaust_drop = if rev_cfg.exhaustion_vol_drop <= 0.0 { 0.50 } else { rev_cfg.exhaustion_vol_drop.max(0.01) };
 
-        let f_z = (z_score.abs() / z_thresh).tanh();
-        let f_disp = (displacement / min_disp_dist).tanh();
+        let f_z = sat_unbounded(z_score.abs(), z_thresh);
+        let f_disp = sat_unbounded(displacement, min_disp_dist);
         let vol_ratio = if vol_sma > 0.0 { vol_current / vol_sma } else { 1.0 };
-        let f_vol = (1.0 - (vol_ratio / exhaust_drop).tanh()).max(0.0).min(1.0);
+        let f_vol = sat_proximity(vol_ratio, exhaust_drop);
 
         // Trọng số lồi (Convex Weights)
         let w_z = if rev_cfg.w_z_score <= 0.0 { 0.40 } else { rev_cfg.w_z_score.clamp(0.10, 0.80) };
         let w_disp = if rev_cfg.w_displacement <= 0.0 { 0.40 } else { rev_cfg.w_displacement.clamp(0.10, 0.80) };
         let w_vol = (1.0 - w_z - w_disp).max(0.05);
-        let sum_w = w_z + w_disp + w_vol;
 
-        let norm_w_z = w_z / sum_w;
-        let norm_w_disp = w_disp / sum_w;
-        let norm_w_vol = w_vol / sum_w;
-
-        let score = norm_w_z * f_z + norm_w_disp * f_disp + norm_w_vol * f_vol;
+        let score = convex_combine(&[f_z, f_disp, f_vol], &[w_z, w_disp, w_vol]);
         let min_score = rev_cfg.min_activation_score;
 
         // Kiểm tra an toàn kép cho điểm số

@@ -23,6 +23,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use crate::strategy::core_v3::normalization::{sat_unbounded, sat_penetration, convex_combine};
 
 pub struct MomentumIgnitionScanner;
 
@@ -104,21 +105,23 @@ impl TacticalScanner for MomentumIgnitionScanner {
         let vol_thresh = if mom_cfg.vol_z_threshold <= 0.0 { 1.50 } else { mom_cfg.vol_z_threshold.max(0.10) };
         let rsi_thresh = if mom_cfg.rsi_threshold <= 0.0 { 60.0 } else { mom_cfg.rsi_threshold.clamp(40.0, 90.0) };
 
-        let f_vol = (flow_force.max(0.0) / vol_thresh).tanh();
+        let f_vol = sat_unbounded(flow_force.max(0.0), vol_thresh);
+        // Đặt mục tiêu bứt phá chuẩn qua BB là 0.25 ATR
+        let target_breakout = atr * 0.25;
 
         let (f_break, f_rsi) = match signal_type {
             SignalType::Long => {
                 let dist = (close - bb_u).max(0.0);
-                let f_b = (dist / atr).tanh();
+                let f_b = sat_penetration(dist, target_breakout);
                 let rsi_excess = (rsi_mom - rsi_thresh).max(0.0);
-                let f_r = (rsi_excess / 15.0).tanh();
+                let f_r = sat_unbounded(rsi_excess, 15.0);
                 (f_b, f_r)
             }
             SignalType::Short => {
                 let dist = (bb_l - close).max(0.0);
-                let f_b = (dist / atr).tanh();
+                let f_b = sat_penetration(dist, target_breakout);
                 let rsi_excess = ((100.0 - rsi_thresh) - rsi_mom).max(0.0);
-                let f_r = (rsi_excess / 15.0).tanh();
+                let f_r = sat_unbounded(rsi_excess, 15.0);
                 (f_b, f_r)
             }
         };
@@ -127,8 +130,7 @@ impl TacticalScanner for MomentumIgnitionScanner {
         let w_break = if mom_cfg.w_breakout <= 0.0 { 0.40 } else { mom_cfg.w_breakout.clamp(0.10, 0.80) };
         let w_vol = if mom_cfg.w_volume <= 0.0 { 0.30 } else { mom_cfg.w_volume.clamp(0.10, 0.80) };
         let w_rsi = (1.0 - w_break - w_vol).max(0.05);
-        let total_w = w_break + w_vol + w_rsi;
-        let raw_score = ((w_break * f_break + w_vol * f_vol + w_rsi * f_rsi) / total_w).min(1.0);
+        let raw_score = convex_combine(&[f_break, f_vol, f_rsi], &[w_break, w_vol, w_rsi]);
 
         if raw_score < mom_cfg.min_activation_score {
             return None;

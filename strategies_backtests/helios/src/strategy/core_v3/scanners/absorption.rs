@@ -27,6 +27,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use crate::strategy::core_v3::normalization::{sat_unbounded, sat_ratio_damped, convex_combine};
 
 pub struct AbsorptionScanner;
 
@@ -66,17 +67,12 @@ impl TacticalScanner for AbsorptionScanner {
         // 🛡️ PHƯƠNG ÁN 2: Mô hình Nỗ lực vs Kết quả (Effort vs Result - Wyckoff VSA)
         // Chuẩn hóa biên độ nến qua ATR với Epsilon toán học sàn 0.10 (chống chia cho 0)
         let norm_spread = (candle_range / current_atr).max(0.10);
-        let f_vol = if raw_vol_z > 0.0 {
-            let effort_vs_result = raw_vol_z / norm_spread;
-            (effort_vs_result / vol_thresh).tanh()
-        } else {
-            0.0 // Volume cạn kiệt (Z-Score âm) -> Không có lực hấp thụ
-        };
+        let f_vol = sat_ratio_damped(raw_vol_z, norm_spread, vol_thresh);
 
         // 1. Chấm điểm Mềm Cường độ Nén Squeeze & Lực gom Volume qua trọng số DNA squeeze_weight
-        let f_sqz = (squeeze / sqz_thresh).tanh();
+        let f_sqz = sat_unbounded(squeeze, sqz_thresh);
         let w_sqz = if abs_cfg.squeeze_weight <= 0.0 { 0.50 } else { abs_cfg.squeeze_weight.clamp(0.0, 1.0) };
-        let raw_score = (w_sqz * f_sqz + (1.0 - w_sqz) * f_vol).min(1.0);
+        let raw_score = convex_combine(&[f_sqz, f_vol], &[w_sqz, 1.0 - w_sqz]);
 
         if raw_score >= abs_cfg.min_activation_score {
             // 🛡️ PHƯƠNG ÁN B: Dynamic Quant (%B + CLV Spring/Upthrust)

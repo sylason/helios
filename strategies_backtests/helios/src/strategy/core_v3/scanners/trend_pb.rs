@@ -27,6 +27,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use crate::strategy::core_v3::normalization::{sat_unbounded, sat_proximity, convex_combine};
 
 pub struct TrendPBScanner;
 
@@ -57,9 +58,6 @@ impl TacticalScanner for TrendPBScanner {
             return None; // Độ dốc KAMA chưa đủ mạnh để hình thành xu hướng
         }
 
-        let trend_axis = matrix.trend_axis.get(i).copied()
-            .unwrap_or_else(|| matrix.trend_strength.get(i).copied().unwrap_or(0.5));
-
         let close = tick.closes()[i];
         let open = tick.opens()[i];
         let low = tick.lows()[i];
@@ -78,7 +76,7 @@ impl TacticalScanner for TrendPBScanner {
         let tr_span = (high - low).max(1e-6);
         let clv = (2.0 * close - (high + low)) / tr_span;
 
-        let f_slope = (kama_slope.abs() / slope_thresh).tanh().min(1.0);
+        let f_slope = sat_unbounded(kama_slope.abs(), slope_thresh);
 
         // -------------------------------------------------------------------------
         // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên Rõ Rệt + Hồi Quy An Toàn + Gradient Dương)
@@ -100,9 +98,9 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            let f_dist = (1.0 - (delta_kama.abs() / max_dist)).max(0.0).min(1.0);
-            let f_stoch = (1.0 - (stoch_k / stoch_thresh)).max(0.0).min(1.0);
-            let score_long = ((f_slope + f_dist + f_stoch) / 3.0) * (0.50 + 0.50 * trend_axis.min(1.0));
+            let f_dist = sat_proximity(delta_kama.abs(), max_dist);
+            let f_stoch = sat_proximity(stoch_k, stoch_thresh);
+            let score_long = convex_combine(&[f_slope, f_dist, f_stoch], &[1.0, 1.0, 1.0]);
 
             if score_long >= pb_cfg.min_activation_score {
                 // 🛡️ Structural SL neo dưới đáy nhịp hồi hoặc đường hỗ trợ KAMA
@@ -114,7 +112,7 @@ impl TacticalScanner for TrendPBScanner {
 
                 return Some(Proposal {
                     signal_type: SignalType::Long,
-                    raw_score: score_long.min(1.0),
+                    raw_score: score_long,
                     scanner_id: self.id(),
                     suggested_sl: Some(sl),
                     suggested_tp: None,
@@ -141,9 +139,10 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            let f_dist = (1.0 - (delta_kama.abs() / max_dist)).max(0.0).min(1.0);
-            let f_stoch = ((stoch_k - (100.0 - stoch_thresh)) / stoch_thresh).max(0.0).min(1.0);
-            let score_short = ((f_slope + f_dist + f_stoch) / 3.0) * (0.50 + 0.50 * trend_axis.min(1.0));
+            let f_dist = sat_proximity(delta_kama.abs(), max_dist);
+            let stoch_dist = (100.0 - stoch_k).max(0.0);
+            let f_stoch = sat_proximity(stoch_dist, stoch_thresh);
+            let score_short = convex_combine(&[f_slope, f_dist, f_stoch], &[1.0, 1.0, 1.0]);
 
             if score_short >= pb_cfg.min_activation_score {
                 // 🛡️ Structural SL neo trên đỉnh nhịp hồi hoặc đường kháng cự KAMA
@@ -155,7 +154,7 @@ impl TacticalScanner for TrendPBScanner {
 
                 return Some(Proposal {
                     signal_type: SignalType::Short,
-                    raw_score: score_short.min(1.0),
+                    raw_score: score_short,
                     scanner_id: self.id(),
                     suggested_sl: Some(sl),
                     suggested_tp: None,

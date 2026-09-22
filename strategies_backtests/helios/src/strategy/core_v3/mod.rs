@@ -5,6 +5,7 @@ pub mod matrix;
 pub mod scanners;
 pub mod risk;
 pub mod config;
+pub mod normalization;
 
 use std::collections::HashMap;
 
