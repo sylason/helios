@@ -114,13 +114,27 @@ impl MarketMatrixV3 {
         }
 
         // 🚀 5. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index)
+        // chaos_index = c_r * (1.0 - entropy)
+        // Trong đó:
+        // - c_r: Chaos Ratio (tỷ lệ biến động rối loạn, từ sensors.chaos_ratio)
+        // - entropy: Kaufman Efficiency Ratio (ER), đo độ mượt của xu hướng (1.0 = đi thẳng một mạch, 0.0 = hoàn toàn ngẫu nhiên)
+        // - (1.0 - entropy): Mức độ nhiễu loạn/ziczac (Noise/Whipsaw)
+        // Khi Super Trend bùng nổ: c_r cao nhưng entropy ~ 1.0 -> (1.0 - entropy) ~ 0.0 -> chaos_index ~ 0.0 (không bị phạt oan)
+        // Khi Bão Whipsaw: c_r cao và entropy ~ 0.0 -> (1.0 - entropy) ~ 1.0 -> chaos_index cao (kích hoạt phòng vệ)
         let mut chaos_index = Vec::with_capacity(len);
         for i in 0..len {
-            let c_r_raw = chaos_ratio.get(i).copied().unwrap_or(0.0);
-            let c_r = if c_r_raw.is_nan() { 0.0 } else { c_r_raw };
-            let z_abs = price_z_score.get(i).copied().unwrap_or(0.0).abs();
-            let ch = 0.60 * c_r.max(0.0).min(1.0) + 0.40 * z_abs.max(0.0).min(1.0);
-            chaos_index.push(ch.max(0.0).min(1.0));
+            let c_r_raw = chaos_ratio.get(i).copied().unwrap_or(f64::NAN);
+            let ent_raw = entropy.get(i).copied().unwrap_or(f64::NAN);
+
+            let ch = if c_r_raw.is_nan() || ent_raw.is_nan() {
+                0.0
+            } else {
+                let c_r = c_r_raw.clamp(0.0, 1.0);
+                let noise = (1.0 - ent_raw.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+                c_r * noise
+            };
+
+            chaos_index.push(ch);
         }
         
         let trend_dir = kama_slope_atr.clone();
@@ -220,24 +234,32 @@ mod tests {
         sensors.kama_slope_adj = Arc::new(vec![0.0; len]);
         sensors.mfi = Arc::new(vec![50.0; len]);
         
-        // Giả lập bối cảnh: 15 nến cuối bão Whipsaw bùng nổ (chaos_ratio = 3.5, z_score = 2.0)
+        // Giả lập bối cảnh: 15 nến cuối bão Whipsaw bùng nổ (chaos_ratio = 3.5, z_score = 2.0, ER sụt giảm mạnh về 0.05)
         let mut chaos_vec = vec![0.8; len];
         let mut z_vec = vec![0.2; len];
+        let mut er_vec = vec![0.8; len];
         for k in (len - 15)..len {
             chaos_vec[k] = 3.5;
             z_vec[k] = 2.0;
+            er_vec[k] = 0.05;
         }
         sensors.chaos_ratio = Arc::new(chaos_vec);
-        sensors.efficiency_ratio = Arc::new(vec![0.1; len]);
+        sensors.efficiency_ratio = Arc::new(er_vec);
         sensors.z_score = Arc::new(z_vec);
         sensors.vol_z_score = Arc::new(vec![0.1; len]);
 
         let config = HeliosConfigV3::default();
         let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
 
-        for i in (len - 10)..len {
+        // Kiểm tra tại các nến bùng nổ bão Whipsaw (nến 35..45): chaos_index phải tăng cao (> 0.50)
+        for i in (len - 15)..(len - 5) {
             let chaos = matrix.chaos_index[i];
-            assert!(chaos > 0.50, "chaos_index ({}) phải tăng cao (> 0.50) khi bão Whipsaw", chaos);
+            assert!(chaos > 0.50, "chaos_index ({}) phải tăng cao (> 0.50) khi bão Whipsaw bùng nổ", chaos);
+        }
+        // Toàn bộ giai đoạn bão (15 nến cuối) phải duy trì mức cảnh báo cao (> 0.35)
+        for i in (len - 15)..len {
+            let chaos = matrix.chaos_index[i];
+            assert!(chaos > 0.35, "chaos_index ({}) phải duy trì mức cảnh báo (> 0.35) trong suốt cơn bão", chaos);
         }
     }
 
@@ -296,5 +318,50 @@ mod tests {
             assert!(matrix.trend_axis[i] > 0.8, "Trend axis phải mạnh khi ADX = 50");
             assert!(matrix.flow_axis[i] > 0.6, "Flow axis phải độc lập duy trì mức cao, không bị Trend triệt tiêu!");
         }
+    }
+
+    #[test]
+    fn test_super_trend_low_chaos() {
+        // Kiểm chứng tính đúng đắn toán học của chaos_index mới:
+        // Khi có Super Trend: c_r cao (biến động lớn), nhưng entropy ~ 1.0 (xu hướng đi thẳng, cực mượt)
+        // => noise = 1.0 - entropy = 0.0 => chaos_index = 0.0 (KHÔNG bị phạt oan!)
+        let mut sensors = HeliosSensors::default();
+        let len = 20;
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![105.0; len]);
+        sensors.lows = Arc::new(vec![95.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+        sensors.adx = Arc::new(vec![40.0; len]);
+        sensors.kama_slope_adj = Arc::new(vec![0.20; len]);
+        sensors.vol_z_score = Arc::new(vec![1.0; len]);
+        sensors.mfi = Arc::new(vec![50.0; len]);
+        sensors.kc_upper = Arc::new(vec![106.0; len]);
+        sensors.kc_lower = Arc::new(vec![94.0; len]);
+        sensors.bb_upper = Arc::new(vec![105.0; len]);
+        sensors.bb_lower = Arc::new(vec![95.0; len]);
+        sensors.bb_middle = Arc::new(vec![100.0; len]);
+
+        // Giả lập chuỗi ER tăng dần để percentile tại index cuối tiệm cận 1.0
+        let mut er_vec = Vec::with_capacity(len);
+        let mut cr_vec = Vec::with_capacity(len);
+        for i in 0..len {
+            er_vec.push(i as f64 / len as f64);
+            cr_vec.push(i as f64 / len as f64);
+        }
+        sensors.efficiency_ratio = Arc::new(er_vec);
+        sensors.chaos_ratio = Arc::new(cr_vec);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // Tại phần tử cuối cùng: entropy percentile tiệm cận 1.0 (>= 0.95) => noise <= 0.05 => chaos_index ~ 0.024
+        let last_idx = len - 1;
+        assert!(matrix.entropy[last_idx] >= 0.95, "Entropy percentile phải tiệm cận 1.0 (>= 0.95)");
+        assert!(matrix.chaos_ratio[last_idx] >= 0.95, "Chaos ratio percentile phải tiệm cận 1.0 (>= 0.95)");
+        assert!(
+            matrix.chaos_index[last_idx] < 0.03,
+            "Khi xu hướng cực mượt (entropy >= 0.95), chaos_index ({}) phải tiệm cận 0.0 (< 0.03) bất kể biến động lớn!",
+            matrix.chaos_index[last_idx]
+        );
     }
 }

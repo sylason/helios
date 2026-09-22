@@ -550,8 +550,8 @@ Quy định rõ ràng phân định trách nhiệm:
        ...
    }
    ```
-2. **Loại bỏ Chỉ báo Ma:**
-   Xóa bỏ các phép tính `rolling_percentile` của `entropy`, `liquidity`, và `chaos`.
+2. **Giữ lại `entropy` và loại bỏ Chỉ báo Ma thừa:**
+   Giữ lại phép tính `entropy` (Kaufman Efficiency Ratio) để phục vụ tái cấu trúc `chaos_index` (xem Mục 9.6). Chỉ xóa bỏ `liquidity` và `chaos` không sử dụng.
 3. **Loại bỏ Gen Ma `volume_lookback`:**
    Xóa bỏ thuộc tính `#[dna(...)]` của trường `volume_lookback` trong `MatrixConfig` để giảm tải chiều tìm kiếm cho GA Optimizer.
 
@@ -559,3 +559,16 @@ Quy định rõ ràng phân định trách nhiệm:
 
 ### 9.5 Ràng buộc đồng bộ Timeframe giữa BB và KC
 Trong `config.rs`, loại bỏ gen `timeframe` độc lập của `KeltnerParams`. Ép buộc Keltner Channel luôn kế thừa và sử dụng chung `timeframe` với Bollinger Bands để bảo toàn tính toàn vẹn hình học của mô hình Squeeze.
+
+---
+
+### 9.6 Tái Cấu Trúc `chaos_index` Bằng Kaufman ER (Trị Dứt Điểm Bẫy Triệt Tiêu Super Trend)
+- **Bản chất lỗi cũ ([L122](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L122)):**
+  $$\text{chaos\_index} = 0.60 \times c\_r + 0.40 \times z\_abs$$
+  Công thức cũ đánh đồng **Biến Động Mạnh ($c\_r$)** và **Độ Lệch Chuẩn ($z\_abs$)** với **Bão Hỗn Loạn (Whipsaw)**. Khi thị trường có Super Trend bùng nổ, cả $c\_r \to 1.0$ và $z\_abs \to 1.0 \implies \text{chaos\_index} \to 1.0$, khiến Arbiter phạt trừ $50\%$ điểm tự tin của các Scanner theo xu hướng.
+- **Giải pháp tái cấu trúc:**
+  Tận dụng biến `entropy` (phân vị của Kaufman Efficiency Ratio) tại dòng 86:
+  $$\text{chaos\_index} = c\_r \times (1.0 - \text{entropy})$$
+  - Khi có **Super Trend** ($c\_r \to 1.0$ nhưng $\text{entropy} \to 1.0$): $\text{chaos\_index} \to \mathbf{0.0}$ (Bảo toàn $100\%$ điểm tự tin).
+  - Khi có **Bão Whipsaw** ($c\_r \to 1.0$ nhưng $\text{entropy} \to 0.0$): $\text{chaos\_index} \to \mathbf{1.0}$ (Phạt mạnh điểm, co hẹp khoảng cách phân xử để Arbiter chọn FLAT).
+  - **Khử hoàn toàn hằng số ma thuật:** Trong giai đoạn Warmup (`is_nan()`), trả về $0.0$ (chưa đủ dữ liệu đo bão thì không phạt điểm), không dùng hằng số giả định $0.5$.

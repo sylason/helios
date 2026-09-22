@@ -16,9 +16,10 @@
 | **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone `Vec<f64>` thừa thãi, chuyển sang Arc aliasing | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:102, 126, 128` |
 | **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🔴 Chưa xử lý | `core_v3/config.rs:103–124` |
 | **6** | `TASK-MAT-06` | Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs:51–73, 108–124` |
-| **7** | `TASK-MAT-07` | Xóa bỏ chỉ báo ma (`entropy`, `liquidity`, `chaos`) và gen ma `volume_lookback` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs`, `core_v3/config.rs:266` |
+| **7** | `TASK-MAT-07` | Giữ lại `entropy`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs`, `core_v3/config.rs:266` |
 | **8** | `TASK-MAT-08` | Bổ sung kẹp biên an toàn cho `bb_width_norm`, `bb_middle_slope_adj` | **LOW** | 🔴 Chưa xử lý | `core_v3/matrix.rs:58, 139` |
 | **9** | `TASK-MAT-09` | Xây dựng bộ Unit Tests chuyên sâu bao phủ các lỗi toán học & edge cases | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:152–300` |
+| **10** | `TASK-MAT-10` | Tái cấu trúc `chaos_index` bằng Kaufman ER (`entropy`) trị dứt điểm bẫy Super Trend | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs:116–124` |
 
 ---
 
@@ -154,18 +155,19 @@
 
 ---
 
-### 🟡 TASK-MAT-07: Xóa bỏ chỉ báo ma (`entropy`, `liquidity`, `chaos`) và gen ma `volume_lookback`
+### 🟡 TASK-MAT-07: Giữ lại `entropy` cho `chaos_index`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback`
 - **Mã lỗi liên đới:** `FLAW-MAT-07` (Medium).
 - **Hiện trạng:**
-  - `matrix.entropy`, `matrix.liquidity`, `matrix.chaos` được tính toán bằng các thuật toán Fenwick Tree tốn kém nhưng không có module nào trong `core_v3` sử dụng.
+  - `matrix.liquidity`, `matrix.chaos` được tính toán bằng các thuật toán Fenwick Tree tốn kém nhưng không có module nào trong `core_v3` sử dụng.
+  - `matrix.entropy` (Kaufman Efficiency Ratio) trước đây bị bỏ xó tại dòng 122, nhưng nay là **chỉ số sống còn để phân biệt sóng định hướng với bão Whipsaw** trong `TASK-MAT-10`.
   - `MatrixConfig.volume_lookback` có gen DNA chiếm 31 nấc tìm kiếm nhưng mã nguồn `matrix.rs` không hề đọc giá trị này.
 - **Hành động cần làm:**
-  1. Xóa bỏ hoặc vô hiệu hóa các dòng tính toán `entropy`, `liquidity`, `chaos` trong `from_sensors`.
-  2. Chuyển các trường này thành deprecated hoặc loại bỏ khỏi struct nếu không cần tương thích ngược.
+  1. Giữ lại phép tính `entropy` trong `from_sensors` để phục vụ `TASK-MAT-10`.
+  2. Xóa bỏ hoặc vô hiệu hóa các dòng tính toán `liquidity`, `chaos` không sử dụng.
   3. Xóa macro `#[dna(...)]` trên trường `volume_lookback` trong `core_v3/config.rs`.
 - **Tiêu chuẩn nghiệm thu:**
   - Tổng số gen DNA của hệ thống giảm thêm 1 gen ma.
-  - Thời gian khởi tạo ma trận giảm thiểu do bỏ được 2 lần chạy `rolling_percentile`.
+  - Phép tính `entropy` được tái sử dụng thành công trong `chaos_index`.
 
 ---
 
@@ -192,3 +194,19 @@
     5. `test_infinite_and_nan_sanitization`: Kiểm chứng khả năng phòng thủ số vô cực và NaN.
 - **Tiêu chuẩn nghiệm thu:**
   - `cargo test --package helios matrix` vượt qua 100% các bài test mới.
+
+---
+
+### 🟢 TASK-MAT-10: Tái Cấu Trúc `chaos_index` Bằng Kaufman ER (`entropy`) (Đã hoàn thành)
+- **Mã lỗi liên đới:** `FLAW-MAT-10`, `VULN-ARB-CHAOS` (Critical).
+- **Hiện trạng:**
+  - Công thức cũ tại `core_v3/matrix.rs:122`: `0.60 * c_r + 0.40 * z_abs` đánh đồng độ lớn biến động và độ lệch chuẩn với bão Whipsaw.
+  - Khi có Super Trend bùng nổ, `chaos_index = 1.0`, bóp chết điểm tự tin của các Scanner theo xu hướng.
+- **Hành động đã thực hiện:**
+  1. Tái cấu trúc công thức:
+     $$\text{chaos\_index} = c\_r \times (1.0 - \text{entropy})$$
+  2. Khử hoàn toàn hằng số ma thuật (như 0.5, 0.6, 0.4): Nếu trong giai đoạn Warmup (`is_nan()`), trả về $0.0$.
+- **Kết quả nghiệm thu:**
+  - `test_super_trend_low_chaos`: Đạt chuẩn (khi entropy $\ge 0.95$, chaos_index $\le 0.03$, không bị phạt oan).
+  - `test_whipsaw_discrimination_chaos_index`: Đạt chuẩn (khi bão Whipsaw bùng nổ, chaos_index $> 0.50$ và duy trì $> 0.35$).
+  - 65/65 tests trong `helios` passed. `bot_engine` check sạch sẽ.
