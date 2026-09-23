@@ -2,6 +2,7 @@ use tracing::{info, warn, error};
 use ferro_trade::broker::actions::Action;
 use crate::models::account_state::AccountEvent;
 use serde::{Serialize, Deserialize};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// [TYPE-SAFE EXIT REASON]
 /// Phân loại chính xác 100% lý do đóng lệnh cho hệ thống thống kê Quant
@@ -51,6 +52,8 @@ pub struct PaperTradeRecord {
     pub net_pnl: f64,
     pub pnl_pct: f64,
     pub equity_after: f64,
+    pub mfe_pct: f64,
+    pub mae_pct: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,6 +83,9 @@ pub struct PaperTrader {
     pub winning_trades: usize,         // Số giao dịch thắng tích lũy từ đầu
     pub losing_trades: usize,          // Số giao dịch thua tích lũy từ đầu
     pub closed_trades: Vec<PaperTradeRecord>,
+    pub highest_price_seen: f64,       // Giá cao nhất đạt được trong vòng đời vị thế (MFE/MAE tracking)
+    pub lowest_price_seen: f64,        // Giá thấp nhất đạt được trong vòng đời vị thế (MFE/MAE tracking)
+    pub last_logged_trade_idx: AtomicUsize, // Vị trí trade cuối cùng đã log để chống lặp quadratic
 }
 
 impl PaperTrader {
@@ -104,6 +110,9 @@ impl PaperTrader {
             winning_trades: 0,
             losing_trades: 0,
             closed_trades: Vec::new(),
+            highest_price_seen: 0.0,
+            lowest_price_seen: 0.0,
+            last_logged_trade_idx: AtomicUsize::new(0),
         }
     }
 
@@ -228,6 +237,28 @@ impl PaperTrader {
             1
         };
 
+        let (mfe_pct, mae_pct) = match old_position {
+            PositionType::Long => {
+                let mfe = if self.entry_price > 0.0 {
+                    ((self.highest_price_seen.max(current_price) - self.entry_price) / self.entry_price) * 100.0 * self.leverage
+                } else { 0.0 };
+                let mae = if self.entry_price > 0.0 && self.lowest_price_seen > 0.0 {
+                    ((self.lowest_price_seen.min(current_price) - self.entry_price) / self.entry_price) * 100.0 * self.leverage
+                } else { 0.0 };
+                (mfe, mae)
+            },
+            PositionType::Short => {
+                let mfe = if self.entry_price > 0.0 && self.lowest_price_seen > 0.0 {
+                    ((self.entry_price - self.lowest_price_seen.min(current_price)) / self.entry_price) * 100.0 * self.leverage
+                } else { 0.0 };
+                let mae = if self.entry_price > 0.0 {
+                    ((self.entry_price - self.highest_price_seen.max(current_price)) / self.entry_price) * 100.0 * self.leverage
+                } else { 0.0 };
+                (mfe, mae)
+            },
+            PositionType::None => (0.0, 0.0),
+        };
+
         self.closed_trades.push(PaperTradeRecord {
             id: self.total_trades,
             pos_type: old_position.clone(),
@@ -241,6 +272,8 @@ impl PaperTrader {
             net_pnl: net_pnl_trade,
             pnl_pct,
             equity_after: self.equity,
+            mfe_pct,
+            mae_pct,
         });
 
         let (icon, side_str) = match old_position {
@@ -252,8 +285,8 @@ impl PaperTrader {
         let tag_str = self.opening_playbook_tag.as_deref().unwrap_or("NORMAL");
 
         info!(
-            "{} #{:03} [{}] [{}] @ {:.2} [{}] | {} PnL: ${:+.2} ({:+.1}% ROE) | Held: {} bars | Balance: ${:.2}",
-            icon, self.total_trades, side_str, tag_str, current_price, exit_reason.as_str(), pnl_icon, net_pnl_trade, pnl_pct, bars_held, self.equity
+            "{} #{:03} [{}] [{}] Entry: {:.2} -> Exit: {:.2} [{}] | {} PnL: ${:+.2} ({:+.1}% ROE) | MFE: {:+.1}% | MAE: {:+.1}% | Held: {} bars | Fee: ${:.2} | Balance: ${:.2}",
+            icon, self.total_trades, side_str, tag_str, self.entry_price, current_price, exit_reason.as_str(), pnl_icon, net_pnl_trade, pnl_pct, mfe_pct, mae_pct, bars_held, total_commission, self.equity
         );
 
         self.position_type = PositionType::None;
@@ -266,21 +299,29 @@ impl PaperTrader {
         self.entry_timestamp = 0;
         self.entry_bar_index = 0;
         self.opening_playbook_tag = None;
+        self.highest_price_seen = 0.0;
+        self.lowest_price_seen = 0.0;
 
         self.broadcast_account_events(account_tx);
     }
 
-    /// In ra bảng log chi tiết tất cả các lệnh đã thực hiện và vị thế đang mở
+    /// In ra bảng log tóm tắt các lệnh MỚI đóng kể từ lần in trước (Chống quadratic log spam)
     pub fn log_all_trades(&self, current_price: f64) {
-        info!("╔══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
-        info!("║ 📋 [PAPER TRADER] DANH SÁCH GIAO DỊCH ĐÃ ĐÓNG (Tổng số: {:<3})                                                                              ║", self.closed_trades.len());
-        info!("╠══════╦═══════╦══════════════╦══════════════╦══════════════╦══════════╦════════════╦════════════╦════════════╦══════════╦════════════════════╣");
-        info!("║  ID  ║ SIDE  ║ PLAYBOOK     ║  OPEN TIME   ║  CLOSE TIME  ║   HELD   ║   ENTRY    ║    EXIT    ║ NET PnL ($)║ ROE (%)  ║ EXIT REASON        ║");
-        info!("╠══════╬═══════╬══════════════╬══════════════╬══════════════╬══════════╬════════════╬════════════╬════════════╬══════════╬════════════════════╣");
-        if self.closed_trades.is_empty() {
-            info!("║                                               (Chưa có giao dịch nào được đóng trong kỳ)                                                 ║");
+        let prev_idx = self.last_logged_trade_idx.swap(self.closed_trades.len(), Ordering::SeqCst);
+        let total = self.closed_trades.len();
+
+        if total == 0 {
+            info!("📋 [PAPER TRADER] Hiện tại chưa có giao dịch nào hoàn tất trong kỳ.");
+        } else if prev_idx >= total {
+            info!("📋 [PAPER TRADER] Không có giao dịch mới đóng trong chu kỳ qua (Tổng số lệnh đã hoàn tất: {}).", total);
         } else {
-            for t in &self.closed_trades {
+            let new_trades = &self.closed_trades[prev_idx..total];
+            info!("╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+            info!("║ 📋 [PAPER TRADER] GIAO DỊCH MỚI ĐÓNG TRONG KỲ: {:<3} lệnh (Lũy kế: {}/{} lệnh)                                                                                      ║", new_trades.len(), prev_idx + 1, total);
+            info!("╠══════╦═══════╦══════════════╦══════════════╦══════════════╦══════════╦════════════╦════════════╦════════════╦══════════╦══════════╦══════════╦════════════════════╣");
+            info!("║  ID  ║ SIDE  ║ PLAYBOOK     ║  OPEN TIME   ║  CLOSE TIME  ║   HELD   ║   ENTRY    ║    EXIT    ║ NET PnL ($)║ ROE (%)  ║ MFE (%)  ║ MAE (%)  ║ EXIT REASON        ║");
+            info!("╠══════╬═══════╬══════════════╬══════════════╬══════════════╬══════════╬════════════╬════════════╬════════════╬══════════╬══════════╬══════════╬════════════════════╣");
+            for t in new_trades {
                 let icon = if t.net_pnl >= 0.0 { "🟢" } else { "🔴" };
                 let side = match t.pos_type {
                     PositionType::Long => "LONG ",
@@ -295,11 +336,11 @@ impl PaperTrader {
                     .map(|dt| dt.format("%m-%d %H:%M").to_string())
                     .unwrap_or_else(|| "--".to_string());
                 let held_str = format!("{} bars", t.bars_held);
-                info!("║ {:04} ║ {}{} ║ {:<12} ║ {:<12} ║ {:<12} ║ {:>8} ║ {:>10.2} ║ {:>10.2} ║ {:>+10.2} ║ {:>+7.1}% ║ {:<18} ║",
-                    t.id, icon, side, tag, open_time, close_time, held_str, t.entry_price, t.exit_price, t.net_pnl, t.pnl_pct, t.exit_reason.as_str());
+                info!("║ {:04} ║ {}{} ║ {:<12} ║ {:<12} ║ {:<12} ║ {:>8} ║ {:>10.2} ║ {:>10.2} ║ {:>+10.2} ║ {:>+7.1}% ║ {:>+7.1}% ║ {:>+7.1}% ║ {:<18} ║",
+                    t.id, icon, side, tag, open_time, close_time, held_str, t.entry_price, t.exit_price, t.net_pnl, t.pnl_pct, t.mfe_pct, t.mae_pct, t.exit_reason.as_str());
             }
+            info!("╚══════╩═══════╩══════════════╩══════════════╩══════════════╩══════════╩════════════╩════════════╩════════════╩══════════╩══════════╩══════════╩════════════════════╝");
         }
-        info!("╚══════╩═══════╩══════════════╩══════════════╩══════════════╩══════════╩════════════╩════════════╩════════════╩══════════╩════════════════════╝");
         
         if self.position_type != PositionType::None {
             let u_pnl = self.get_unrealized_pnl(current_price);
@@ -315,6 +356,56 @@ impl PaperTrader {
             let tag_str = self.opening_playbook_tag.as_deref().unwrap_or("NORMAL");
             let icon = if u_pnl >= 0.0 { "🟢" } else { "🔴" };
             info!("📌 [OPEN POSITION] {} {} [{}] Entry: {:.2} | Now: {:.2} | Size: {:.4} | SL: {} | TP: {} | uPnL: ${:+.2} ({:+.1}% ROE)",
+                  icon, pos_str, tag_str, self.entry_price, current_price, self.position_size, sl_str, tp_str, u_pnl, u_pnl_pct);
+        }
+    }
+
+    /// In ra bảng log tổng kết toàn bộ 100% lịch sử giao dịch khi kết thúc bài test (Chỉ in 1 lần duy nhất)
+    pub fn log_final_summary(&self, current_price: f64) {
+        if self.closed_trades.is_empty() {
+            info!("📋 [PAPER TRADER FINAL] Không có giao dịch nào được thực hiện trong toàn bộ phiên test.");
+            return;
+        }
+
+        info!("╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗");
+        info!("║ 🏆 [PAPER TRADER FINAL SUMMARY] TỔNG HỢP TOÀN BỘ GIAO DỊCH (Tổng số: {:<3} lệnh)                                                                                 ║", self.closed_trades.len());
+        info!("╠══════╦═══════╦══════════════╦══════════════╦══════════════╦══════════╦════════════╦════════════╦════════════╦══════════╦══════════╦══════════╦════════════════════╣");
+        info!("║  ID  ║ SIDE  ║ PLAYBOOK     ║  OPEN TIME   ║  CLOSE TIME  ║   HELD   ║   ENTRY    ║    EXIT    ║ NET PnL ($)║ ROE (%)  ║ MFE (%)  ║ MAE (%)  ║ EXIT REASON        ║");
+        info!("╠══════╬═══════╬══════════════╬══════════════╬══════════════╬══════════╬════════════╬════════════╬════════════╬══════════╬══════════╬══════════╬════════════════════╣");
+        for t in &self.closed_trades {
+            let icon = if t.net_pnl >= 0.0 { "🟢" } else { "🔴" };
+            let side = match t.pos_type {
+                PositionType::Long => "LONG ",
+                PositionType::Short => "SHORT",
+                PositionType::None => "NONE ",
+            };
+            let tag = t.opening_playbook_tag.as_deref().unwrap_or("NORMAL");
+            let open_time = chrono::DateTime::from_timestamp_millis(t.entry_timestamp)
+                .map(|dt| dt.format("%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "--".to_string());
+            let close_time = chrono::DateTime::from_timestamp_millis(t.exit_timestamp)
+                .map(|dt| dt.format("%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "--".to_string());
+            let held_str = format!("{} bars", t.bars_held);
+            info!("║ {:04} ║ {}{} ║ {:<12} ║ {:<12} ║ {:<12} ║ {:>8} ║ {:>10.2} ║ {:>10.2} ║ {:>+10.2} ║ {:>+7.1}% ║ {:>+7.1}% ║ {:>+7.1}% ║ {:<18} ║",
+                t.id, icon, side, tag, open_time, close_time, held_str, t.entry_price, t.exit_price, t.net_pnl, t.pnl_pct, t.mfe_pct, t.mae_pct, t.exit_reason.as_str());
+        }
+        info!("╚══════╩═══════╩══════════════╩══════════════╩══════════════╩══════════╩════════════╩════════════╩════════════╩══════════╩══════════╩══════════╩════════════════════╝");
+        
+        if self.position_type != PositionType::None {
+            let u_pnl = self.get_unrealized_pnl(current_price);
+            let margin_used = (self.entry_price * self.position_size) / self.leverage;
+            let u_pnl_pct = if margin_used > 0.0 { (u_pnl / margin_used) * 100.0 } else { 0.0 };
+            let pos_str = match self.position_type {
+                PositionType::Long => "LONG ",
+                PositionType::Short => "SHORT",
+                PositionType::None => "NONE ",
+            };
+            let sl_str = self.current_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+            let tp_str = self.current_tp_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
+            let tag_str = self.opening_playbook_tag.as_deref().unwrap_or("NORMAL");
+            let icon = if u_pnl >= 0.0 { "🟢" } else { "🔴" };
+            info!("📌 [FINAL OPEN POSITION] {} {} [{}] Entry: {:.2} | Now: {:.2} | Size: {:.4} | SL: {} | TP: {} | uPnL: ${:+.2} ({:+.1}% ROE)",
                   icon, pos_str, tag_str, self.entry_price, current_price, self.position_size, sl_str, tp_str, u_pnl, u_pnl_pct);
         }
     }
@@ -354,6 +445,8 @@ impl PaperTrader {
         self.entry_timestamp = entry_timestamp;
         self.entry_bar_index = entry_bar_index;
         self.opening_playbook_tag = tag;
+        self.highest_price_seen = current_price;
+        self.lowest_price_seen = current_price;
 
         let (icon, side_str) = match self.position_type {
             PositionType::Long => ("🟢 [OPEN LONG] ", "LONG"),
@@ -379,6 +472,13 @@ impl PaperTrader {
     ) -> bool {
         if self.position_type == PositionType::None {
             return false;
+        }
+
+        self.highest_price_seen = self.highest_price_seen.max(candle.high);
+        if self.lowest_price_seen == 0.0 {
+            self.lowest_price_seen = candle.low;
+        } else {
+            self.lowest_price_seen = self.lowest_price_seen.min(candle.low);
         }
 
         let sl_opt = self.current_sl_price;
@@ -844,6 +944,57 @@ mod tests {
         assert_eq!(trader.position_type, PositionType::None);
         assert_eq!(trader.closed_trades[0].exit_reason, ExitReason::HardStopLoss);
         assert_eq!(trader.closed_trades[0].exit_price, 1950.0);
+    }
+
+    #[test]
+    fn test_mfe_mae_and_delta_logging() {
+        use ferro_trade::broker::policies::RiskPolicy;
+        let mut trader = PaperTrader::new("ETHUSDT".to_string(), 1000.0, 0.0);
+        trader.leverage = 1.0;
+
+        // Mở Long tại 2000, SL 1900, TP 2200
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(1900.0), tp_price: Some(2200.0) });
+        trader.process_action(Action::Buy { size: 1.0, limit: None, stop: None, policy, tag: Some("TREND_PB".to_string()) }, 2000.0, 1600000000, 0, None);
+
+        // Nến 1: Giá tăng lên High 2100, Low 1980 (MFE = +5%, MAE = -1%)
+        let candle1 = crate::models::models::Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1600000060,
+            open: 2000.0,
+            high: 2100.0,
+            low: 1980.0,
+            close: 2050.0,
+            volume: 10.0,
+        };
+        trader.on_candle(&candle1, 1, None);
+
+        // Nến 2: Giá tiếp tục chạm TP 2200
+        let candle2 = crate::models::models::Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1600000120,
+            open: 2050.0,
+            high: 2210.0,
+            low: 2040.0,
+            close: 2205.0,
+            volume: 10.0,
+        };
+        let hit = trader.on_candle(&candle2, 2, None);
+        assert!(hit);
+        assert_eq!(trader.closed_trades.len(), 1);
+
+        let trade = &trader.closed_trades[0];
+        assert_eq!(trade.exit_reason, ExitReason::TakeProfit);
+        // MFE phải >= 10% ((2210 - 2000) / 2000 = 10.5%)
+        assert!(trade.mfe_pct >= 10.0, "MFE phải >= 10%: {}", trade.mfe_pct);
+        // MAE phải là ((1980 - 2000) / 2000 = -1.0%)
+        assert!((trade.mae_pct - (-1.0)).abs() < 1e-3, "MAE phải là -1%: {}", trade.mae_pct);
+
+        // Kiểm tra Delta logging: Lần 1 in ra 1 trade, lần 2 không in lại
+        assert_eq!(trader.last_logged_trade_idx.load(Ordering::SeqCst), 0);
+        trader.log_all_trades(2200.0);
+        assert_eq!(trader.last_logged_trade_idx.load(Ordering::SeqCst), 1);
+        trader.log_all_trades(2200.0);
+        assert_eq!(trader.last_logged_trade_idx.load(Ordering::SeqCst), 1);
     }
 }
 

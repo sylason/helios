@@ -340,7 +340,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ KẾT THÚC BÀI ĐÁNH GIÁ WALK-FORWARD EVALUATOR VỚI SMART SEEDING!");
     info!("   Tổng số lần chạy Re-Optimize (N mins): {}", reopt_count);
     info!("   Tổng số lần chạy Single Backtest Eval (M mins): {}", backtest_count);
-    info!("   File log chi tiết: examples/logs/{}.log", STRATEGY_ID);
+    info!("   Log Hệ Thống & GA: examples/logs/{}_system.log", STRATEGY_ID);
+    info!("   Log Giao Dịch OOS & Auction: examples/logs/{}_trades.log", STRATEGY_ID);
     info!("================================================================================");
 
     Ok(())

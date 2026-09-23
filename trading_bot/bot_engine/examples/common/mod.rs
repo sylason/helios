@@ -10,35 +10,76 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::weight_monitor::WeightMonitor;
 
-/// Khởi tạo Logger tiêu chuẩn (Xuất ra Console + 1 File log tổng hợp)
-pub fn init_logging(strategy_id: &str) -> Result<WorkerGuard, Box<dyn Error>> {
-    std::fs::create_dir_all("examples/logs")?;
-    let log_filename = format!("{}.log", strategy_id);
-    let file_appender = tracing_appender::rolling::never("examples/logs", &log_filename);
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new("warn")
-            .add_directive("walk_forward_smart_seed=info".parse().unwrap())
-            .add_directive("bot_engine::execution::paper_trader=info".parse().unwrap())
-            .add_directive("bot_engine::controller::asset_actor=info".parse().unwrap())
-            .add_directive("bot_engine::optimizer::prospector_runner=info".parse().unwrap())
-    });
-
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt::layer().with_writer(std::io::stdout))
-        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
-        .init();
-
-    Ok(guard)
+/// Bộ bảo vệ WorkerGuard kép cho 2 luồng log không đồng bộ
+pub struct LoggingGuards {
+    pub _system: WorkerGuard,
+    pub _trades: WorkerGuard,
 }
 
-/// Khởi tạo Dual-Logger (Xuất ra Console + File log tổng hợp)
+/// Khởi tạo Logger kép độc lập (Dual-Appender: System Log + Trades OOS Telemetry Log + Lean Console)
+pub fn init_logging(strategy_id: &str) -> Result<LoggingGuards, Box<dyn Error>> {
+    std::fs::create_dir_all("examples/logs")?;
+
+    // 1. File Log Hệ Thống ({strategy_id}_system.log)
+    let system_log_filename = format!("{}_system.log", strategy_id);
+    let system_appender = tracing_appender::rolling::never("examples/logs", &system_log_filename);
+    let (system_non_blocking, system_guard) = tracing_appender::non_blocking(system_appender);
+
+    let system_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("warn")
+            .add_directive("bot_engine=info".parse().unwrap())
+            .add_directive("walk_forward_smart_seed=info".parse().unwrap())
+            .add_directive("helios=info".parse().unwrap())
+    });
+
+    let system_layer = fmt::layer()
+        .with_writer(system_non_blocking)
+        .with_ansi(false)
+        .with_filter(system_filter);
+
+    // 2. File Log Giao Dịch OOS Chuyên Biệt ({strategy_id}_trades.log)
+    let trades_log_filename = format!("{}_trades.log", strategy_id);
+    let trades_appender = tracing_appender::rolling::never("examples/logs", &trades_log_filename);
+    let (trades_non_blocking, trades_guard) = tracing_appender::non_blocking(trades_appender);
+
+    let trades_filter = EnvFilter::new("off")
+        .add_directive("bot_engine::execution::paper_trader=info".parse().unwrap())
+        .add_directive("bot_engine::controller::asset_actor=info".parse().unwrap())
+        .add_directive("helios::strategy::core_v3::arbiter=info".parse().unwrap())
+        .add_directive("helios::strategy::core_v3=info".parse().unwrap())
+        .add_directive("walk_forward_smart_seed=info".parse().unwrap());
+
+    let trades_layer = fmt::layer()
+        .with_writer(trades_non_blocking)
+        .with_ansi(false)
+        .with_filter(trades_filter);
+
+    // 3. Console Output (Chỉ in các mốc quan trọng, không spam terminal)
+    let stdout_filter = EnvFilter::new("warn")
+        .add_directive("walk_forward_smart_seed=info".parse().unwrap())
+        .add_directive("bot_engine::execution::paper_trader=info".parse().unwrap());
+
+    let stdout_layer = fmt::layer()
+        .with_writer(std::io::stdout)
+        .with_filter(stdout_filter);
+
+    tracing_subscriber::registry()
+        .with(stdout_layer)
+        .with(system_layer)
+        .with(trades_layer)
+        .init();
+
+    Ok(LoggingGuards {
+        _system: system_guard,
+        _trades: trades_guard,
+    })
+}
+
+/// Khởi tạo Dual-Logger (Alias tiện dụng)
 #[allow(dead_code)]
 pub fn init_dual_logging(
     strategy_id: &str,
-) -> Result<WorkerGuard, Box<dyn Error>> {
+) -> Result<LoggingGuards, Box<dyn Error>> {
     init_logging(strategy_id)
 }
 

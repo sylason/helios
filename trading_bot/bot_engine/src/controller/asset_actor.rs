@@ -373,6 +373,7 @@ impl AssetActor {
         let last_price = self.asset.get_candles_vec().last().map(|c| c.close).unwrap_or(0.0);
         self.log_paper_report(last_price, "FINAL RUN SUMMARY");
         self.log_all_trades_report(last_price);
+        self.log_final_summary(last_price);
         info!("🏁 Actor [{}] stopped.", self.symbol);
     }
 
@@ -480,6 +481,11 @@ impl AssetActor {
     /// Xuất báo cáo danh sách tất cả các lệnh đã thực hiện của Paper Trading
     pub fn log_all_trades_report(&self, current_price: f64) {
         self.execution_engine.log_all_trades_report(current_price);
+    }
+
+    /// Xuất báo cáo tổng kết toàn diện 100% lịch sử giao dịch khi kết thúc phiên
+    pub fn log_final_summary(&self, current_price: f64) {
+        self.execution_engine.log_final_summary(current_price);
     }
 
     /// Xử lý đồng bộ dữ liệu nến lịch sử vào bộ nhớ (Rolling Buffer)
@@ -673,7 +679,7 @@ impl AssetActor {
                                 warn!(
                                     "🛡️ [ENGINE COOLDOWN VETO] Symbol: {} | Action {} BLOCKED by Engine Bidirectional Cooldown! \
                                     Locked until bar_idx: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | \
-                                    FavorableDiff: {:+.2} < {:.2}*ATR ({:.2})",
+                                    FavorableDiff: {:+.2} (Required >= {:.2}*ATR = {:.2})",
                                     self.symbol, sig_str, self.cooldown_guard.locked_until_bar,
                                     self.cooldown_guard.locked_until_bar.saturating_sub(current_bar_idx),
                                     self.cooldown_guard.last_exit_price, current_close, diff, mult, threshold

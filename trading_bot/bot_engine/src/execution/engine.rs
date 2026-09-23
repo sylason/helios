@@ -52,6 +52,9 @@ pub trait ExecutionEngine: Send + Sync {
 
     /// Báo cáo chi tiết tất cả các lệnh đã đóng Paper Trading (No-op cho Live)
     fn log_all_trades_report(&self, _current_price: f64) {}
+
+    /// Báo cáo tổng kết toàn diện 100% lịch sử Paper Trading (No-op cho Live)
+    fn log_final_summary(&self, _current_price: f64) {}
 }
 
 /// Thành phần cốt lõi dùng chung (ExecutionCore) cho các Engine

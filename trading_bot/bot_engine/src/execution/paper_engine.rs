@@ -140,5 +140,9 @@ impl ExecutionEngine for PaperExecutionEngine {
     fn log_all_trades_report(&self, current_price: f64) {
         self.paper_trader.log_all_trades(current_price);
     }
+
+    fn log_final_summary(&self, current_price: f64) {
+        self.paper_trader.log_final_summary(current_price);
+    }
 }
 
