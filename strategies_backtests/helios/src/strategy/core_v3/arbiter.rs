@@ -4,6 +4,7 @@ use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use tracing::info;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalType {
@@ -129,7 +130,7 @@ impl HeliosArbiter {
         }
     }
 
-    pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, _debug_mode: bool) -> ArbiterDecision {
+    pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
         
         let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
@@ -137,19 +138,47 @@ impl HeliosArbiter {
         let conflict_margin = config.arbiter.conflict_confidence_margin;
         let max_chaos_penalty = config.arbiter.max_chaos_penalty;
 
+        let mut all_scanned: Vec<(Proposal, f64, bool)> = Vec::new();
         let mut approved_proposals: Vec<(Proposal, f64)> = Vec::new();
 
         // 1. THU THẬP & CHẤM ĐIỂM TỰ TIN PHI TUYẾN O(1) CHO CÁC PROPOSALS
         for scanner in &self.scanners {
             if let Some(proposal) = scanner.scan(tick, sensors, matrix, config) {
                 let confidence = Self::compute_confidence(proposal.raw_score, chaos_val, max_chaos_penalty);
-                if confidence >= min_threshold {
-                    approved_proposals.push((proposal, confidence));
+                let passed = confidence >= min_threshold;
+                if passed {
+                    approved_proposals.push((proposal.clone(), confidence));
+                }
+                if debug_mode {
+                    all_scanned.push((proposal, confidence, passed));
                 }
             }
         }
 
+        // TELEMETRY: In biên bản đấu thầu nếu có ít nhất 1 proposal và debug_mode được bật
+        if debug_mode && !all_scanned.is_empty() {
+            info!(
+                "⚖️ [ARBITER AUCTION] Bar: {} | Scanned Proposals: {} | Approved: {} | Chaos: {:.3} | Min Conf Thresh: {:.3} | Margin: {:.3}",
+                i, all_scanned.len(), approved_proposals.len(), chaos_val, min_threshold, conflict_margin
+            );
+            for (p, conf, passed) in &all_scanned {
+                info!(
+                    "   - [{:<8}] Scanner: {:<12} | Side: {:<5} | Raw: {:.3} | Conf: {:.3} | SL: {:?} | TP: {:?}",
+                    if *passed { "APPROVED" } else { "REJECTED" },
+                    p.scanner_id.as_str(),
+                    format!("{:?}", p.signal_type),
+                    p.raw_score,
+                    conf,
+                    p.suggested_sl,
+                    p.suggested_tp
+                );
+            }
+        }
+
         if approved_proposals.is_empty() {
+            if debug_mode && !all_scanned.is_empty() {
+                info!("   => [ARBITER RESULT] REJECTED: All proposals failed min_confidence_threshold ({:.3})", min_threshold);
+            }
             return ArbiterDecision {
                 is_approved: false,
                 final_signal: None,
@@ -163,7 +192,13 @@ impl HeliosArbiter {
         // 2. GIẢI QUYẾT XUNG ĐỘT TÍN HIỆU QUA TWO-STAGE AUCTION (O(N), COMMUTATIVE, CONFIDENCE-FIRST)
         let winner = Self::resolve_conflicts(approved_proposals, conflict_margin);
 
-        if let Some((proposal, confidence)) = winner {
+        if let Some((ref proposal, confidence)) = winner {
+            if debug_mode {
+                info!(
+                    "   => [ARBITER RESULT] ✅ APPROVED! Winner: {} ({:?}) | Final Conf: {:.3} | SL: {:?} | TP: {:?}",
+                    proposal.scanner_id.as_str(), proposal.signal_type, confidence, proposal.suggested_sl, proposal.suggested_tp
+                );
+            }
             ArbiterDecision {
                 is_approved: true,
                 final_signal: Some(proposal.signal_type),
@@ -173,6 +208,9 @@ impl HeliosArbiter {
                 final_tp: proposal.suggested_tp,
             }
         } else {
+            if debug_mode {
+                info!("   => [ARBITER RESULT] 🛡️ FLAT: Conflict deadlock between Long and Short (|diff| <= margin {:.3})", conflict_margin);
+            }
             ArbiterDecision {
                 is_approved: false,
                 final_signal: None,
