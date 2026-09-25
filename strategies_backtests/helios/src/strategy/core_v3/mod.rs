@@ -350,7 +350,11 @@ impl Strategy for HeliosStrategyV3 {
 
         if decision.is_approved {
             if let Some(signal) = decision.final_signal {
-                // 4. KIỂM TRA BỘ LỌC RE-ENTRY COOLDOWN & SAME-SIDE PRICE GUARD
+                // 4. [ARCH-COOLDOWN-SEPARATION]: Cầu Dao Cooldown VETO được độc quyền sở hữu và thực thi
+                // bởi Bot Engine (AssetActor) dựa trên PnL thực tế của tài khoản (Net PnL).
+                // Helios Strategy chuyên tâm 100% vào việc sinh tín hiệu Alpha, không tự ý chặn tín hiệu bằng PnL ước lượng.
+                // Khối code dưới đây được comment out an toàn để bảo toàn logic kiểm chứng/đối chiếu khi cần.
+                /*
                 let stop_cfg = &self.config.risk_management.stop_management;
                 let current_price = tick.closes()[i];
                 let current_atr = self.sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
@@ -372,6 +376,7 @@ impl Strategy for HeliosStrategyV3 {
                     }
                     return;
                 }
+                */
                 let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
                 
                 let size = RiskManager::calculate_size(
