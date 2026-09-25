@@ -31,104 +31,37 @@ pub struct LivePositionState {
 /// 🛡️ CHỐT CHẶN COOLDOWN TẠI ENGINE (DUAL SENTINELS - FLAW-TSL.7)
 /// Bảo vệ tài khoản chống bẫy cào lệnh (Revenge Trading) và bẫy vả 2 đầu (Alternating Whipsaw)
 /// khi lệnh thật (Paper/Live) bị cắt lỗ hoặc hòa vốn danh nghĩa.
+/// 🛡️ CẦU DAO BẢO VỆ TÀI KHOẢN (ACCOUNT CIRCUIT BREAKER - PURE TTL)
+/// Bảo vệ tài khoản chống bẫy cào lệnh trả thù (Revenge Trading) và bẫy vả 2 đầu (Whipsaw)
+/// sau chuỗi lệnh thua liên tiếp. Tự động mở khóa 100% khi hết hạn nến phạt (Pure TTL).
 #[derive(Debug, Clone, Default)]
 pub struct EngineCooldownGuard {
     pub locked_until_bar: usize,
-    pub last_exit_price: f64,
-    pub locked_side: Option<String>,
     pub consecutive_losses: usize,
-    pub last_losing_side: Option<String>,
-    pub last_losing_price: f64,
 }
 
 impl EngineCooldownGuard {
-    /// Tính toán số nến cooldown phạt lũy tiến (Exponential Backoff) với trần tối đa 60 nến (~1 giờ)
+    /// Tính toán số nến cooldown phạt lũy tiến (Exponential Backoff) với trần động = base_bars * 4
     #[inline]
-    pub fn calculate_exponential_cooldown(base_bars: usize, consecutive_losses: usize, max_cap: usize) -> usize {
+    pub fn calculate_exponential_cooldown(base_bars: usize, consecutive_losses: usize) -> usize {
         if base_bars == 0 || consecutive_losses == 0 {
             return 0;
         }
         let streak_power = (consecutive_losses.saturating_sub(1)).min(2) as u32;
         let multiplier = 1usize << streak_power; // 1, 2, hoặc 4
         let penalty = base_bars.saturating_mul(multiplier);
-        let cap = if max_cap == 0 { 60 } else { max_cap };
-        penalty.min(cap)
+        let dynamic_cap = base_bars.saturating_mul(4); // Dynamic Cap = base * 4
+        penalty.min(dynamic_cap)
     }
 
-    /// Kiểm tra xem một Action (Buy/Sell) có bị chặn bởi Cooldown hay không
-    /// Trả về `true` nếu bị VETO (chặn), `false` nếu HỢP LỆ (được phép thực thi)
-    pub fn should_veto(
-        &self,
-        is_buy: bool,
-        current_bar_idx: usize,
-        current_close: f64,
-        current_atr: f64,
-        enable_cooldown: bool,
-        breakout_atr_mult: f64,
-    ) -> bool {
+    /// Kiểm tra xem một Action (Buy/Sell) có bị chặn bởi Cầu Dao hay không
+    /// Trả về `true` nếu bị VETO (đang trong thời gian phạt), `false` nếu HỢP LỆ (hết hạn hoặc tắt cooldown)
+    #[inline]
+    pub fn should_veto(&self, current_bar_idx: usize, enable_cooldown: bool) -> bool {
         if !enable_cooldown {
             return false;
         }
-
-        // 🛡️ 1. SAME-SIDE PRICE GUARD:
-        // Nếu đang trong chuỗi thua cùng chiều: Cấm vào lệnh nếu giá hiện tại tồi tệ hơn giá vừa cắt lỗ!
-        let side_str = if is_buy { "LONG" } else { "SHORT" };
-        if self.consecutive_losses > 0 && self.last_losing_side.as_deref() == Some(side_str) {
-            let is_worse_price = if is_buy {
-                current_close < self.last_losing_price
-            } else {
-                current_close > self.last_losing_price
-            };
-            if is_worse_price {
-                return true; // Veto bắt dao rơi / cản đầu xe tăng khi giá tồi tệ hơn điểm cắt lỗ
-            }
-        }
-
-        // 🛡️ 2. UNIVERSAL BIDIRECTIONAL EXPONENTIAL COOLDOWN:
-        if current_bar_idx < self.locked_until_bar {
-            let mult = if breakout_atr_mult <= 0.0 { 1.5 } else { breakout_atr_mult };
-            let threshold = mult * current_atr;
-
-            let is_favorable_breakout = if is_buy {
-                (current_close - self.last_exit_price) >= threshold
-            } else {
-                (self.last_exit_price - current_close) >= threshold
-            };
-
-            if !is_favorable_breakout {
-                return true;
-            }
-        }
-
-        false
-    }
-}
-
-/// Tính toán True Range trung bình (ATR) 14 nến trên bộ đệm nến gần nhất phục vụ Directional Early Release
-pub fn calculate_rolling_atr(candles: &[Candle], period: usize) -> f64 {
-    let p = period.max(1);
-    if candles.len() < 2 {
-        return 1.0;
-    }
-    let start = candles.len().saturating_sub(p + 1);
-    let slice = &candles[start..];
-    if slice.len() < 2 {
-        return 1.0;
-    }
-    let mut sum_tr = 0.0;
-    let mut count = 0;
-    for idx in 1..slice.len() {
-        let h = slice[idx].high;
-        let l = slice[idx].low;
-        let prev_c = slice[idx - 1].close;
-        let tr = (h - l).max((h - prev_c).abs()).max((l - prev_c).abs());
-        sum_tr += tr;
-        count += 1;
-    }
-    if count > 0 {
-        (sum_tr / count as f64).max(1e-5)
-    } else {
-        1.0
+        current_bar_idx < self.locked_until_bar
     }
 }
 
@@ -158,6 +91,8 @@ pub struct AssetActor {
     pub cooldown_guard: EngineCooldownGuard,
     /// Bản sao cấu hình chiến lược Helios V3 để đọc động tham số DNA
     pub helios_config: HeliosConfigV3,
+    /// Ảnh chụp vị thế chu kỳ trước phục vụ Unified Lifecycle Sentinel nhận diện đóng lệnh
+    pub previous_position: Option<LivePositionState>,
 }
 
 impl AssetActor {
@@ -195,6 +130,7 @@ impl AssetActor {
             pending_dna: None,
             cooldown_guard: EngineCooldownGuard::default(),
             helios_config: HeliosConfigV3::default(),
+            previous_position: None,
         }
     }
 
@@ -232,6 +168,82 @@ impl AssetActor {
     pub fn with_max_mem_candles(mut self, max_candles: usize) -> Self {
         self.config.max_live_mem_candles = max_candles;
         self
+    }
+
+    /// 🛡️ ĐIỂM CHỐT DUY NHẤT: ĐỒNG BỘ VÀ XỬ LÝ VỊ THẾ VỪA ĐÓNG (UNIFIED LIFECYCLE SENTINEL)
+    /// Trả về true nếu vừa có vị thế đóng trong nhịp xử lý này.
+    pub fn sync_and_handle_closed_positions(&mut self, current_bar_idx: usize, current_close: f64) -> bool {
+        let current_pos = self.execution_engine.get_position();
+        let pos_closed = self.previous_position.is_some() && current_pos.is_none();
+        
+        // NGUỒN 1: Kiểm tra xem ExecutionEngine có ClosedTrade hoàn chỉnh không (PaperTrader)
+        let engine_closed_trade = self.execution_engine.take_last_closed_trade();
+
+        if pos_closed || engine_closed_trade.is_some() {
+            let stop_cfg = &self.helios_config.risk_management.stop_management;
+            
+            // Phân định thắng/thua bằng Dual-Feed (tự động trừ phí sàn, không bẫy mệnh giá):
+            let (is_net_win, pnl_display, side_str) = if let Some(ref trade) = engine_closed_trade {
+                let is_win = trade.net_pnl > 0.0;
+                let display = format!("{:+.2} USD", trade.net_pnl);
+                let side = format!("{:?}", trade.pos_type);
+                (is_win, display, side)
+            } else if let Some(ref prev) = self.previous_position {
+                let side = if prev.position_amt > 0.0 { "LONG" } else { "SHORT" };
+                let raw_ret = if prev.position_amt > 0.0 {
+                    (current_close - prev.entry_price) / prev.entry_price.max(1e-5)
+                } else {
+                    (prev.entry_price - current_close) / prev.entry_price.max(1e-5)
+                };
+                let roundtrip_fee = 2.0 * self.config.commission_rate; // ~0.08%
+                let net_ret = raw_ret - roundtrip_fee;
+                (net_ret > 0.0, format!("{:+.2}% Net", net_ret * 100.0), side.to_string())
+            } else {
+                (false, "0.00 (Unknown)".to_string(), "UNKNOWN".to_string())
+            };
+
+            if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 {
+                if is_net_win {
+                    // THẮNG THỰC TẾ: Reset streak & cooldown
+                    self.cooldown_guard.consecutive_losses = 0;
+                    self.cooldown_guard.locked_until_bar = 0;
+                    info!(
+                        "🎉 [COOLDOWN FULL RESET] Symbol: {} | Side: {} | PnL: {} > 0 -> Reset streak & Cooldown to 0!",
+                        self.symbol, side_str, pnl_display
+                    );
+                } else {
+                    // THUA HOẶC HÒA VỐN DANH NGHĨA (MẤT PHÍ): Tăng streak & phạt cooldown
+                    self.cooldown_guard.consecutive_losses = self.cooldown_guard.consecutive_losses.saturating_add(1);
+                    let effective_cooldown = EngineCooldownGuard::calculate_exponential_cooldown(
+                        stop_cfg.re_entry_cooldown_bars,
+                        self.cooldown_guard.consecutive_losses,
+                    );
+                    self.cooldown_guard.locked_until_bar = current_bar_idx + effective_cooldown;
+                    warn!(
+                        "🛑 [CIRCUIT BREAKER ACTIVATED] Symbol: {} | Side: {} | PnL: {} <= 0 | Streak: {} | Penalty: {} bars | Locked until bar_idx: {}",
+                        self.symbol, side_str, pnl_display, self.cooldown_guard.consecutive_losses, effective_cooldown, self.cooldown_guard.locked_until_bar
+                    );
+                }
+            }
+
+            // Tự động kích hoạt Pending DNA mới (nếu có)
+            if let Some(pending) = self.pending_dna.take() {
+                let fitness = pending.fitness;
+                let dna_len = pending.dna.len();
+                if self.apply_dna(&pending.dna, fitness, "Position Closed") {
+                    info!(
+                        "🔄 [PENDING DNA ACTIVATED] Symbol: {} | Position Closed -> Deployed new DNA (Fitness: {:.2}%, Dim: {})",
+                        self.symbol, fitness, dna_len
+                    );
+                }
+            }
+
+            self.previous_position = current_pos;
+            return true;
+        }
+
+        self.previous_position = current_pos;
+        false
     }
 
     pub async fn run(mut self) {
@@ -321,19 +333,9 @@ impl AssetActor {
                 // Lắng nghe trạng thái tài khoản và vị thế
                 Ok(acc_evt) = self.account_rx.recv() => {
                     self.execution_engine.on_account_event(&acc_evt).await;
-                    // Nếu sau sự kiện tài khoản vị thế đã đóng -> Kích hoạt ngay Pending DNA nếu có
-                    if self.execution_engine.get_position().is_none() {
-                        if let Some(pending) = self.pending_dna.take() {
-                            if let Some(ref mut strategy) = self.strategy {
-                                strategy.update_from_dna(&pending.dna);
-                                info!(
-                                    "🔄 [PENDING DNA ACTIVATED] Symbol: {} | Account Event (Position closed) -> Swapped in pending DNA (Fitness: {:.2}%, Dim: {})",
-                                    self.symbol, pending.fitness, pending.dna.len()
-                                );
-                            }
-                            self.helios_config.update_from_dna(&pending.dna);
-                        }
-                    }
+                    let last_close = self.asset.get_candles_vec().last().map(|c| c.close).unwrap_or(0.0);
+                    let bar_idx = self.asset.get_candles_vec().len().saturating_sub(1);
+                    self.sync_and_handle_closed_positions(bar_idx, last_close);
                 }
 
                 // Lắng nghe nến đồng bộ có Backpressure (MPSC - Walk-Forward / Fast Simulation)
@@ -545,84 +547,10 @@ impl AssetActor {
             let rolling_buffer = &full_buffer[slice_start..];
 
             // BƯỚC 3.1: Quét nến real-time cho ExecutionEngine (Paper Trader tự kiểm tra Trailing SL/TP tại đây)
-            let pos_before = self.execution_engine.get_position();
+            let prev_side_before = self.execution_engine.get_position().map(|p| if p.position_amt > 0.0 { "LONG" } else { "SHORT" }.to_string());
             let _ = self.execution_engine.on_candle_ctx(&candle, current_bar_idx).await;
+            let closed_intra_candle = self.sync_and_handle_closed_positions(current_bar_idx, current_close);
             let pos_after = self.execution_engine.get_position();
-
-            // KIỂM CHỨNG LỖ HỔNG 2: Vị thế vừa bị đóng trong chính cây nến này (SL/TP)
-            let closed_intra_candle = pos_before.is_some() && pos_after.is_none();
-            if closed_intra_candle {
-                if let Some(ref p) = pos_before {
-                    let side_str = if p.position_amt > 0.0 { "LONG" } else { "SHORT" };
-                    let exit_price = if p.position_amt > 0.0 {
-                        p.current_sl_price.unwrap_or(candle.low)
-                    } else {
-                        p.current_sl_price.unwrap_or(candle.high)
-                    };
-                    let trade_pnl = if p.position_amt > 0.0 {
-                        exit_price - p.entry_price
-                    } else {
-                        p.entry_price - exit_price
-                    };
-
-                    info!(
-                        "⚡ [INTRA-CANDLE EXIT] Symbol: {} | Position {} entry {:.2} was CLOSED during candle {} (bar_idx: {}) at est. {:.2} (Est PnL: {:+.2})",
-                        self.symbol, side_str, p.entry_price, candle.timestamp, current_bar_idx, exit_price, trade_pnl
-                    );
-
-                    // 🛡️ DUAL SENTINELS: Kích hoạt Cooldown tại Engine khi lệnh đóng lỗ hoặc hòa vốn danh nghĩa
-                    let stop_cfg = &self.helios_config.risk_management.stop_management;
-                    if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 {
-                        if trade_pnl <= 0.001 {
-                            // 1. Cập nhật chuỗi thua:
-                            if self.cooldown_guard.last_losing_side.as_deref() == Some(side_str) {
-                                self.cooldown_guard.consecutive_losses = self.cooldown_guard.consecutive_losses.saturating_add(1);
-                            } else {
-                                self.cooldown_guard.consecutive_losses = 1;
-                            }
-                            self.cooldown_guard.last_losing_side = Some(side_str.to_string());
-                            self.cooldown_guard.last_losing_price = exit_price;
-
-                            // 2. Tính Exponential Cooldown (trần 60 nến ~ 1 giờ):
-                            let effective_cooldown = EngineCooldownGuard::calculate_exponential_cooldown(
-                                stop_cfg.re_entry_cooldown_bars,
-                                self.cooldown_guard.consecutive_losses,
-                                60,
-                            );
-
-                            self.cooldown_guard.locked_until_bar = current_bar_idx + effective_cooldown;
-                            self.cooldown_guard.last_exit_price = exit_price;
-                            self.cooldown_guard.locked_side = Some(side_str.to_string());
-                            warn!(
-                                "🛑 [ENGINE EXPONENTIAL COOLDOWN ACTIVATED] Symbol: {} | Side: {} | Streak: {} | Penalty: {} bars (Cap: 60) | Exit: {:.2} | PnL: {:+.4} <= 0.001 | Locked until bar_idx: {}",
-                                self.symbol, side_str, self.cooldown_guard.consecutive_losses, effective_cooldown, exit_price, trade_pnl, self.cooldown_guard.locked_until_bar
-                            );
-                        } else {
-                            // 3. RESET TOÀN BỘ KHI CÓ LỢI NHUẬN THỰC TẾ:
-                            self.cooldown_guard.consecutive_losses = 0;
-                            self.cooldown_guard.locked_until_bar = 0;
-                            self.cooldown_guard.locked_side = None;
-                            self.cooldown_guard.last_losing_side = None;
-                            info!(
-                                "🎉 [ENGINE COOLDOWN RESET - REAL PROFIT] Symbol: {} | Side: {} | PnL: {:+.4} > 0.001 -> Reset streak & Cooldown to 0!",
-                                self.symbol, side_str, trade_pnl
-                            );
-                        }
-                    }
-                }
-
-                // 🔄 LOCK DNA ON ACTIVE TRADE: Kích hoạt ngay Pending DNA nếu vị thế vừa đóng bởi Trailing SL/TP
-                if let Some(pending) = self.pending_dna.take() {
-                    if let Some(ref mut strategy) = self.strategy {
-                        strategy.update_from_dna(&pending.dna);
-                        info!(
-                            "🔄 [PENDING DNA ACTIVATED] Symbol: {} | Position closed (Intra-candle SL/TP) -> Swapped in pending DNA (Fitness: {:.2}%, Dim: {}) for subsequent trades!",
-                            self.symbol, pending.fitness, pending.dna.len()
-                        );
-                    }
-                    self.helios_config.update_from_dna(&pending.dna);
-                }
-            }
 
             // BƯỚC 3.2: Lấy số dư vốn thực tế và trạng thái vị thế mới nhất
             let current_equity = self.execution_engine.get_equity();
@@ -647,7 +575,7 @@ impl AssetActor {
                         Action::Buy { .. } | Action::Sell { .. } => {
                             // TẦNG 1: CẤM TUYỆT ĐỐI MỞ LỆNH TRÊN CÙNG CÂY NẾN VỪA ĐÓNG VỊ THẾ (No Same-Bar Re-entry)
                             if closed_intra_candle {
-                                let prev_side = pos_before.as_ref().map(|p| if p.position_amt > 0.0 { "LONG" } else { "SHORT" }).unwrap_or("UNKNOWN");
+                                let prev_side = prev_side_before.as_deref().unwrap_or("UNKNOWN");
                                 warn!(
                                     "🛡️ [REVENGE RE-ENTRY BLOCKED] Symbol: {} | Position {} was closed intra-candle at bar_idx {} -> SUPPRESSED new order {:?} on the SAME candle!",
                                     self.symbol, prev_side, current_bar_idx, action
@@ -655,43 +583,17 @@ impl AssetActor {
                                 continue;
                             }
 
-                            // TẦNG 2: ENGINE COOLDOWN GUARD (Universal Bidirectional Cooldown + Directional Early Release)
+                            // TẦNG 2: CẦU DAO BẢO VỆ TÀI KHOẢN (Pure TTL Circuit Breaker)
                             let stop_cfg = &self.helios_config.risk_management.stop_management;
-                            let is_buy = matches!(action, Action::Buy { .. });
-                            let current_atr = calculate_rolling_atr(&full_buffer, 14);
 
-                            if self.cooldown_guard.should_veto(
-                                is_buy,
-                                current_bar_idx,
-                                current_close,
-                                current_atr,
-                                stop_cfg.enable_re_entry_cooldown,
-                                stop_cfg.cooldown_breakout_atr_mult,
-                            ) {
-                                let diff = if is_buy {
-                                    current_close - self.cooldown_guard.last_exit_price
-                                } else {
-                                    self.cooldown_guard.last_exit_price - current_close
-                                };
-                                let sig_str = if is_buy { "LONG" } else { "SHORT" };
-                                let mult = if stop_cfg.cooldown_breakout_atr_mult <= 0.0 { 1.5 } else { stop_cfg.cooldown_breakout_atr_mult };
-                                let threshold = mult * current_atr;
+                            if self.cooldown_guard.should_veto(current_bar_idx, stop_cfg.enable_re_entry_cooldown) {
+                                let remaining = self.cooldown_guard.locked_until_bar.saturating_sub(current_bar_idx);
                                 warn!(
-                                    "🛡️ [ENGINE COOLDOWN VETO] Symbol: {} | Action {} BLOCKED by Engine Bidirectional Cooldown! \
-                                    Locked until bar_idx: {} (Remaining: {} bars) | LastExit: {:.2} | Curr: {:.2} | \
-                                    FavorableDiff: {:+.2} (Required >= {:.2}*ATR = {:.2})",
-                                    self.symbol, sig_str, self.cooldown_guard.locked_until_bar,
-                                    self.cooldown_guard.locked_until_bar.saturating_sub(current_bar_idx),
-                                    self.cooldown_guard.last_exit_price, current_close, diff, mult, threshold
+                                    "🛡️ [ENGINE COOLDOWN VETO] Symbol: {} | Action {:?} BLOCKED by Circuit Breaker! \
+                                    Locked until bar_idx: {} (Remaining: {} bars) | Streak: {}",
+                                    self.symbol, action, self.cooldown_guard.locked_until_bar, remaining, self.cooldown_guard.consecutive_losses
                                 );
                                 continue;
-                            } else if stop_cfg.enable_re_entry_cooldown && current_bar_idx < self.cooldown_guard.locked_until_bar {
-                                let mult = if stop_cfg.cooldown_breakout_atr_mult <= 0.0 { 1.5 } else { stop_cfg.cooldown_breakout_atr_mult };
-                                let threshold = mult * current_atr;
-                                info!(
-                                    "🚀 [ENGINE COOLDOWN EARLY RELEASE] Symbol: {} | Action {:?} released early! Favorable breakout >= {:.2}*ATR ({:.2})",
-                                    self.symbol, action, mult, threshold
-                                );
                             }
 
                             valid_actions.push(action);
@@ -719,42 +621,8 @@ impl AssetActor {
                 self.execution_engine.on_account_event(&acc_evt).await;
             }
 
-            // 🔄 LOCK DNA ON ACTIVE TRADE: Kích hoạt Pending DNA nếu vị thế đã đóng hoàn toàn (Flat) sau khi thực thi Action
-            let pos_post_action = self.execution_engine.get_position();
-            if pos_after.is_some() && pos_post_action.is_none() {
-                // Vị thế vừa được đóng bởi Action::ClosePosition hoặc sàn
-                if let Some(ref p) = pos_after {
-                    let side_str = if p.position_amt > 0.0 { "LONG" } else { "SHORT" };
-                    let exit_price = current_close;
-                    let trade_pnl = if p.position_amt > 0.0 {
-                        exit_price - p.entry_price
-                    } else {
-                        p.entry_price - exit_price
-                    };
-                    let stop_cfg = &self.helios_config.risk_management.stop_management;
-                    if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 && trade_pnl <= 0.001 {
-                        self.cooldown_guard.locked_until_bar = current_bar_idx + stop_cfg.re_entry_cooldown_bars;
-                        self.cooldown_guard.last_exit_price = exit_price;
-                        self.cooldown_guard.locked_side = Some(side_str.to_string());
-                        warn!(
-                            "🛑 [ENGINE COOLDOWN ACTIVATED - POST ACTION] Symbol: {} | Side: {} | Entry: {:.2} | Exit: {:.2} | PnL: {:+.4} <= 0.001 | Locked until bar_idx: {} ({} bars)",
-                            self.symbol, side_str, p.entry_price, exit_price, trade_pnl, self.cooldown_guard.locked_until_bar, stop_cfg.re_entry_cooldown_bars
-                        );
-                    }
-                }
-            }
-            if pos_post_action.is_none() {
-                if let Some(pending) = self.pending_dna.take() {
-                    if let Some(ref mut strategy) = self.strategy {
-                        strategy.update_from_dna(&pending.dna);
-                        info!(
-                            "🔄 [PENDING DNA ACTIVATED] Symbol: {} | Position is now FLAT (Post-Action) -> Swapped in pending DNA (Fitness: {:.2}%, Dim: {}) for subsequent trades!",
-                            self.symbol, pending.fitness, pending.dna.len()
-                        );
-                    }
-                    self.helios_config.update_from_dna(&pending.dna);
-                }
-            }
+            // Đồng bộ hóa trạng thái vị thế sau khi thực thi Action (Strategy ClosePosition / Sàn)
+            self.sync_and_handle_closed_positions(current_bar_idx, current_close);
         }
     }
 
@@ -778,131 +646,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_calculate_rolling_atr_basic() {
-        let mut candles = Vec::new();
-        for i in 0..20 {
-            candles.push(Candle {
-                symbol: "BTCUSDT".to_string(),
-                timestamp: i * 60_000,
-                open: 100.0,
-                high: 110.0,
-                low: 95.0,
-                close: 105.0,
-                volume: 10.0,
-            });
-        }
-        let atr = calculate_rolling_atr(&candles, 14);
-        assert!((atr - 15.0).abs() < 1e-6, "ATR phải xấp xỉ 15.0, thực tế: {}", atr);
+    fn test_calculate_exponential_cooldown_dynamic_cap() {
+        // Base bars = 15
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 0), 0);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 1), 15);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 2), 30);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 3), 60);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 4), 60); // Cap at 15 * 4 = 60
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 10), 60);
+
+        // Base bars = 25
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 1), 25);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 2), 50);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 3), 100);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 5), 100); // Cap at 25 * 4 = 100
+
+        // Edge case: base_bars = 0
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(0, 5), 0);
     }
 
     #[test]
-    fn test_engine_cooldown_guard_blocks_both_sides_in_chop() {
+    fn test_should_veto_pure_ttl() {
         let guard = EngineCooldownGuard {
-            locked_until_bar: 115,
-            last_exit_price: 2000.0,
-            locked_side: Some("LONG".to_string()),
-            ..Default::default()
+            locked_until_bar: 100,
+            consecutive_losses: 2,
         };
 
-        let current_bar = 105; // Còn 10 bars trong cooldown
-        let current_atr = 10.0;
-        let mult = 1.5; // threshold = 15.0
-
-        // 1. Long trong vùng chop: giá 2005 (diff = +5 < 15) -> VETO!
+        // 1. Đang trong thời gian phạt (current_bar < locked_until_bar): Bị Veto
         assert!(
-            guard.should_veto(true, current_bar, 2005.0, current_atr, true, mult),
-            "Long trong vùng biên độ nhỏ phải bị Veto!"
+            guard.should_veto(95, true),
+            "Bar 95 < 100 phải bị VETO!"
         );
 
-        // 2. Short trong vùng chop: giá 1995 (diff = +5 < 15) -> VETO!
+        // 2. Chạm đúng mốc hết hạn (current_bar == locked_until_bar): Mở khóa
         assert!(
-            guard.should_veto(false, current_bar, 1995.0, current_atr, true, mult),
-            "Short trong vùng biên độ nhỏ phải bị Veto!"
-        );
-    }
-
-    #[test]
-    fn test_engine_cooldown_guard_directional_early_release() {
-        let guard = EngineCooldownGuard {
-            locked_until_bar: 115,
-            last_exit_price: 2000.0,
-            locked_side: Some("LONG".to_string()),
-            ..Default::default()
-        };
-
-        let current_bar = 105;
-        let current_atr = 10.0;
-        let mult = 1.5; // threshold = 15.0
-
-        // 1. Long bứt phá mạnh: giá 2020.0 (diff = +20 >= 15) -> EARLY RELEASE (should_veto = false)!
-        assert!(
-            !guard.should_veto(true, current_bar, 2020.0, current_atr, true, mult),
-            "Long bứt phá >= 1.5 ATR phải được mở khóa sớm!"
+            !guard.should_veto(100, true),
+            "Bar 100 >= 100 phải được MỞ KHÓA!"
         );
 
-        // 2. Short sập gãy mạnh: giá 1980.0 (diff = 2000 - 1980 = 20 >= 15) -> EARLY RELEASE!
+        // 3. Sau thời gian phạt (current_bar > locked_until_bar): Mở khóa
         assert!(
-            !guard.should_veto(false, current_bar, 1980.0, current_atr, true, mult),
-            "Short sập gãy >= 1.5 ATR phải được mở khóa sớm!"
+            !guard.should_veto(105, true),
+            "Bar 105 > 100 phải được MỞ KHÓA!"
         );
 
-        // 3. Falling knife: Giá sập 1980.0 nhưng lại ra tín hiệu BUY -> BỊ VETO (diff = 1980 - 2000 = -20 < 15)!
+        // 4. Khi enable_cooldown = false: Luôn mở khóa
         assert!(
-            guard.should_veto(true, current_bar, 1980.0, current_atr, true, mult),
-            "Long bắt dao rơi khi giá sập sâu phải bị VETO!"
-        );
-
-        // 4. Short cản tàu: Giá tăng 2020.0 nhưng lại ra tín hiệu SELL -> BỊ VETO (diff = 2000 - 2020 = -20 < 15)!
-        assert!(
-            guard.should_veto(false, current_bar, 2020.0, current_atr, true, mult),
-            "Short cản tàu khi giá tăng mạnh phải bị VETO!"
+            !guard.should_veto(95, false),
+            "Khi enable_cooldown = false, không bao giờ được VETO!"
         );
     }
 
     #[test]
-    fn test_engine_cooldown_guard_expired_and_disabled() {
+    fn test_pure_ttl_unlock_no_deadlock() {
+        // Mô phỏng VULN-AA-09: kiểm tra tính bảo đảm không bị deadlock vĩnh viễn
         let guard = EngineCooldownGuard {
-            locked_until_bar: 115,
-            last_exit_price: 2000.0,
-            locked_side: Some("LONG".to_string()),
-            ..Default::default()
+            locked_until_bar: 50,
+            consecutive_losses: 3,
         };
 
-        // 1. Hết hạn cooldown (bar 116 >= 115): Cho phép mở lệnh kể cả biến động nhỏ
-        assert!(
-            !guard.should_veto(true, 116, 2002.0, 10.0, true, 1.5),
-            "Khi hết thời gian cooldown, phải cho phép mở lệnh!"
-        );
-
-        // 2. Cooldown bị tắt (enable_cooldown = false)
-        assert!(
-            !guard.should_veto(true, 105, 2002.0, 10.0, false, 1.5),
-            "Khi enable_cooldown = false, không được Veto!"
-        );
-    }
-
-    #[test]
-    fn test_engine_cooldown_same_side_price_guard() {
-        // Vừa cắt lỗ Long tại 2000.0, streak = 1
-        let guard = EngineCooldownGuard {
-            locked_until_bar: 100, // Đã qua thời gian khóa bar
-            last_exit_price: 2000.0,
-            locked_side: Some("LONG".to_string()),
-            consecutive_losses: 1,
-            last_losing_side: Some("LONG".to_string()),
-            last_losing_price: 2000.0,
-        };
-
-        // Long ở giá thấp hơn giá cắt lỗ (1990.0 < 2000.0) -> PHẢI BỊ VETO bởi Same-Side Price Guard
-        assert!(
-            guard.should_veto(true, 105, 1990.0, 10.0, true, 1.5),
-            "Long ở giá thấp hơn giá cắt lỗ trong chuỗi thua PHẢI BỊ VETO!"
-        );
-
-        // Long ở giá hồi phục cao hơn (2005.0 > 2000.0) -> CHO PHÉP
-        assert!(
-            !guard.should_veto(true, 105, 2005.0, 10.0, true, 1.5),
-            "Long ở giá hồi phục cao hơn được phép vào"
-        );
+        // Qua 50 bars, bảo đảm 100% được mở khóa bất kể giá thị trường
+        assert!(!guard.should_veto(50, true));
+        assert!(!guard.should_veto(51, true));
     }
 }

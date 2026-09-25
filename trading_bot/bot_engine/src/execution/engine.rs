@@ -55,6 +55,11 @@ pub trait ExecutionEngine: Send + Sync {
 
     /// Báo cáo tổng kết toàn diện 100% lịch sử Paper Trading (No-op cho Live)
     fn log_final_summary(&self, _current_price: f64) {}
+
+    /// Rút thông tin lệnh vừa đóng gần nhất (nếu có) để phục vụ Cầu Dao và hạch toán PnL
+    fn take_last_closed_trade(&mut self) -> Option<crate::execution::paper_trader::PaperTradeRecord> {
+        None
+    }
 }
 
 /// Thành phần cốt lõi dùng chung (ExecutionCore) cho các Engine

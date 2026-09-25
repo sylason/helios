@@ -83,6 +83,7 @@ pub struct PaperTrader {
     pub winning_trades: usize,         // Số giao dịch thắng tích lũy từ đầu
     pub losing_trades: usize,          // Số giao dịch thua tích lũy từ đầu
     pub closed_trades: Vec<PaperTradeRecord>,
+    pub last_closed_trade: Option<PaperTradeRecord>, // Lệnh vừa đóng gần nhất phục vụ Cầu Dao và hạch toán
     pub highest_price_seen: f64,       // Giá cao nhất đạt được trong vòng đời vị thế (MFE/MAE tracking)
     pub lowest_price_seen: f64,        // Giá thấp nhất đạt được trong vòng đời vị thế (MFE/MAE tracking)
     pub last_logged_trade_idx: AtomicUsize, // Vị trí trade cuối cùng đã log để chống lặp quadratic
@@ -110,6 +111,7 @@ impl PaperTrader {
             winning_trades: 0,
             losing_trades: 0,
             closed_trades: Vec::new(),
+            last_closed_trade: None,
             highest_price_seen: 0.0,
             lowest_price_seen: 0.0,
             last_logged_trade_idx: AtomicUsize::new(0),
@@ -259,7 +261,7 @@ impl PaperTrader {
             PositionType::None => (0.0, 0.0),
         };
 
-        self.closed_trades.push(PaperTradeRecord {
+        let trade_record = PaperTradeRecord {
             id: self.total_trades,
             pos_type: old_position.clone(),
             entry_price: self.entry_price,
@@ -274,7 +276,10 @@ impl PaperTrader {
             equity_after: self.equity,
             mfe_pct,
             mae_pct,
-        });
+        };
+
+        self.last_closed_trade = Some(trade_record.clone());
+        self.closed_trades.push(trade_record);
 
         let (icon, side_str) = match old_position {
             PositionType::Long => ("🔴 [CLOSE LONG] ", "LONG"),
@@ -303,6 +308,11 @@ impl PaperTrader {
         self.lowest_price_seen = 0.0;
 
         self.broadcast_account_events(account_tx);
+    }
+
+    /// Rút thông tin lệnh vừa đóng gần nhất (drain pattern)
+    pub fn take_last_closed_trade(&mut self) -> Option<PaperTradeRecord> {
+        self.last_closed_trade.take()
     }
 
     /// In ra bảng log tóm tắt các lệnh MỚI đóng kể từ lần in trước (Chống quadratic log spam)
@@ -995,6 +1005,40 @@ mod tests {
         assert_eq!(trader.last_logged_trade_idx.load(Ordering::SeqCst), 1);
         trader.log_all_trades(2200.0);
         assert_eq!(trader.last_logged_trade_idx.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_take_last_closed_trade_drain_semantics() {
+        use ferro_trade::broker::policies::RiskPolicy;
+        let mut trader = PaperTrader::new("BTCUSDT".to_string(), 1000.0, 0.0);
+
+        // Ban đầu chưa có trade đóng nào
+        assert!(trader.take_last_closed_trade().is_none());
+
+        // Mở Long tại 50000, SL 49000
+        let policy = Some(RiskPolicy::FixedPrice { sl_price: Some(49000.0), tp_price: None });
+        trader.process_action(
+            Action::Buy { size: 0.1, limit: None, stop: None, policy, tag: Some("TEST".to_string()) },
+            50000.0,
+            1600000000,
+            10,
+            None
+        );
+
+        // Đóng vị thế tại 51000
+        trader.close_position(51000.0, ExitReason::StrategySignalClose, 1600000060, 11, None);
+
+        // Lần gọi 1: Rút được trade record
+        let trade_opt = trader.take_last_closed_trade();
+        assert!(trade_opt.is_some(), "Phải lấy được trade vừa đóng");
+        let trade = trade_opt.unwrap();
+        assert_eq!(trade.pos_type, PositionType::Long);
+        assert_eq!(trade.entry_price, 50000.0);
+        assert_eq!(trade.exit_price, 51000.0);
+        assert!(trade.net_pnl > 0.0, "Trade lãi ròng");
+
+        // Lần gọi 2: Đã bị drain (tiêu thụ) nên trả về None
+        assert!(trader.take_last_closed_trade().is_none(), "Lần gọi thứ 2 phải trả về None để chống bẫy kích hoạt 2 lần");
     }
 }
 

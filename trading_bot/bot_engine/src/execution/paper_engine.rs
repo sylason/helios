@@ -144,5 +144,9 @@ impl ExecutionEngine for PaperExecutionEngine {
     fn log_final_summary(&self, current_price: f64) {
         self.paper_trader.log_final_summary(current_price);
     }
+
+    fn take_last_closed_trade(&mut self) -> Option<crate::execution::paper_trader::PaperTradeRecord> {
+        self.paper_trader.take_last_closed_trade()
+    }
 }
 
