@@ -10,7 +10,7 @@
 
 | Thứ Tự | Mã Task | Tên Công Việc | Mức Độ | Trạng Thái | File Liên Quan |
 | :---: | :--- | :--- | :---: | :---: | :--- |
-| **1** | `TASK-MAT-01` | Sửa lỗi nghịch đảo độ nhạy `vol_z_sensitivity` trong `flow_axis` | **CRITICAL** | 🔴 Chưa xử lý | `core_v3/matrix.rs:105–114` |
+| **1** | `TASK-MAT-01` | Tái cấu trúc trục volume: Xóa `flow_axis` & gen `vol_z_sensitivity` (Occam) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs`, `scanners/momentum_ignition.rs` |
 | **2** | `TASK-MAT-02` | Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50 | **CRITICAL** | 🔴 Chưa xử lý | `core_v3/matrix.rs:60–68, 83` |
 | **3** | `TASK-MAT-03` | Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:71–81` |
 | **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone `Vec<f64>` thừa thãi, chuyển sang Arc aliasing | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:102, 126, 128` |
@@ -25,8 +25,14 @@
 
 ## 📋 CHI TIẾT CÁC ĐẦU VIỆC CẦN THỰC HIỆN
 
-### 🔴 TASK-MAT-01: Sửa lỗi nghịch đảo độ nhạy `vol_z_sensitivity` trong `flow_axis`
+### 🟢 TASK-MAT-01: Tái Cấu Trúc Trục Khối Lượng: Xóa Bỏ Hộp Đen `flow_axis` / `volume_force` (Occam's Scalpel) - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-01` (Critical).
+- **Kết quả thực hiện:**
+  - [x] Đã xóa bỏ hoàn toàn trường `flow_axis` và clone `volume_force` khỏi `MarketMatrixV3`, loại bỏ 2 vector cấp phát rác trên heap.
+  - [x] Đã bỏ macro `#[dna(...)]` trên `vol_z_sensitivity` trong `MatrixConfig`, đưa số chiều DNA về 103 chuẩn xác.
+  - [x] Chuyển `MomentumIgnition` sang đọc trực tiếp `sensors.vol_z_score` qua hàm chuẩn hóa `sat_unbounded(raw_vol_z, vol_thresh)`.
+  - [x] Chuyển `RangeOscillator` sang đọc trực tiếp `sensors.vol_z_score` quy đổi an toàn qua `sat_unbounded(raw_vol_z, 2.0)`.
+  - [x] Kiểm thử tự động: 100% tests của `helios` (65/65 tests) và `bot_engine` (39/39 tests) đã PASS.
 - **Hiện trạng:**
   - Tại `core_v3/matrix.rs:106`, mã nguồn gọi:
     ```rust
@@ -34,15 +40,33 @@
     ```
   - Do hàm `tanh_scale` chia dữ liệu cho tham số độ nhạy (`v / sensitivity`), việc truyền `1.0 / vol_z_sens` khiến công thức trở thành $\tanh(v \times \text{vol\_z\_sens})$.
   - Hậu quả: Đảo ngược $180^\circ$ ý đồ quant. Khi tăng `vol_z_sensitivity` để giảm độ nhạy thì hệ thống lại biến thành siêu nhạy, bão hòa kịch trần $\approx 1.0$ ngay cả với biến động khối lượng vi mô.
-  - Ngoài ra, mã nguồn cộng gộp cảm tính $50\%$ MFI vào `flow_axis`, vi phạm triệt để nguyên tắc trực giao độc lập của bản Đặc tả Kỹ thuật.
-- **Hành động cần làm:**
-  1. Đổi tham số truyền vào: `tanh_scale(&sensors.vol_z_score, vol_z_sens)`.
-  2. Bỏ việc cộng gộp MFI vào `flow_axis`:
-     $$\text{flow\_axis}[i] = \tanh\left(\frac{|\text{vol\_z\_score}[i]|}{\text{vol\_z\_sens}}\right)$$
-  3. Để MFI độc lập trong `sensors.mfi` cho các Scanner cần dòng tiền tự truy vấn.
+  - Ngoài ra, mã nguồn cộng gộp cảm tính $50\%$ MFI vào `flow_axis`, tạo ra sàn đáy ảo $0.25$ ngay cả khi khối lượng bằng 0, làm tê liệt `RangeOscillator`.
+  - **Phát hiện kiểm toán chuyên sâu:** Trong toàn bộ hệ thống, chỉ có 2 scanner đọc `flow_axis` / `volume_force` (`MomentumIgnition` và `RangeOscillator`), trong khi `Absorption` (scanner cần volume nhất) lại đọc trực tiếp `sensors.vol_z_score`. Việc duy trì `MatrixConfig.vol_z_sensitivity` tạo ra bẫy trùng lặp siêu tham số (Collinearity) với `mom_cfg.vol_z_threshold`.
+- **Phương án Giải quyết Tối ưu Nhất (Occam's Scalpel - Chém Tận Gốc):**
+  1. **Xóa bỏ hoàn toàn** trường `flow_axis` và bản sao nhân bản `volume_force` khỏi struct `MarketMatrixV3`.
+  2. **Xóa bỏ macro `#[dna(...)]`** trên trường `vol_z_sensitivity` trong `MatrixConfig` (cắt giảm 1 chiều DNA thừa thãi).
+  3. **Tại `momentum_ignition.rs`:** Đọc trực tiếp `sensors.vol_z_score`:
+     ```rust
+     let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
+     let f_vol = sat_unbounded(raw_vol_z, mom_cfg.vol_z_threshold);
+     ```
+     *(Dải DNA của `mom_cfg.vol_z_threshold` là `[1.0, 3.5]` vốn dĩ được thiết kế nguyên bản cho Z-Score!)*
+  4. **Tại `range_osc.rs`:** Đọc trực tiếp `sensors.vol_z_score` kèm chuẩn hóa an toàn:
+     ```rust
+     let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
+     let vol_norm = sat_unbounded(raw_vol_z, 2.0);
+     if vol_norm > range_cfg.volume_max_threshold { return None; }
+     ```
+     *(Lưu ý: RangeOsc và Anomaly hiện tại đang tắt gen DNA trong `config.rs`, nhưng vẫn cần xử lý phòng thủ để không bị Unit Mismatch khi bật lại).*
+- **Phân tích 4 Edge Cases Chí Tử:**
+  - *Edge Case 1 (DNA Length Shift):* Độ dài DNA giảm 1 (từ 104 -> 103). Cần dọn sạch DB SQLite cũ để tránh lỗi Deserialize (đã có cơ chế Storage Cleanup tự động).
+  - *Edge Case 2 (Z-Score âm trong Momentum):* Khi $Z \le 0.0$, `sat_unbounded(val, thresh)` trả về $0.0$ ngay lập tức vì `val <= 0.0` (khối lượng yếu thì điểm xung lực = 0, hoàn hảo).
+  - *Edge Case 3 (Unit Mismatch trong RangeOsc):* `volume_max_threshold` có dải DNA $[0.01, 0.99]$. Không được so sánh trực tiếp với $Z$-Score thô mà phải qua `sat_unbounded(raw_vol_z, 2.0)` để bảo toàn dải phần trăm.
+  - *Edge Case 4 (Gãy Unit Tests trong matrix.rs):* Cập nhật các bài test cũ đang assert `flow_axis`.
 - **Tiêu chuẩn nghiệm thu (Acceptance Criteria):**
-  - Viết unit test xác nhận khi `vol_z_score = 1.5` và `vol_z_sens = 1.5`, giá trị $\tanh(1.5 / 1.5) = \tanh(1.0) \approx 0.76159$.
-  - Khi `vol_z_sens` tăng lên $3.0$, giá trị giảm xuống $\tanh(1.5 / 3.0) = \tanh(0.5) \approx 0.46211$ (đúng chiều co giãn).
+  - Struct `MarketMatrixV3` không còn chứa 2 vector cấp phát rác `flow_axis` và `volume_force`.
+  - `MomentumIgnition` nhận điểm bùng nổ khối lượng chuẩn xác từ `sensors.vol_z_score`.
+  - Tất cả các unit test và integration tests trong `helios` pass 100%.
 
 ---
 
@@ -155,19 +179,32 @@
 
 ---
 
-### 🟡 TASK-MAT-07: Giữ lại `entropy` cho `chaos_index`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback`
+### 🟡 TASK-MAT-07: Đại Phẫu Rác Thừa Matrix: Xóa Bỏ 4 Chỉ Báo Ma, 3 Bản Sao Clone và 3 Gen DNA Ma
 - **Mã lỗi liên đới:** `FLAW-MAT-07` (Medium).
-- **Hiện trạng:**
-  - `matrix.liquidity`, `matrix.chaos` được tính toán bằng các thuật toán Fenwick Tree tốn kém nhưng không có module nào trong `core_v3` sử dụng.
-  - `matrix.entropy` (Kaufman Efficiency Ratio) trước đây bị bỏ xó tại dòng 122, nhưng nay là **chỉ số sống còn để phân biệt sóng định hướng với bão Whipsaw** trong `TASK-MAT-10`.
-  - `MatrixConfig.volume_lookback` có gen DNA chiếm 31 nấc tìm kiếm nhưng mã nguồn `matrix.rs` không hề đọc giá trị này.
+- **Hiện trạng kiểm toán toàn diện (11/17 trường thừa thãi & 3 gen DNA ma):**
+  - **4 Chỉ báo ma (Zombie Indicators - 0 ai đọc trong toàn bộ chiến lược):**
+    1. `trend_axis`: Map từ ADX nhưng không có scanner nào đọc (chỉ xuất hiện trong test nội bộ).
+    2. `liquidity`: **CỰC KỲ LÃNG PHÍ**: Chạy cây Fenwick `rolling_percentile` trên MFI mỗi nến nhưng vứt xó!
+    3. `chaos`: Tính từ `natr / 100.0`, hoàn toàn vô dụng.
+    4. `price_z_score`: Tính bằng hàm `tanh_scale` nặng nề nhưng không module nào sử dụng.
+  - **3 Bản sao nhân bản (Duplicate Clones - Tốn RAM heap allocations vô ích):**
+    1. `vol_axis`: Deep clone 100% từ `squeeze_intensity` (chỉ dùng duy nhất ở `risk.rs:320`).
+    2. `trend_dir`: Deep clone 100% từ `kama_slope_atr`.
+    3. `volume_force`: Deep clone 100% từ `flow_axis`.
+    *(Kèm trường `kama_slope_adj` trên matrix: Passthrough từ sensors nhưng các scanner toàn đọc thẳng từ `sensors`, không ai đọc từ `matrix`).*
+  - **3 Gen DNA Ma (Phantom Genes) trong `MatrixConfig` (`core_v3/config.rs`):**
+    1. `volume_lookback`: Khai báo gen 31 nấc tìm kiếm, nhưng trong toàn bộ `matrix.rs` **không có chữ `volume_lookback` nào**!
+    2. `momentum_lookback`: Dùng tính `liquidity`, mà `liquidity` là Zombie $\implies$ GA tối ưu vô nghĩa!
+    3. `adx_trend_threshold`: Dùng tính `trend_axis`, mà `trend_axis` là Zombie $\implies$ GA tối ưu vô nghĩa!
 - **Hành động cần làm:**
-  1. Giữ lại phép tính `entropy` trong `from_sensors` để phục vụ `TASK-MAT-10`.
-  2. Xóa bỏ hoặc vô hiệu hóa các dòng tính toán `liquidity`, `chaos` không sử dụng.
-  3. Xóa macro `#[dna(...)]` trên trường `volume_lookback` trong `core_v3/config.rs`.
+  1. Giữ lại phép tính `entropy` và `chaos_ratio` trong `from_sensors` để phục vụ `TASK-MAT-10` (nhưng cân nhắc giữ cục bộ thay vì public clone nếu có thể).
+  2. Xóa bỏ hoặc vô hiệu hóa các dòng tính toán 4 chỉ báo ma `liquidity`, `chaos`, `price_z_score`, `trend_axis`.
+  3. Xóa các bản clone thừa `vol_axis`, `trend_dir`, `volume_force`, thay bằng dùng trực tiếp `squeeze_intensity` và `kama_slope_atr`.
+  4. Xóa macro `#[dna(...)]` trên 3 gen ma `volume_lookback`, `momentum_lookback`, `adx_trend_threshold` trong `core_v3/config.rs` (giúp GA giảm thêm 3 chiều tìm kiếm vô ích).
 - **Tiêu chuẩn nghiệm thu:**
-  - Tổng số gen DNA của hệ thống giảm thêm 1 gen ma.
-  - Phép tính `entropy` được tái sử dụng thành công trong `chaos_index`.
+  - Tổng số gen DNA của hệ thống giảm thêm 3 gen ma vô tác dụng.
+  - Triệt tiêu hoàn toàn các phép tính Cây Fenwick và Tanh chạy vô ích cho các trường rác.
+  - Bộ nhớ RAM heap allocations của Matrix giảm tối đa.
 
 ---
 

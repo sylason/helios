@@ -753,8 +753,8 @@ mod tests {
         // 🎯 KIỂM CHỨNG FLAW-3.2:
         // Price Z-Score phải bằng 0.0 (giá phẳng)
         assert_eq!(matrix.price_z_score[len - 1], 0.0, "Price Z-Score phải phản ánh giá phẳng = 0.0");
-        // Volume Force phải phản ứng với Vol Z-Score = 3.5 và MFI = 80 -> vf phải cao > 0.60
-        assert!(matrix.volume_force[len - 1] > 0.60, "Volume Force phải phát hiện bùng nổ thanh khoản!");
+        // Volume Z-Score phải phản ứng độc lập với Vol Z-Score = 3.5 -> phát hiện bùng nổ thanh khoản
+        assert!(sensors.vol_z_score[len - 1] > 3.0, "Vol Z-Score phải độc lập phản ánh bùng nổ thanh khoản!");
     }
 
     #[test]
@@ -1179,7 +1179,7 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 104, "DNA_WIDTH phải là chính xác 104 chiều sau khi thêm max_chaos_penalty (+1) và chuyển min_activation_score của 4 Scanner sang sàn kỹ thuật (-4)!");
+        assert_eq!(width, 103, "DNA_WIDTH phải là chính xác 103 chiều sau khi loại bỏ gen ma vol_z_sensitivity (-1) theo TASK-MAT-01!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
@@ -1236,7 +1236,7 @@ mod tests {
         assert!(has_mom_w_vol, "defs phải chứa tactical_sniper.momentum.w_volume!");
         assert!(has_matrix_adx, "defs phải chứa matrix.adx_trend_threshold!");
         assert!(has_matrix_kama_scale, "defs phải chứa matrix.kama_slope_scale_atr!");
-        assert!(has_matrix_vol_z, "defs phải chứa matrix.vol_z_sensitivity!");
+        assert!(!has_matrix_vol_z, "defs KHÔNG được chứa matrix.vol_z_sensitivity (đã loại bỏ theo TASK-MAT-01)!");
         assert!(!has_phantom_comp, "defs KHÔNG được chứa gen ma min_confidence_compression!");
         assert!(!has_phantom_veto, "defs KHÔNG được chứa gen ma min_multiplier_veto!");
         assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
@@ -1381,8 +1381,7 @@ mod tests {
         // 2. Kiểm tra MomentumIgnitionScanner
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.closes = std::sync::Arc::new(vec![2025.0; len]); // Phá vỡ BB Upper (2020.0)
-        let mut matrix_mom = MarketMatrixV3::from_sensors(&config, &sensors);
-        matrix_mom.volume_force = std::sync::Arc::new(vec![1.5; len]);
+        let matrix_mom = MarketMatrixV3::from_sensors(&config, &sensors);
 
         let raw_cache_mom = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
@@ -1420,7 +1419,6 @@ mod tests {
         let mut matrix_range = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix_range.trend_strength = std::sync::Arc::new(vec![0.2; len]);
         matrix_range.bb_width_norm = std::sync::Arc::new(vec![0.04; len]);
-        matrix_range.volume_force = std::sync::Arc::new(vec![0.2; len]);
         matrix_range.trend_dir = std::sync::Arc::new(vec![0.0; len]);
 
         let raw_cache_range = RawDataCache {
@@ -1738,7 +1736,6 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
-        matrix.volume_force = std::sync::Arc::new(vec![0.5; len]);
         matrix.trend_strength = std::sync::Arc::new(vec![0.20; len]);
         matrix.trend_dir = std::sync::Arc::new(vec![-0.05; len]);
         matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
@@ -1810,7 +1807,6 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
-        matrix.volume_force = std::sync::Arc::new(vec![0.5; len]);
         matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
         matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
         matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
@@ -1887,7 +1883,6 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
-        matrix.volume_force = std::sync::Arc::new(vec![0.5; len]);
         matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
         matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
         matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
@@ -2276,8 +2271,7 @@ mod tests {
         sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
         sensors.kama_slope_adj = std::sync::Arc::new(vec![0.10; len]);
 
-        let mut matrix = MarketMatrixV3::default();
-        matrix.volume_force = std::sync::Arc::new(vec![1.5; len]);
+        let matrix = MarketMatrixV3::default();
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "Nến Shooting Star có CLV âm (-0.73) PHẢI bị từ chối bởi min_clv guard!");
@@ -2368,8 +2362,7 @@ mod tests {
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
         sensors.kama_slope_adj = std::sync::Arc::new(vec![-0.25; len]); // Ngược trend mạnh
 
-        let mut matrix = MarketMatrixV3::default();
-        matrix.volume_force = std::sync::Arc::new(vec![1.5; len]);
+        let matrix = MarketMatrixV3::default();
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "Bùng nổ Long khi macro trend dốc xuống quá ngưỡng adverse_slope (0.25 > 0.15) PHẢI bị VETO!");
@@ -2419,8 +2412,7 @@ mod tests {
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
         sensors.kama_slope_adj = std::sync::Arc::new(vec![0.10; len]); // Thuận trend
 
-        let mut matrix = MarketMatrixV3::default();
-        matrix.volume_force = std::sync::Arc::new(vec![1.2; len]);
+        let matrix = MarketMatrixV3::default();
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "Nến bùng nổ hợp lệ PHẢI được duyệt Proposal Long!");

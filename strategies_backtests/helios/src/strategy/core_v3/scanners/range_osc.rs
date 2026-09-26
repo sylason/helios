@@ -8,7 +8,7 @@
 //! ## 2. Logic Hoạt Động & Hệ Thống Phòng Ngự 5 Tầng:
 //! - **Chỉ báo sử dụng:**
 //!   + Dải Bollinger Bands (`bb_upper`, `bb_middle`, `bb_lower`, `bb_width_norm`): Xác định biên độ kênh dao động.
-//!   + `volume_force`: Phát hiện dòng tiền tin tức bất thường.
+//!   + Volume Force qua `sensors.vol_z_score`: Phát hiện dòng tiền tin tức bất thường.
 //!   + `trend_strength` & `bb_middle_slope_adj`: Nhận diện độ dốc và xung lực xu hướng để tránh cản tàu.
 //!   + Stochastic Range (`stoch_range_k`, `stoch_range_d`): Đo đạc tín hiệu quá mua / quá bán và điểm giao cắt đảo chiều.
 //! - **Các Chốt Chặn Phòng Ngự:**
@@ -25,6 +25,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use crate::strategy::core_v3::normalization::sat_unbounded;
 
 pub struct RangeOscScanner;
 
@@ -50,7 +51,9 @@ impl TacticalScanner for RangeOscScanner {
         let bb_m = sensors.bb_middle[i];
         let bb_l = sensors.bb_lower[i];
         let bb_w_norm = matrix.bb_width_norm[i];
-        let vol_force = matrix.volume_force[i];
+        // 🚀 TASK-MAT-01: Chuẩn hóa Volume Z-Score về thang đo [0.0, 1.0] tương thích với range_cfg.volume_max_threshold
+        let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
+        let vol_force = sat_unbounded(raw_vol_z, 2.0);
         
         if bb_u.is_nan() || bb_m.is_nan() || bb_l.is_nan() || close <= 0.0 {
             return None;

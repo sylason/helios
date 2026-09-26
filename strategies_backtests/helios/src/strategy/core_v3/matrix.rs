@@ -14,7 +14,6 @@ pub struct MarketMatrixV3 {
     pub kama_slope_atr: Arc<Vec<f64>>,   // Độ dốc KAMA chuẩn hóa theo ATR phi thứ nguyên [-1.0, 1.0]
     pub trend_axis: Arc<Vec<f64>>,       // Trục xu hướng ADX chuẩn hóa theo adx_trend_threshold [0.0, 1.0]
     pub vol_axis: Arc<Vec<f64>>,         // Trục nén/bung biến động (Squeeze / Expansion) [0.0, 1.0]
-    pub flow_axis: Arc<Vec<f64>>,        // Trục dòng tiền Z-Score Volume chuẩn hóa theo vol_z_sensitivity [0.0, 1.0]
     pub chaos_index: Arc<Vec<f64>>,      // Chỉ số bão hỗn loạn Whipsaw [0.0, 1.0]
 
     // --- 🧭 Hướng & Sức mạnh (Directional) ---
@@ -29,7 +28,6 @@ pub struct MarketMatrixV3 {
     pub chaos_ratio: Arc<Vec<f64>>,       // NATR / SMA(NATR)
     pub entropy: Arc<Vec<f64>>,           // 0.0 to 1.0 (Efficiency Ratio)
     pub liquidity: Arc<Vec<f64>>,         // 0.0 to 1.0 (MFI Scaled)
-    pub volume_force: Arc<Vec<f64>>,      // 0.0 to 1.0 (Quant Volume Force: Z-Score + MFI)
     pub bb_width_norm: Arc<Vec<f64>>,     // (Upper - Lower) / Middle
     
     // --- 🌊 Động lượng (Velocity) ---
@@ -101,19 +99,7 @@ impl MarketMatrixV3 {
         // 🚀 3. TRỤC BIẾN ĐỘNG / NÉN SQUEEZE (vol_axis)
         let vol_axis = squeeze_intensity.clone();
 
-        // 🚀 4. TRỤC DÒNG TIỀN / KHỐI LƯỢNG THEO vol_z_sensitivity (flow_axis)
-        let vol_z_sens = if config.matrix.vol_z_sensitivity <= 0.0 { 1.50 } else { config.matrix.vol_z_sensitivity };
-        let vol_z_scale = normalization::tanh_scale(&sensors.vol_z_score, 1.0 / vol_z_sens);
-        let mut flow_axis = Vec::with_capacity(len);
-        for i in 0..len {
-            let mfi_val = sensors.mfi.get(i).copied().unwrap_or(50.0);
-            let mfi_norm = (mfi_val / 100.0).max(0.0).min(1.0);
-            let z_val = vol_z_scale.get(i).copied().unwrap_or(0.0);
-            let vf = 0.5 * (z_val.abs()) + 0.5 * mfi_norm;
-            flow_axis.push(vf.max(0.0).min(1.0));
-        }
-
-        // 🚀 5. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index)
+        // 🚀 4. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index)
         // chaos_index = c_r * (1.0 - entropy)
         // Trong đó:
         // - c_r: Chaos Ratio (tỷ lệ biến động rối loạn, từ sensors.chaos_ratio)
@@ -139,13 +125,10 @@ impl MarketMatrixV3 {
         
         let trend_dir = kama_slope_atr.clone();
 
-        let volume_force = flow_axis.clone();
-
         Self {
             kama_slope_atr: Arc::new(kama_slope_atr),
             trend_axis: Arc::new(trend_axis),
             vol_axis: Arc::new(vol_axis),
-            flow_axis: Arc::new(flow_axis),
             chaos_index: Arc::new(chaos_index),
             trend_dir: Arc::new(trend_dir),
             trend_strength: Arc::new(trend_strength),
@@ -157,7 +140,6 @@ impl MarketMatrixV3 {
             chaos: Arc::new(chaos),
             chaos_ratio: Arc::new(chaos_ratio), 
             entropy: Arc::new(entropy),
-            volume_force: Arc::new(volume_force),
             price_z_score: Arc::new(price_z_score),
         }
     }
@@ -199,19 +181,16 @@ mod tests {
             let slope = matrix.kama_slope_atr[i];
             let trend = matrix.trend_axis[i];
             let vol = matrix.vol_axis[i];
-            let flow = matrix.flow_axis[i];
             let chaos = matrix.chaos_index[i];
 
             assert!(!slope.is_nan(), "kama_slope_atr không được là NaN tại index {}", i);
             assert!(!trend.is_nan(), "trend_axis không được là NaN tại index {}", i);
             assert!(!vol.is_nan(), "vol_axis không được là NaN tại index {}", i);
-            assert!(!flow.is_nan(), "flow_axis không được là NaN tại index {}", i);
             assert!(!chaos.is_nan(), "chaos_index không được là NaN tại index {}", i);
 
             assert!(slope >= -1.0 && slope <= 1.0, "slope phải trong [-1.0, 1.0]");
             assert!(trend >= 0.0 && trend <= 1.0, "trend phải trong [0.0, 1.0]");
             assert!(vol >= 0.0 && vol <= 1.0, "vol phải trong [0.0, 1.0]");
-            assert!(flow >= 0.0 && flow <= 1.0, "flow phải trong [0.0, 1.0]");
             assert!(chaos >= 0.0 && chaos <= 1.0, "chaos phải trong [0.0, 1.0]");
         }
     }
@@ -316,7 +295,6 @@ mod tests {
 
         for i in 0..len {
             assert!(matrix.trend_axis[i] > 0.8, "Trend axis phải mạnh khi ADX = 50");
-            assert!(matrix.flow_axis[i] > 0.6, "Flow axis phải độc lập duy trì mức cao, không bị Trend triệt tiêu!");
         }
     }
 

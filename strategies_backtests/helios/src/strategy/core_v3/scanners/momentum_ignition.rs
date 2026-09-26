@@ -8,7 +8,7 @@
 //! - **Chỉ báo sử dụng:**
 //!   + Dải Bollinger Bands (`bb_upper`, `bb_lower`): Nhận diện giá vượt biên biến động.
 //!   + RSI Momentum (`rsi_momentum`): Đo đạc sức mạnh gia tốc dòng tiền ngắn hạn.
-//!   + Khối lượng dòng tiền (`flow_force` / `volume_force`): Xác nhận có dòng tiền lớn tham gia.
+//!   + Khối lượng dòng tiền (`sensors.vol_z_score`): Xác nhận bùng nổ xung lực qua Volume Z-Score chuẩn hóa.
 //!   + ATR (`atr_sl`): Chuẩn hóa khoảng cách giá và làm đệm Stop Loss.
 //! - **Cơ chế Chấm Điểm (Sigmoid / Tanh Smooth Scoring):**
 //!   + Long: $0.40 \times f_{\text{break\_long}} + 0.35 \times f_{\text{rsi\_long}} + 0.25 \times f_{\text{vol}}$
@@ -58,11 +58,10 @@ impl TacticalScanner for MomentumIgnitionScanner {
 
         let atr = sensors.atr_sl.get(i).copied().unwrap_or(f64::NAN);
         let rsi_mom = sensors.rsi_momentum.get(i).copied().unwrap_or(f64::NAN);
-        let flow_force = matrix.flow_axis.get(i).copied()
-            .or_else(|| matrix.volume_force.get(i).copied())
-            .unwrap_or(f64::NAN);
+        // 🚀 TASK-MAT-01 (Occam's Scalpel): Đọc trực tiếp Volume Z-Score tinh khiết từ sensors
+        let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(f64::NAN);
 
-        if rsi_mom.is_nan() || atr.is_nan() || atr <= 0.0 || flow_force.is_nan() {
+        if rsi_mom.is_nan() || atr.is_nan() || atr <= 0.0 || raw_vol_z.is_nan() {
             return None;
         }
 
@@ -105,7 +104,7 @@ impl TacticalScanner for MomentumIgnitionScanner {
         let vol_thresh = if mom_cfg.vol_z_threshold <= 0.0 { 1.50 } else { mom_cfg.vol_z_threshold.max(0.10) };
         let rsi_thresh = if mom_cfg.rsi_threshold <= 0.0 { 60.0 } else { mom_cfg.rsi_threshold.clamp(40.0, 90.0) };
 
-        let f_vol = sat_unbounded(flow_force.max(0.0), vol_thresh);
+        let f_vol = sat_unbounded(raw_vol_z, vol_thresh);
         // Đặt mục tiêu bứt phá chuẩn qua BB là 0.25 ATR
         let target_breakout = atr * 0.25;
 

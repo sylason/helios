@@ -20,6 +20,7 @@
 | **TASK-ABS-07** | 🟠 **MEDIUM** | Tách cơ chế Break-Even và Time-Decay Trailing riêng cho Absorption | `risk.rs` (L301–325, L423–447) | ⏳ CHỜ XỬ LÝ (Module Risk) |
 | **TASK-ABS-08** | 🟠 **MEDIUM** | Dọn dẹp gen chết `max_initial_sl_pct` hoặc tích hợp nội tại | `config.rs` (L538–540), `absorption.rs` | ⏳ CHỜ XỬ LÝ |
 | **TASK-ABS-09** | 🟢 **LOW** | Bổ sung Unit Tests kiểm thử phân định Tích lũy vs Phân phối & DNA Width = 97 | `core_v3/mod.rs` (tests) | ✅ **ĐÃ HOÀN THÀNH** |
+| **TASK-ABS-10** | 🔴 **CRITICAL** | Triệt tiêu bẫy đệm kép SL (`ABS-SL-DOUBLE-PADDING`), đưa SL về neo trực tiếp `low - buffer` | `absorption.rs` (L122–133) | ⏳ CHUYỂN GIAO SANG PHÂN HỆ `06_risk` |
 
 ---
 

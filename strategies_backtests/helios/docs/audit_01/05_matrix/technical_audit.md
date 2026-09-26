@@ -189,6 +189,14 @@ $$\text{volume\_force}[i] = \tanh\left(\frac{|\text{vol\_z\_score}[i]|}{\text{vo
 > - Trên thực tế, hệ số nhân lại thành $\times 3.0$! Một cú biến động khối lượng nhỏ có Z-score chỉ $1.0$ sẽ bị thổi phồng thành $3.0$, dẫn đến $\tanh(3.0) \approx 0.995$ (bão hòa kịch trần 100%).
 > - Hậu quả: `flow_axis` và `volume_force` luôn bị đẩy lên mức cực đại gần $1.0$, làm tê liệt hoàn toàn chức năng phân biệt giữa nến volume thực và nến volume giả.
 
+#### 💡 Phát Hiện Kiểm Toán Mới & Phương Án Tối Ưu (Occam's Scalpel):
+- **Bẫy Trùng Lặp Siêu Tham Số (Parameter Collinearity):**
+  - Rà soát toàn bộ codebase cho thấy: Chỉ có 2 Scanner duy nhất đọc `flow_axis` / `volume_force` (`MomentumIgnition` và `RangeOscillator`).
+  - Trong khi đó, `Absorption` (scanner cần volume nhất) lại đọc trực tiếp `sensors.vol_z_score` qua gen `abs_cfg.vol_z_threshold`!
+  - `MomentumIgnition` cũng có sẵn gen riêng `mom_cfg.vol_z_threshold` ([config.rs:424](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L424) dải `[1.0, 3.5]`).
+  - Việc duy trì `MatrixConfig.vol_z_sensitivity` ở tầng Ma Trận tạo ra 2 gen ở 2 tầng cùng tranh giành điều khiển một cây nến Volume, khiến GA Optimizer bị phân tán và loạn hướng.
+- **Giải Pháp Tối Ưu Nhất:** Xóa bỏ hoàn toàn trục `flow_axis`, bản sao `volume_force` và gen `vol_z_sensitivity`. Cho Scanners đọc trực tiếp `sensors.vol_z_score` (Single Source of Truth), khử hoàn toàn bẫy chuẩn hóa kép và triệt tiêu 100% rác heap clone.
+
 ---
 
 ### 3.3 Chênh lệch dải giá trị của `trend_strength` (Range Mismatch)

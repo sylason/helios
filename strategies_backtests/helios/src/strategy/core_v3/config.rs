@@ -281,8 +281,7 @@ pub struct MatrixConfig {
     #[serde(default = "default_kama_slope_scale_atr")]
     pub kama_slope_scale_atr: f64,
 
-    /// 3. Độ nhạy bùng nổ khối lượng qua Z-score (1.0 -> 3.0, Step 0.1 -> 21 nấc)
-    #[dna(min = 1.0, max = 3.0, step = 0.1)]
+    /// 3. Độ nhạy bùng nổ khối lượng qua Z-score (Đã bỏ gen DNA theo TASK-MAT-01: Scanners đọc trực tiếp sensors.vol_z_score)
     #[serde(default = "default_vol_z_sensitivity")]
     pub vol_z_sensitivity: f64,
 }
