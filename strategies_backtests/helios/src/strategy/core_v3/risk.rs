@@ -317,7 +317,7 @@ impl RiskManager {
                 ),
             };
 
-            let sqz_multiplier = matrix.vol_axis.get(i).copied().unwrap_or(0.0).max(0.0);
+            let sqz_multiplier = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0).max(0.0);
             let effective_be_trigger_atr = be_trigger_mult * (1.0 + 0.5 * sqz_multiplier);
             let required_profit = current_atr * effective_be_trigger_atr * trade.size.abs();
             let min_be_roe = (risk_cfg.base_be_roe_trigger.max(0.08) * (1.0 + sqz_multiplier)).min(0.50);

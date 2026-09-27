@@ -408,15 +408,38 @@ $$\text{Tổng dung lượng cấp phát rác} = 5,000 \times 12.6 \text{ MB} \a
 
 ---
 
-### 6.2 Chỉ báo ma (Zombie Indicators): `entropy`, `liquidity`, `chaos`
-Trong hàm `from_sensors`:
-1. `entropy` ([L86](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L86)): Tính `rolling_percentile` từ `sensors.efficiency_ratio`.
-2. `liquidity` ([L84](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L84)): Tính `rolling_percentile` từ `sensors.mfi`.
-3. `chaos` ([L53](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L53)): Tính `natr / 100.0`.
+### 6.2 Bảng Chứng Thực Toàn Diện 15 Trường Dữ Liệu Trong `MarketMatrixV3`
 
-#### 📌 Kết quả rà soát toàn bộ thư mục `src/strategy/core_v3`:
-- Lệnh tìm kiếm toàn diện cho thấy: **Không có bất kỳ dòng code nào trong `core_v3` (từ Scanners, Arbiter đến RiskManager) đọc dữ liệu từ `matrix.entropy`, `matrix.liquidity`, hay `matrix.chaos`!**
-- Thuật toán `rolling_percentile` là thuật toán nặng nhất trong module (chạy sort $O(N \log N)$ và cập nhật cây Fenwick $O(N \log U)$). Việc tính toán 2 chỉ báo ma này hoàn toàn là một sự lãng phí tài nguyên CPU vô ích.
+Quét lệnh thực tế (`git grep -n "matrix."`) trên toàn bộ thư mục `strategies_backtests/helios/src/strategy/core_v3`:
+
+| STT | Trường trong `MarketMatrixV3` | File nào đọc? Dòng nào? | Mục đích nghiệp vụ thực tế | Đánh giá tình trạng |
+| :---: | :--- | :--- | :--- | :--- |
+| **1** | `kama_slope_atr` | `scanners/trend_pb.rs:47` | Đo độ dốc KAMA chuẩn hóa theo ATR để bắt nhịp hồi | 🟢 **ACTIVE CORE** (Đang dùng tích cực) |
+| **2** | `trend_axis` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** *(Chỉ có test nội bộ `matrix.rs:182`)* | Map từ ADX nhưng bị bỏ hoang hoàn toàn | 🧟 **ZOMBIE 100% (Chỉ báo ma)** |
+| **3** | `vol_axis` | `risk.rs:320`: `let sqz_multiplier = matrix.vol_axis...` | Nới rộng ngưỡng kích hoạt hòa vốn (Break-Even) khi có nén | ⚠️ **CÓ DÙNG** (nhưng là clone 100% từ `squeeze_intensity`) |
+| **4** | `chaos_index` | `risk.rs:103`, `arbiter.rs` | Phạt điểm tín hiệu và thắt chặt SL khi gặp bão Whipsaw | 🟢 **ACTIVE CORE** (Đang dùng tích cực) |
+| **5** | `trend_dir` | `scanners/absorption.rs:107`, `momentum_ignition.rs:86`, `range_osc.rs:122` | Đo hướng xu hướng KAMA để Veto cản tàu / bắt dao rơi | 🟢 **ACTIVE CORE** (Clone từ `kama_slope_atr`) |
+| **6** | `trend_strength` | `scanners/range_osc.rs:69` | Chặn RangeOsc khi thị trường có trend mạnh | 🟡 **CÓ DÙNG** (cần sửa số âm ở TASK-MAT-03) |
+| **7** | `kama_slope_adj` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** *(Scanner đọc từ `sensors`)* | Passthrough trung chuyển dữ liệu thừa thãi | 🧟 **PASSTHROUGH THỪA** |
+| **8** | `bb_middle_slope_adj` | `scanners/range_osc.rs:74` | Kiểm tra độ dốc trục giữa BB Middle (SMA 20) | 🟢 **ACTIVE CORE** (Đang dùng trong Range) |
+| **9** | `squeeze_intensity` | `scanners/absorption.rs:48` | Cường độ nén Squeeze cho Absorption | 🟢 **ACTIVE CORE** (Đang dùng tích cực) |
+| **10** | `chaos` | **HOÀN TOÀN KHÔNG CÓ BẤT KỲ FILE NÀO ĐỌC!** | Tính `natr / 100.0` rồi bỏ xó | 🧟 **ZOMBIE 100% (Chỉ báo ma)** |
+| **11** | `chaos_ratio` | `mod.rs:257`: `.len() <= i` | Chỉ dùng để kiểm tra độ dài buffer nến | 🧟 **BIẾN NỘI BỘ RÒ RỈ** (Dùng tính `chaos_index`) |
+| **12** | `entropy` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** | Chỉ dùng nội bộ tính `chaos_index` | 🧟 **BIẾN NỘI BỘ RÒ RỈ** (Dùng tính `chaos_index`) |
+| **13** | `liquidity` | **HOÀN TOÀN KHÔNG CÓ BẤT KỲ FILE NÀO ĐỌC!** | Chạy cây Fenwick `rolling_percentile` trên MFI mỗi nến rồi vứt xó! | 🧟 **ZOMBIE SIÊU LÃNG PHÍ CPU 100%!** |
+| **14** | `bb_width_norm` | `scanners/range_osc.rs:53` | Kiểm tra bề rộng dải Bollinger tối thiểu | 🟢 **ACTIVE CORE** (Đang dùng trong Range) |
+| **15** | `price_z_score` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** | Chạy `tanh_scale` nặng nề nhưng bỏ xó | 🧟 **ZOMBIE 100% (Chỉ báo ma)** |
+
+#### 🚨 Phát Hiện Đặc Biệt Về `vol_axis` & Tác Động Dây Chuyền Tới `RiskManager` (`risk.rs:320`):
+Tại [`risk.rs:320`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L320):
+```rust
+let sqz_multiplier = matrix.vol_axis.get(i).copied().unwrap_or(0.0).max(0.0);
+let effective_be_trigger_atr = be_trigger_mult * (1.0 + 0.5 * sqz_multiplier);
+let min_be_roe = (risk_cfg.base_be_roe_trigger.max(0.08) * (1.0 + sqz_multiplier)).min(0.50);
+```
+- Tác giả đặt tên biến là `sqz_multiplier` nhưng lại đọc từ `matrix.vol_axis` (clone từ `squeeze_intensity`).
+- Khi `squeeze_intensity` bị kẹt cứng ở $0.50$ (`TASK-MAT-02`), `sqz_multiplier` luôn bằng $0.50$ mọi lúc mọi nơi.
+- Hậu quả: Ngưỡng kích hoạt Break-Even luôn bị **thổi phồng thêm 50%**, khiến các lệnh thắng không thể dời Stop Loss về hòa vốn kịp thời khi thị trường đảo chiều, biến lệnh thắng thành lệnh lỗ cắn Hard SL!
 
 ---
 

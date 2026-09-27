@@ -11,7 +11,7 @@
 | Thứ Tự | Mã Task | Tên Công Việc | Mức Độ | Trạng Thái | File Liên Quan |
 | :---: | :--- | :--- | :---: | :---: | :--- |
 | **1** | `TASK-MAT-01` | Tái cấu trúc trục volume: Xóa `flow_axis` & gen `vol_z_sensitivity` (Occam) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs`, `scanners/momentum_ignition.rs` |
-| **2** | `TASK-MAT-02` | Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50 | **CRITICAL** | 🔴 Chưa xử lý | `core_v3/matrix.rs:60–68, 83` |
+| **2** | `TASK-MAT-02` | Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50 (Xóa clone `vol_axis`) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs:58–67`, `risk.rs:320` |
 | **3** | `TASK-MAT-03` | Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:71–81` |
 | **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone `Vec<f64>` thừa thãi, chuyển sang Arc aliasing | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:102, 126, 128` |
 | **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🔴 Chưa xử lý | `core_v3/config.rs:103–124` |
@@ -70,21 +70,22 @@
 
 ---
 
-### 🔴 TASK-MAT-02: Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50
+### 🟢 TASK-MAT-02: Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50 (Inverse Quadratic Soft Squeeze & Xóa clone `vol_axis`) - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-02` (Critical).
-- **Hiện trạng:**
-  - Tại `core_v3/matrix.rs:60–68`, biểu thức `(ku - bu) + (bl - kl) / kc_w` hoàn toàn đồng nhất đại số với $1.0 - (BB_w / KC_w)$.
-  - Khi thị trường biến động ($BB_w > KC_w$), giá trị bị kẹp về $0.0$.
-  - Khi `sqz_raw` toàn bộ là $0.0$, thuật toán `rolling_percentile` trả về bách phân vị **cứng $0.50$** (vì $\text{count\_smaller} = 0$, $\text{count\_equal} = W \implies (0 + 0.5W)/W = 0.50$).
-  - Squeeze Scanner ngộ nhận thị trường luôn nén trung bình ngay giữa tâm bão biến động mạnh.
-- **Hành động cần làm:**
-  1. Tái cấu trúc công thức đo Squeeze thành hàm liên tục:
-     $$\text{sqz\_ratio} = \frac{KC_w}{BB_w}$$
-     $$\text{sqz\_raw} = \tanh\left(\frac{KC_w}{BB_w \times \text{factor}}\right) \in [0.0, 1.0]$$
-  2. Khi $BB_w \gg KC_w$ (thị trường bung rộng, biến động cực đại), $\text{sqz\_raw} \to 0.0$.
-  3. Đảm bảo hàm `rolling_percentile` phân biệt rõ ràng giữa giai đoạn co thắt thật sự và giai đoạn dải mở rộng.
-- **Tiêu chuẩn nghiệm thu:**
-  - Unit test kiểm tra khi $BB_w = 2.0 \times KC_w$, kết quả `sqz_raw` phải tiến sát về $0.0$, và chuỗi `squeeze_intensity` không bị kẹt ở $0.50$.
+- **Kết quả thực hiện:**
+  - [x] Đã tái cấu trúc công thức đo Squeeze thành hàm phân số bậc 2 liên tục trơn tru:
+    $$\text{sqz\_raw} = \frac{1.0}{1.0 + (BB_w / KC_w)^2}$$
+    + Khi $BB_w \ll KC_w$ (nén cực đại): $\text{sqz\_raw} \to 1.0$.
+    + Khi $BB_w = KC_w$ (ngưỡng Carter kinh điển): $\text{sqz\_raw} = 0.50$.
+    + Khi $BB_w \gg KC_w$ (bung nén/bão): $\text{sqz\_raw} \to 0.0$ (không bị ép về $0.0$ phẳng lỳ, bảo toàn độ dốc biến thiên liên tục).
+  - [x] Triệt tiêu vĩnh viễn bẫy kẹt $0.50$ của `rolling_percentile`: khi biến động mở rộng, `squeeze_intensity` rơi chuẩn xác về vùng đáy $[0.01 \dots 0.15]$.
+  - [x] Tiện tay xóa sổ hoàn toàn biến clone dư thừa `vol_axis` khỏi struct `MarketMatrixV3`, loại bỏ 1 lệnh deep clone vector trên heap.
+  - [x] Chuyển `risk.rs:320` sang đọc trực tiếp `matrix.squeeze_intensity`:
+    `let sqz_multiplier = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0).max(0.0);`
+    Giải phóng điểm nghẽn Break-Even: Ngưỡng kích hoạt BE không còn bị thổi phồng ảo thêm $50\%$ trong bão, giúp bot chốt giữ hòa vốn kịp thời khi có lợi nhuận.
+  - [x] Bổ sung unit test `test_squeeze_continuous_no_half_stuck` kiểm chứng bung nén mạnh $BB_w = 3.1 \times KC_w$ thì `squeeze_intensity` rơi về $< 0.20$ (PASS).
+  - [x] Cập nhật test `test_orthogonal_matrix_nan_resilience` đổi sang kiểm tra `squeeze_intensity` (PASS).
+  - [x] Kiểm thử tự động: 100% tests `helios` (66/66) và `bot_engine` (39 passed, 1 ignored) vượt qua.
 
 ---
 
@@ -181,26 +182,36 @@
 
 ### 🟡 TASK-MAT-07: Đại Phẫu Rác Thừa Matrix: Xóa Bỏ 4 Chỉ Báo Ma, 3 Bản Sao Clone và 3 Gen DNA Ma
 - **Mã lỗi liên đới:** `FLAW-MAT-07` (Medium).
-- **Hiện trạng kiểm toán toàn diện (11/17 trường thừa thãi & 3 gen DNA ma):**
-  - **4 Chỉ báo ma (Zombie Indicators - 0 ai đọc trong toàn bộ chiến lược):**
-    1. `trend_axis`: Map từ ADX nhưng không có scanner nào đọc (chỉ xuất hiện trong test nội bộ).
-    2. `liquidity`: **CỰC KỲ LÃNG PHÍ**: Chạy cây Fenwick `rolling_percentile` trên MFI mỗi nến nhưng vứt xó!
-    3. `chaos`: Tính từ `natr / 100.0`, hoàn toàn vô dụng.
-    4. `price_z_score`: Tính bằng hàm `tanh_scale` nặng nề nhưng không module nào sử dụng.
-  - **3 Bản sao nhân bản (Duplicate Clones - Tốn RAM heap allocations vô ích):**
-    1. `vol_axis`: Deep clone 100% từ `squeeze_intensity` (chỉ dùng duy nhất ở `risk.rs:320`).
-    2. `trend_dir`: Deep clone 100% từ `kama_slope_atr`.
-    3. `volume_force`: Deep clone 100% từ `flow_axis`.
-    *(Kèm trường `kama_slope_adj` trên matrix: Passthrough từ sensors nhưng các scanner toàn đọc thẳng từ `sensors`, không ai đọc từ `matrix`).*
-  - **3 Gen DNA Ma (Phantom Genes) trong `MatrixConfig` (`core_v3/config.rs`):**
-    1. `volume_lookback`: Khai báo gen 31 nấc tìm kiếm, nhưng trong toàn bộ `matrix.rs` **không có chữ `volume_lookback` nào**!
-    2. `momentum_lookback`: Dùng tính `liquidity`, mà `liquidity` là Zombie $\implies$ GA tối ưu vô nghĩa!
-    3. `adx_trend_threshold`: Dùng tính `trend_axis`, mà `trend_axis` là Zombie $\implies$ GA tối ưu vô nghĩa!
+- **BẢNG CHỨNG THỰC TOÀN DIỆN 15 TRƯỜNG DỮ LIỆU TRONG `MarketMatrixV3`:**
+  *(Quét trực tiếp 100% mã nguồn trên toàn bộ thư mục `strategies_backtests/helios/src/strategy/core_v3/`)*
+
+  | STT | Trường trong `MarketMatrixV3` | File nào đọc? Dòng nào? | Mục đích nghiệp vụ thực tế | Đánh giá tình trạng |
+  | :---: | :--- | :--- | :--- | :--- |
+  | **1** | `kama_slope_atr` | `scanners/trend_pb.rs:47` | Đo độ dốc KAMA chuẩn hóa theo ATR để bắt nhịp hồi | 🟢 **ACTIVE CORE** (Đang dùng tích cực) |
+  | **2** | `trend_axis` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** *(Chỉ có test nội bộ `matrix.rs:182`)* | Map từ ADX nhưng bị bỏ hoang hoàn toàn | 🧟 **ZOMBIE 100% (Chỉ báo ma)** |
+  | **3** | `vol_axis` | `risk.rs:320`: `let sqz_multiplier = matrix.vol_axis...` | Nới rộng ngưỡng kích hoạt hòa vốn (Break-Even) khi có nén | ⚠️ **CÓ DÙNG** (nhưng là clone 100% từ `squeeze_intensity`) |
+  | **4** | `chaos_index` | `risk.rs:103`, `arbiter.rs` | Phạt điểm tín hiệu và thắt chặt SL khi gặp bão Whipsaw | 🟢 **ACTIVE CORE** (Đang dùng tích cực) |
+  | **5** | `trend_dir` | `scanners/absorption.rs:107`, `momentum_ignition.rs:86`, `range_osc.rs:122` | Đo hướng xu hướng KAMA để Veto cản tàu / bắt dao rơi | 🟢 **ACTIVE CORE** (Clone từ `kama_slope_atr`) |
+  | **6** | `trend_strength` | `scanners/range_osc.rs:69` | Chặn RangeOsc khi thị trường có trend mạnh | 🟡 **CÓ DÙNG** (cần sửa số âm ở TASK-MAT-03) |
+  | **7** | `kama_slope_adj` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** *(Scanner đọc từ `sensors`)* | Passthrough trung chuyển dữ liệu thừa thãi | 🧟 **PASSTHROUGH THỪA** |
+  | **8** | `bb_middle_slope_adj` | `scanners/range_osc.rs:74` | Kiểm tra độ dốc trục giữa BB Middle (SMA 20) | 🟢 **ACTIVE CORE** (Đang dùng trong Range) |
+  | **9** | `squeeze_intensity` | `scanners/absorption.rs:48` | Cường độ nén Squeeze cho Absorption | 🟢 **ACTIVE CORE** (Đang dùng tích cực) |
+  | **10** | `chaos` | **HOÀN TOÀN KHÔNG CÓ BẤT KỲ FILE NÀO ĐỌC!** | Tính `natr / 100.0` rồi bỏ xó | 🧟 **ZOMBIE 100% (Chỉ báo ma)** |
+  | **11** | `chaos_ratio` | `mod.rs:257`: `.len() <= i` | Chỉ dùng để kiểm tra độ dài buffer nến | 🧟 **BIẾN NỘI BỘ RÒ RỈ** (Dùng tính `chaos_index`) |
+  | **12** | `entropy` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** | Chỉ dùng nội bộ tính `chaos_index` | 🧟 **BIẾN NỘI BỘ RÒ RỈ** (Dùng tính `chaos_index`) |
+  | **13** | `liquidity` | **HOÀN TOÀN KHÔNG CÓ BẤT KỲ FILE NÀO ĐỌC!** | Chạy cây Fenwick `rolling_percentile` trên MFI mỗi nến rồi vứt xó! | 🧟 **ZOMBIE SIÊU LÃNG PHÍ CPU 100%!** |
+  | **14** | `bb_width_norm` | `scanners/range_osc.rs:53` | Kiểm tra bề rộng dải Bollinger tối thiểu | 🟢 **ACTIVE CORE** (Đang dùng trong Range) |
+  | **15** | `price_z_score` | **KHÔNG CÓ SCANNER NÀO ĐỌC!** | Chạy `tanh_scale` nặng nề nhưng bỏ xó | 🧟 **ZOMBIE 100% (Chỉ báo ma)** |
+
+- **🚨 PHÁT HIỆN ĐẶC BIỆT VỀ `vol_axis` & `risk.rs:320`:**
+  - Tại `risk.rs:320`: `let sqz_multiplier = matrix.vol_axis.get(i)...; let min_be_roe = base_be_roe * (1.0 + sqz_multiplier);`
+  - Do `vol_axis` clone từ `squeeze_intensity` vốn bị kẹt cứng ở $0.50$ (lỗi `TASK-MAT-02`), ngưỡng kích hoạt Break-Even luôn bị **thổi phồng thêm 50%**, khiến các lệnh thắng không dời được SL về hòa vốn kịp thời và bị quay đầu cắn Hard SL!
 - **Hành động cần làm:**
-  1. Giữ lại phép tính `entropy` và `chaos_ratio` trong `from_sensors` để phục vụ `TASK-MAT-10` (nhưng cân nhắc giữ cục bộ thay vì public clone nếu có thể).
+  1. Giữ lại phép tính `entropy` và `chaos_ratio` cục bộ trong `from_sensors` để phục vụ `TASK-MAT-10` (không cần lưu public Arc).
   2. Xóa bỏ hoặc vô hiệu hóa các dòng tính toán 4 chỉ báo ma `liquidity`, `chaos`, `price_z_score`, `trend_axis`.
-  3. Xóa các bản clone thừa `vol_axis`, `trend_dir`, `volume_force`, thay bằng dùng trực tiếp `squeeze_intensity` và `kama_slope_atr`.
-  4. Xóa macro `#[dna(...)]` trên 3 gen ma `volume_lookback`, `momentum_lookback`, `adx_trend_threshold` trong `core_v3/config.rs` (giúp GA giảm thêm 3 chiều tìm kiếm vô ích).
+  3. Đổi `risk.rs:320` sang đọc trực tiếp `matrix.squeeze_intensity`, rồi xóa bản clone thừa `vol_axis`.
+  4. Đổi các scanner sang đọc trực tiếp `matrix.kama_slope_atr`, rồi xóa bản clone thừa `trend_dir`.
+  5. Xóa macro `#[dna(...)]` trên 3 gen ma `volume_lookback`, `momentum_lookback`, `adx_trend_threshold` trong `core_v3/config.rs` (giúp GA giảm thêm 3 chiều tìm kiếm vô ích).
 - **Tiêu chuẩn nghiệm thu:**
   - Tổng số gen DNA của hệ thống giảm thêm 3 gen ma vô tác dụng.
   - Triệt tiêu hoàn toàn các phép tính Cây Fenwick và Tanh chạy vô ích cho các trường rác.

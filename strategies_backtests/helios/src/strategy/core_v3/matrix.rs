@@ -13,7 +13,6 @@ pub struct MarketMatrixV3 {
     // --- 🚀 4 TRỤC ĐO VẬT LÝ TRỰC GIAO MỚI (DE-OVERENGINEERED ORTHOGONAL AXES) ---
     pub kama_slope_atr: Arc<Vec<f64>>,   // Độ dốc KAMA chuẩn hóa theo ATR phi thứ nguyên [-1.0, 1.0]
     pub trend_axis: Arc<Vec<f64>>,       // Trục xu hướng ADX chuẩn hóa theo adx_trend_threshold [0.0, 1.0]
-    pub vol_axis: Arc<Vec<f64>>,         // Trục nén/bung biến động (Squeeze / Expansion) [0.0, 1.0]
     pub chaos_index: Arc<Vec<f64>>,      // Chỉ số bão hỗn loạn Whipsaw [0.0, 1.0]
 
     // --- 🧭 Hướng & Sức mạnh (Directional) ---
@@ -58,11 +57,18 @@ impl MarketMatrixV3 {
             let ku = sensors.kc_upper.get(i).copied().unwrap_or(0.0);
             let kl = sensors.kc_lower.get(i).copied().unwrap_or(0.0);
             let kc_w = ku - kl;
-            if kc_w < 1e-9 || bu.is_nan() || bl.is_nan() || ku.is_nan() || kl.is_nan() {
+            let bb_w = bu - bl;
+            if kc_w < 1e-9 || kc_w.is_nan() || bb_w.is_nan() || bu.is_nan() || bl.is_nan() || ku.is_nan() || kl.is_nan() {
                 sqz_raw.push(0.0);
             } else {
-                let overlap = (ku - bu) + (bl - kl);
-                sqz_raw.push((overlap / kc_w).max(0.0).min(1.0));
+                // 🚀 TASK-MAT-02 (Inverse Quadratic Soft Squeeze):
+                // sqz_raw = 1.0 / (1.0 + (BB_w / KC_w)^2)
+                // - Khi BB_w << KC_w (nén cực đại): sqz_raw -> 1.0
+                // - Khi BB_w == KC_w (ngưỡng Carter): sqz_raw = 0.50
+                // - Khi BB_w >> KC_w (bung nén/bão): sqz_raw -> 0.0 (không bao giờ kẹt 0.0 phẳng lỳ)
+                let ratio = (bb_w.max(0.0) / kc_w).max(0.0);
+                let sqz_continuous = 1.0 / (1.0 + ratio * ratio);
+                sqz_raw.push(sqz_continuous.clamp(0.0, 1.0));
             }
 
             // ADX Centered tại ngưỡng 20.0 để dùng Tanh Scale
@@ -96,10 +102,7 @@ impl MarketMatrixV3 {
             if adx_v.is_nan() { 0.0 } else { (adx_v / adx_thresh).max(0.0).min(1.0) }
         }).collect();
 
-        // 🚀 3. TRỤC BIẾN ĐỘNG / NÉN SQUEEZE (vol_axis)
-        let vol_axis = squeeze_intensity.clone();
-
-        // 🚀 4. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index)
+        // 🚀 3. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index)
         // chaos_index = c_r * (1.0 - entropy)
         // Trong đó:
         // - c_r: Chaos Ratio (tỷ lệ biến động rối loạn, từ sensors.chaos_ratio)
@@ -128,7 +131,6 @@ impl MarketMatrixV3 {
         Self {
             kama_slope_atr: Arc::new(kama_slope_atr),
             trend_axis: Arc::new(trend_axis),
-            vol_axis: Arc::new(vol_axis),
             chaos_index: Arc::new(chaos_index),
             trend_dir: Arc::new(trend_dir),
             trend_strength: Arc::new(trend_strength),
@@ -180,17 +182,17 @@ mod tests {
         for i in 0..len {
             let slope = matrix.kama_slope_atr[i];
             let trend = matrix.trend_axis[i];
-            let vol = matrix.vol_axis[i];
+            let sqz = matrix.squeeze_intensity[i];
             let chaos = matrix.chaos_index[i];
 
             assert!(!slope.is_nan(), "kama_slope_atr không được là NaN tại index {}", i);
             assert!(!trend.is_nan(), "trend_axis không được là NaN tại index {}", i);
-            assert!(!vol.is_nan(), "vol_axis không được là NaN tại index {}", i);
+            assert!(!sqz.is_nan(), "squeeze_intensity không được là NaN tại index {}", i);
             assert!(!chaos.is_nan(), "chaos_index không được là NaN tại index {}", i);
 
             assert!(slope >= -1.0 && slope <= 1.0, "slope phải trong [-1.0, 1.0]");
             assert!(trend >= 0.0 && trend <= 1.0, "trend phải trong [0.0, 1.0]");
-            assert!(vol >= 0.0 && vol <= 1.0, "vol phải trong [0.0, 1.0]");
+            assert!(sqz >= 0.0 && sqz <= 1.0, "sqz phải trong [0.0, 1.0]");
             assert!(chaos >= 0.0 && chaos <= 1.0, "chaos phải trong [0.0, 1.0]");
         }
     }
@@ -340,6 +342,67 @@ mod tests {
             matrix.chaos_index[last_idx] < 0.03,
             "Khi xu hướng cực mượt (entropy >= 0.95), chaos_index ({}) phải tiệm cận 0.0 (< 0.03) bất kể biến động lớn!",
             matrix.chaos_index[last_idx]
+        );
+    }
+
+    #[test]
+    fn test_squeeze_continuous_no_half_stuck() {
+        let mut sensors = HeliosSensors::default();
+        let len = 50;
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![110.0; len]);
+        sensors.lows = Arc::new(vec![90.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+        sensors.natr = Arc::new(vec![2.0; len]);
+        sensors.adx = Arc::new(vec![25.0; len]);
+        sensors.kama_slope_adj = Arc::new(vec![0.0; len]);
+        sensors.vol_z_score = Arc::new(vec![0.0; len]);
+        sensors.mfi = Arc::new(vec![50.0; len]);
+        sensors.chaos_ratio = Arc::new(vec![1.0; len]);
+        sensors.efficiency_ratio = Arc::new(vec![0.5; len]);
+        sensors.z_score = Arc::new(vec![0.0; len]);
+
+        // Giả lập 30 nến đầu: Nén cực mạnh (BB = 4.0, KC = 10.0 => ratio = 0.4 => sqz ~ 0.86)
+        // 20 nến sau: Bung nén bão lớn dần (BB tăng từ 12.0 đến 31.0, KC = 10.0 => ratio > 1.0)
+        let mut bb_u = Vec::with_capacity(len);
+        let mut bb_l = Vec::with_capacity(len);
+        let mut kc_u = Vec::with_capacity(len);
+        let mut kc_l = Vec::with_capacity(len);
+
+        for i in 0..len {
+            kc_u.push(105.0);
+            kc_l.push(95.0); // KC width = 10.0
+            if i < 30 {
+                // Squeeze mạnh: BB width = 4.0
+                bb_u.push(102.0);
+                bb_l.push(98.0);
+            } else {
+                // Bung nén mở rộng: BB width = 12.0 + (i - 30) = 12..31
+                let half_w = 6.0 + (i - 30) as f64 * 0.5;
+                bb_u.push(100.0 + half_w);
+                bb_l.push(100.0 - half_w);
+            }
+        }
+
+        sensors.bb_upper = Arc::new(bb_u);
+        sensors.bb_lower = Arc::new(bb_l);
+        sensors.bb_middle = Arc::new(vec![100.0; len]);
+        sensors.kc_upper = Arc::new(kc_u);
+        sensors.kc_lower = Arc::new(kc_l);
+
+        let mut config = HeliosConfigV3::default();
+        config.matrix.squeeze_lookback = 20;
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // Nến cuối cùng (index 49) là lúc bung nén mạnh nhất (BB = 31, KC = 10, ratio = 3.1)
+        // Với công thức cũ: cả 20 nến sau đều bị kẹt 0.0 => percentile kẹt cứng ở 0.50!
+        // Với công thức mới: sqz_raw giảm liên tục từ 0.40 về 0.09, là giá trị thấp nhất trong window!
+        let last_sqz = matrix.squeeze_intensity[len - 1];
+        assert!(
+            last_sqz < 0.20,
+            "Khi biến động bung mạnh nhất, Squeeze Intensity ({}) phải ở vùng đáy (< 0.20), không được kẹt ở 0.50!",
+            last_sqz
         );
     }
 }
