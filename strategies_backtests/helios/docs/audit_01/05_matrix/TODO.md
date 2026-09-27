@@ -14,7 +14,7 @@
 | **2** | `TASK-MAT-02` | Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50 (Xóa clone `vol_axis`) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs:58–67`, `risk.rs:320` |
 | **3** | `TASK-MAT-03` | Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs:75–86` |
 | **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone & Xóa biến nhân bản `trend_dir`, chuẩn hóa `kama_slope_atr` | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs`, scanners, `mod.rs` |
-| **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🔴 Chưa xử lý | `core_v3/config.rs:103–124` |
+| **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🟢 Đã xử lý | `core_v3/config.rs:114–124`, `core_v3/mod.rs:142–195` |
 | **6** | `TASK-MAT-06` | Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs:51–73, 108–124` |
 | **7** | `TASK-MAT-07` | Giữ lại `entropy`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs`, `core_v3/config.rs:266` |
 | **8** | `TASK-MAT-08` | Bổ sung kẹp biên an toàn cho `bb_width_norm`, `bb_middle_slope_adj` | **LOW** | 🔴 Chưa xử lý | `core_v3/matrix.rs:58, 139` |
@@ -126,23 +126,32 @@
 
 ---
 
-### 🟠 TASK-MAT-05: Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels
+### 🟢 TASK-MAT-05: Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels (Serde-Safe) - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-05` (High).
-- **Hiện trạng:**
-  - Tại `core_v3/config.rs:109, 120`, cả `BbandsParams` và `KeltnerParams` đều có gen DNA riêng để chọn `timeframe`.
-  - GA Optimizer có thể chọn `bbands.timeframe = 5m` và `keltner.timeframe = 4h`, làm phá hủy hoàn toàn mối tương quan hình học của mô hình Squeeze.
-- **Hành động cần làm:**
-  1. Trong `KeltnerParams`, loại bỏ macro `#[dna(...)]` khỏi trường `timeframe` hoặc loại bỏ hoàn toàn trường này.
-  2. Tại `core_v3/mod.rs:174`, ép buộc Keltner Channel sử dụng chung `ind.bbands.timeframe` với Bollinger Bands:
-     ```rust
-     let (kc_u, _kc_m, kc_l) = ctx.keltner(
-         ind.bbands.timeframe, // Đồng bộ 100% với Bollinger Bands
-         "KC", ind.keltner.period as u32, ind.keltner.multiplier, ind.keltner.ma_type.clone()
-     );
-     ```
-- **Tiêu chuẩn nghiệm thu:**
-  - GA Optimizer không còn khả năng cấu hình lệch pha timeframe giữa BB và KC.
-  - Squeeze luôn được đo lường trên cùng một khung nến nhất quán.
+- **Kết quả thực hiện:**
+  - [x] Bổ sung hỗ trợ thuộc tính `#[dna(skip)]` vào proc macro `DnaMappableMacro` trong `ferro_trade_derive/src/lib.rs`.
+  - [x] Gắn `#[dna(skip)]` và `#[serde(default = "default_timeframe")]` lên trường `timeframe` của `KeltnerParams` trong `core_v3/config.rs:114–124`:
+    + Loại bỏ vĩnh viễn gen `indicators.keltner.timeframe` khỏi không gian tìm kiếm GA Optimizer.
+    + Thu gọn số chiều DNA từ **103 về đúng 102 chiều**.
+    + Đảm bảo tính tương thích ngược Serde JSON 100% (Serde-Safe), không làm crash IPC hay hỏng deserialization khi nạp JSON cũ.
+  - [x] Đồng bộ hóa 100% cấu hình và runtime trong `core_v3/mod.rs`:
+    + Tại đầu hàm `init()`: `self.config.indicators.keltner.timeframe = self.config.indicators.bbands.timeframe;`
+    + Tại `update_from_dna()`: `self.config.indicators.keltner.timeframe = self.config.indicators.bbands.timeframe;`
+    + Khởi tạo Keltner Channel ép buộc sử dụng `ind.bbands.timeframe`:
+      ```rust
+      let (kc_u, _kc_m, kc_l) = ctx.keltner(
+          ind.bbands.timeframe, "KC", 
+          ind.keltner.period as u32, ind.keltner.multiplier, ind.keltner.ma_type.clone()
+      );
+      ```
+  - [x] Cập nhật unit test `test_dna_width_and_parameter_defs_integrity` kiểm chứng `DNA_WIDTH == 102` và `parameter_defs` không còn chứa `keltner.timeframe` (PASS).
+  - [x] Bổ sung unit test chuyên sâu `test_keltner_bbands_timeframe_synchronization` kiểm chứng đồng bộ sau khi nạp DNA và kiểm thử 2 kịch bản deserialize JSON cũ/mới (PASS).
+  - [x] Kiểm thử toàn diện:
+    + `helios`: 68/68 unit tests PASS ($100\%$).
+    + `bot_engine`: 39 passed, 0 failed, 1 ignored ($100\%$).
+    + `walk_forward_smart_seed`: Cargo check PASS (Exit code 0).
+- **Ý nghĩa định lượng:**
+  Triệt tiêu hoàn toàn $75\%$ tổ hợp lệch pha khung thời gian ngẫu nhiên (12/16 trường hợp) giữa BB và KC. Bảo toàn nguyên vẹn tính hình học của Carter Squeeze $\text{ratio} = BB_w / KC_w$, giải phóng Playbook `Absorption` và `RiskManager` khỏi các tín hiệu nén ảo.
 
 ---
 

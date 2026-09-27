@@ -117,7 +117,8 @@ pub struct KeltnerParams {
     pub period: usize,
     #[dna(min = 1.0, max = 5.0, step = 1.0)]
     pub multiplier: f64,
-    #[dna(subset = "5m, 15m, 1h, 4h")]
+    #[dna(skip)]
+    #[serde(default = "default_timeframe")]
     pub timeframe: Timeframe,
     #[dna(options="SMA,EMA,WMA,HMA,RMA,DMA,DEMA,TMA,TEMA,WSMA,SMM,SWMA,TRIMA,LinReg,Vidya")]
     pub ma_type: MaType,

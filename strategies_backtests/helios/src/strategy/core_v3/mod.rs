@@ -136,10 +136,15 @@ impl Strategy for HeliosStrategyV3 {
             return;
         }
         self.config.update_from_dna(dna);
+        // 🛡️ TASK-MAT-05: Đồng bộ hóa cấu hình Keltner timeframe theo BBands
+        self.config.indicators.keltner.timeframe = self.config.indicators.bbands.timeframe;
         self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
     }
 
     fn init(&mut self, ctx: &mut InitContext) {
+        // 🛡️ TASK-MAT-05: Khóa cứng đồng bộ 100% Timeframe của Keltner Channel theo Bollinger Bands (Serde-Safe)
+        self.config.indicators.keltner.timeframe = self.config.indicators.bbands.timeframe;
+
         let ind = &self.config.indicators;
 
         if ind.natr.period == 0 || ind.mfi.period == 0 || 
@@ -181,7 +186,14 @@ impl Strategy for HeliosStrategyV3 {
         s.bb_middle = bb_m;
         s.bb_lower = bb_l;
 
-        let (kc_u, _kc_m, kc_l) = ctx.keltner(ind.keltner.timeframe, "KC", ind.keltner.period as u32, ind.keltner.multiplier, ind.keltner.ma_type.clone());
+        // 🛡️ TASK-MAT-05: Khóa cứng đồng bộ 100% Timeframe của Keltner Channel theo Bollinger Bands (Serde-Safe)
+        let (kc_u, _kc_m, kc_l) = ctx.keltner(
+            ind.bbands.timeframe, 
+            "KC", 
+            ind.keltner.period as u32, 
+            ind.keltner.multiplier, 
+            ind.keltner.ma_type.clone()
+        );
         s.kc_upper = kc_u;
         s.kc_lower = kc_l;
 
@@ -1179,7 +1191,9 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 103, "DNA_WIDTH phải là chính xác 103 chiều sau khi loại bỏ gen ma vol_z_sensitivity (-1) theo TASK-MAT-01!");
+        assert_eq!(width, 102, "DNA_WIDTH phải là chính xác 102 chiều sau khi khóa cứng đồng bộ keltner.timeframe (-1) theo TASK-MAT-05!");
+        let has_kc_tf = defs.iter().any(|(name, _)| name.contains("keltner.timeframe"));
+        assert!(!has_kc_tf, "defs KHÔNG được chứa indicators.keltner.timeframe (đã khóa cứng theo bbands ở TASK-MAT-05)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
@@ -2423,6 +2437,42 @@ mod tests {
         let sl = p.suggested_sl.unwrap();
         // Low 2014.0 - 0.5 * 10.0 = 2009.0
         assert!(sl < 2014.0, "SL {} phải dưới Low 2014.0", sl);
+    }
+
+    #[test]
+    fn test_keltner_bbands_timeframe_synchronization() {
+        use ferro_trade::strategy::Strategy;
+        use ferro_trade::data::Timeframe;
+        use crate::strategy::core_v3::config::KeltnerParams;
+
+        let mut strategy = HeliosStrategyV3::new(&std::collections::HashMap::new());
+
+        // 1. Kiểm tra đồng bộ qua update_from_dna
+        strategy.config.indicators.bbands.timeframe = Timeframe::T15m;
+        strategy.config.indicators.keltner.timeframe = Timeframe::T4h; // Cố tình làm lệch pha
+
+        let dummy_dna = vec![0.0; HeliosConfigV3::DNA_WIDTH];
+        strategy.update_from_dna(&dummy_dna);
+
+        // Keltner timeframe phải lập tức được ép bám theo bbands.timeframe
+        assert_eq!(
+            strategy.config.indicators.keltner.timeframe, 
+            strategy.config.indicators.bbands.timeframe,
+            "Keltner timeframe PHẢI được tự động đồng bộ theo BBands sau khi nạp DNA!"
+        );
+
+        // 2. Kiểm tra tính tương thích ngược Serde JSON (Serde-Safe)
+        // Kịch bản A: JSON cũ có chứa trường "timeframe"
+        let json_with_tf = r#"{"period": 20, "multiplier": 2.0, "timeframe": "T1h", "ma_type": "EMA"}"#;
+        let parsed_with_tf: Result<KeltnerParams, _> = serde_json::from_str(json_with_tf);
+        assert!(parsed_with_tf.is_ok(), "JSON cũ chứa trường timeframe phải deserialize thành công!");
+        assert_eq!(parsed_with_tf.unwrap().timeframe, Timeframe::T1h);
+
+        // Kịch bản B: JSON mới hoặc thiếu trường "timeframe"
+        let json_without_tf = r#"{"period": 20, "multiplier": 2.0, "ma_type": "EMA"}"#;
+        let parsed_without_tf: Result<KeltnerParams, _> = serde_json::from_str(json_without_tf);
+        assert!(parsed_without_tf.is_ok(), "JSON thiếu trường timeframe phải tự động fallback về default mà không panic!");
+        assert_eq!(parsed_without_tf.unwrap().timeframe, Timeframe::T5m);
     }
 }
 

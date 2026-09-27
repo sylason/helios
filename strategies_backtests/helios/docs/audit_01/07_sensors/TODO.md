@@ -136,10 +136,68 @@
     Struct `HeliosSensors` chứa 35 trường, trong đó có nhiều trường rác từ V2/V1 không còn sử dụng trong V3.3:
     - `highs`, `lows`, `volumes` (Scanners đã đọc từ `tick.*`).
     - `kama_slope` (chỉ dùng `kama_slope_adj`).
-    - `vol_sma` (đã thay bằng `vol_z_score`).
+    - `vol_sma` (đang bị quên khởi tạo, xem Task 08).
     - `macd_main`, `macd_signal`, `macd_hist` (Helios V3.3 đã loại bỏ MACD).
     - `stoch_k` (thừa).
   - **Giải pháp triển khai:**
-    Thu gọn struct `HeliosSensors` từ 35 trường xuống còn đúng 18 trường cốt lõi phục vụ Matrix và 4 Playbook hoạt động thực tế.
+    Thu gọn struct `HeliosSensors` từ 35 trường xuống còn đúng các trường cốt lõi phục vụ Matrix và 4 Playbook hoạt động thực tế.
   - **Tiêu chí nghiệm thu:**  
     + Toàn bộ crate `helios` và `trading_bot` biên dịch thành công (`cargo check`), mã nguồn tinh gọn, tường minh 100%.
+
+---
+
+## 💥 CÁC PHÁT HIỆN KIỂM TOÁN CHẤN ĐỘNG BỔ SUNG (2026-09-27)
+> **Tài liệu kiểm toán chi tiết:** [`strategies_backtests/helios/docs/audit_01/07_sensors/comprehensive_indicators_audit.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/07_sensors/comprehensive_indicators_audit.md)
+
+- [ ] **Task 08: Khắc phục lỗi quên khởi tạo `s.vol_sma` trong `core_v3/mod.rs:init()` (DEFECT-SEN-01)**
+  - **Mức độ:** **CRITICAL** (Ảnh hưởng trực tiếp đến hiệu năng Reversal Playbook)
+  - **Tập tin liên quan:**  
+    + [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:188-230`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L188-L230)
+    + [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:55, 104-105`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs#L55)
+  - **Bản chất lỗi:**  
+    Tại `core_v3/mod.rs`, `s.vol_sma` bị bỏ quên không gọi hàm `ctx.volume_sma(...)`, để mảng rỗng `vec![]`. Tại `reversal.rs:55`, `vol_sma = sensors.vol_sma.get(i).copied().unwrap_or(vol_current)` luôn rơi về fallback `vol_current`, khiến `vol_ratio = vol_current / vol_current = 1.0` cố định trên mọi nến! Làm liệt hoàn toàn cơ chế đo lường kiệt sức khối lượng của Reversal Scanner.
+  - **Giải pháp triển khai:**
+    1. Khởi tạo `s.vol_sma = ctx.volume_sma(ind.kama.timeframe, "VolSMA", 20);` trong `core_v3/mod.rs:init()`, hoặc
+    2. Chuyển `reversal.rs` sang sử dụng `sensors.vol_z_score` để đồng bộ chuẩn hóa phi thứ nguyên với các scanner khác (được khuyến nghị theo triết lý Quant thuần).
+  - **Tiêu chí nghiệm thu:**  
+    + `vol_ratio` trong `reversal.rs` biến thiên động phản ánh đúng tương quan nến hiện tại so với trung bình quá khứ.
+
+---
+
+- [ ] **Task 09: Loại bỏ chỉ báo zombie `rsi_reversal` và 2 gen DNA vô nghĩa (PHANTOM-SEN-02)**
+  - **Mức độ:** **HIGH** (Lãng phí tài nguyên và làm loãng không gian tìm kiếm GA)
+  - **Tập tin liên quan:**  
+    + [`strategies_backtests/helios/src/strategy/core_v3/config.rs:24, 76-85`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L24)
+    + [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:192-194`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L192-L194)
+    + [`strategies_backtests/helios/src/strategy/sensors.rs:40`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/sensors.rs#L40)
+  - **Bản chất lỗi:**  
+    Hệ thống tiêu tốn CPU tính `rsi_reversal` mỗi bar và mở 2 gen DNA (`rsi_reversal.period`, `rsi_reversal.timeframe`). Tuy nhiên, `scanners/reversal.rs` sử dụng MFI (`sensors.mfi`) và không hề đọc 1 chữ nào từ `rsi_reversal`.
+  - **Giải pháp triển khai:**
+    1. Xóa `s.rsi_reversal` khỏi `mod.rs:init()`.
+    2. Bỏ `#[dna]` khỏi `rsi_reversal` trong `config.rs`.
+    3. Dọn dẹp trường `rsi_reversal` khỏi `HeliosSensors`.
+  - **Tiêu chí nghiệm thu:**  
+    + Giảm thêm 2 chiều DNA, tăng tốc độ chạy GA Optimizer, không làm thay đổi bất kỳ quyết định vào lệnh nào của Reversal.
+
+---
+
+- [ ] **Task 10: Xóa bỏ bộ tứ ma trận phái sinh rác và gen ma `volume_lookback` (PHANTOM-MAT-03)**
+  - **Mức độ:** **MEDIUM**
+  - **Tập tin liên quan:**  
+    + [`strategies_backtests/helios/src/strategy/core_v3/matrix.rs:88-100, 115-125`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L88-L100)
+    + [`strategies_backtests/helios/src/strategy/core_v3/config.rs:266`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L266)
+  - **Bản chất lỗi:**  
+    `matrix.liquidity`, `matrix.price_z_score`, `matrix.trend_axis`, `matrix.chaos` tiêu tốn hàng nghìn phép tính tanh/percentile mỗi vòng lặp nhưng 0 scanner nào tiêu thụ. Trường `volume_lookback` trong `MatrixConfig` là gen ma không được dùng trong bất kỳ công thức nào.
+  - **Giải pháp:** Xem chi tiết và thực thi tại `TASK-MAT-07` trong [`05_matrix/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/05_matrix/TODO.md).
+
+---
+
+- [x] **Task 11: Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels (FLAW-MAT-05) - [ĐÃ XỬ LÝ ✅]**
+  - **Mức độ:** **HIGH**
+  - **Tập tin liên quan:**  
+    + [`strategies_backtests/helios/src/strategy/core_v3/config.rs:114-124`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L114-L124)
+    + [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:184-186`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L184-L186)
+  - **Bản chất lỗi:**  
+    Keltner Channel không thể đứng độc lập trong hệ thống, chỉ phục vụ duy nhất làm mẫu số tính Squeeze với Bollinger Bands. Tách rời 2 gen Timeframe độc lập khiến GA chọn lệch pha khung nến (75% tổ hợp), làm biến dạng hoàn toàn tỷ lệ $BB_w / KC_w$.
+  - **Kết quả:** Đã xử lý trọn vẹn theo `TASK-MAT-05` trong [`05_matrix/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/05_matrix/TODO.md) với giải pháp `#[dna(skip)]` và Serde-Safe.
+
