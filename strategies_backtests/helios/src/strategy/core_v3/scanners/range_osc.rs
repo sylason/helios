@@ -119,13 +119,13 @@ impl TacticalScanner for RangeOscScanner {
 
         let min_score = range_cfg.min_activation_score;
         let max_adverse = range_cfg.max_adverse_slope.max(0.01);
-        let trend_dir = matrix.trend_dir[i];
+        let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
         let tp_ratio = range_cfg.tp_target_ratio.max(0.05).min(0.95);
 
         if score_long >= min_score && score_long > score_short {
             // 🛡️ CHỐNG BẮT DAO RƠI & TRÔI DỐC:
             // 1. KAMA slope vĩ mô không được dốc xuống
-            if trend_dir < -max_adverse {
+            if kama_slope < -max_adverse {
                 return None;
             }
             // 2. Trục giữa BB Middle không được dốc cắm đầu
@@ -161,7 +161,7 @@ impl TacticalScanner for RangeOscScanner {
             })
         } else if score_short >= min_score && score_short > score_long {
             // 🛡️ CHỐNG CẢN TÀU & TRÔI DỐC LÊN:
-            if trend_dir > max_adverse {
+            if kama_slope > max_adverse {
                 return None;
             }
             if bb_slope > max_bb_slope {

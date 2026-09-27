@@ -13,7 +13,7 @@
 | **1** | `TASK-MAT-01` | Tái cấu trúc trục volume: Xóa `flow_axis` & gen `vol_z_sensitivity` (Occam) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs`, `scanners/momentum_ignition.rs` |
 | **2** | `TASK-MAT-02` | Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50 (Xóa clone `vol_axis`) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs:58–67`, `risk.rs:320` |
 | **3** | `TASK-MAT-03` | Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs:75–86` |
-| **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone `Vec<f64>` thừa thãi, chuyển sang Arc aliasing | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:102, 126, 128` |
+| **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone & Xóa biến nhân bản `trend_dir`, chuẩn hóa `kama_slope_atr` | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs`, scanners, `mod.rs` |
 | **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🔴 Chưa xử lý | `core_v3/config.rs:103–124` |
 | **6** | `TASK-MAT-06` | Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs:51–73, 108–124` |
 | **7** | `TASK-MAT-07` | Giữ lại `entropy`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs`, `core_v3/config.rs:266` |
@@ -103,36 +103,26 @@
 
 ---
 
-### 🟠 TASK-MAT-04: Triệt tiêu Deep Clone `Vec<f64>` thừa thãi, chuyển sang Arc aliasing
+### 🟢 TASK-MAT-04: Triệt Tiêu Deep Clone & Xóa Sổ Biến Nhân Bản `trend_dir` (Clean Code Triệt Để) - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-04` (High).
-- **Hiện trạng:**
+- **Kết quả thực hiện:**
+  - [x] Đã xóa bỏ hoàn toàn trường `pub trend_dir: Arc<Vec<f64>>` khỏi struct `MarketMatrixV3`, chấm dứt tình trạng 2 biến song sinh chứa cùng 1 nội dung.
+  - [x] Đã loại bỏ hoàn toàn lệnh `let trend_dir = kama_slope_atr.clone();` và cấp phát `Arc::new(trend_dir)` trong `MarketMatrixV3::from_sensors`.
+  - [x] Chuyển đổi 100% các Scanner sang đọc trực tiếp trường duy nhất chuẩn xác `matrix.kama_slope_atr`:
+    + `absorption.rs`: Đổi sang `matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0)`.
+    + `momentum_ignition.rs`: Đổi sang `matrix.kama_slope_atr.get(i).copied()`.
+    + `range_osc.rs`: Đổi sang `matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0)` kèm phòng vệ bounds checking.
+  - [x] Cập nhật toàn bộ 14 mock unit tests trong `core_v3/mod.rs` từ `matrix.trend_dir` sang `matrix.kama_slope_atr`.
+  - [x] Kiểm thử tự động:
+    + `helios`: 67/67 unit tests PASS ($100\%$).
+    + `bot_engine`: 39 passed, 1 ignored ($100\%$).
+    + `walk_forward_smart_seed`: Cargo check PASS (Exit code 0).
+- **Hiện trạng ban đầu:**
   - Tại `core_v3/matrix.rs:102, 126, 128`, mã nguồn gọi `.clone()` trên các `Vec<f64>`:
-    + `let vol_axis = squeeze_intensity.clone();`
-    + `let trend_dir = kama_slope_atr.clone();`
-    + `let volume_force = flow_axis.clone();`
-  - Gây lãng phí $> 12 \text{ MB}$ bộ nhớ heap cho mỗi lần backtest, tích lũy thành $> 60 \text{ GB}$ rác trong quá trình chạy GA Optimizer.
-- **Hành động cần làm:**
-  1. Thay thế việc nhân bản mảng bằng việc chia sẻ con trỏ `Arc`:
-     ```rust
-     let slope_arc = Arc::new(kama_slope_atr);
-     let flow_arc = Arc::new(flow_axis);
-     let sqz_arc = Arc::new(squeeze_intensity);
-
-     Self {
-         kama_slope_atr: slope_arc.clone(),
-         trend_dir: slope_arc,
-         flow_axis: flow_arc.clone(),
-         volume_force: flow_arc,
-         vol_axis: sqz_arc.clone(),
-         squeeze_intensity: sqz_arc,
-         ...
-     }
-     ```
-  2. Giảm chi phí nhân bản từ $O(N)$ phân bổ lại mảng về $O(1)$ tăng reference counter (8 bytes).
-- **Tiêu chuẩn nghiệm thu:**
-  - `Arc::ptr_eq(&matrix.kama_slope_atr, &matrix.trend_dir)` trả về `true`.
-  - `Arc::ptr_eq(&matrix.vol_axis, &matrix.squeeze_intensity)` trả về `true`.
-  - `Arc::ptr_eq(&matrix.flow_axis, &matrix.volume_force)` trả về `true`.
+    + `let vol_axis = squeeze_intensity.clone();` (Đã xóa ở TASK-MAT-02)
+    + `let trend_dir = kama_slope_atr.clone();` (Đã xử lý dứt điểm ở task này)
+    + `let volume_force = flow_axis.clone();` (Đã xóa ở TASK-MAT-01)
+  - Thay vì giải pháp chắp vá Arc aliasing, việc xóa bỏ hoàn toàn `trend_dir` đã tuân thủ 100% các nguyên tắc Clean Code: Single Source of Truth (SSOT), Intention-Revealing Names và DRY.
 
 ---
 

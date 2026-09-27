@@ -17,7 +17,6 @@ pub struct MarketMatrixV3 {
     pub chaos_index: Arc<Vec<f64>>,      // Chỉ số bão hỗn loạn Whipsaw [0.0, 1.0]
 
     // --- 🧭 Hướng & Sức mạnh (Directional) ---
-    pub trend_dir: Arc<Vec<f64>>,         // -1.0 (Bearish) to 1.0 (Bullish)
     pub trend_strength: Arc<Vec<f64>>,    // 0.0 to 1.0 (ADX Tanh Scaled)
     pub kama_slope_adj: Arc<Vec<f64>>,    // KAMA Slope điều chỉnh theo ER
     pub bb_middle_slope_adj: Arc<Vec<f64>>, // 🛡️ FLAW-REG.10: Độ dốc chuẩn hóa của trục giữa BB Middle (SMA 20)
@@ -134,13 +133,10 @@ impl MarketMatrixV3 {
             chaos_index.push(ch);
         }
         
-        let trend_dir = kama_slope_atr.clone();
-
         Self {
             kama_slope_atr: Arc::new(kama_slope_atr),
             trend_axis: Arc::new(trend_axis),
             chaos_index: Arc::new(chaos_index),
-            trend_dir: Arc::new(trend_dir),
             trend_strength: Arc::new(trend_strength),
             kama_slope_adj: sensors.kama_slope_adj.clone(),
             bb_middle_slope_adj: sensors.bb_middle_slope_adj.clone(),

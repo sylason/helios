@@ -11,12 +11,12 @@
 //!   + `volume_force`: Khối lượng giao dịch gia tăng bất thường.
 //!   + `vwma` (Volume Weighted Moving Average): Đường giá bình quân gia quyền khối lượng.
 //!   + `bb_middle`, `bb_lower`, `bb_upper`: Dải Bollinger Bands bao bọc vùng nén.
-//!   + `trend_dir`: Hướng xu hướng vĩ mô để tránh bẫy cản tàu hoặc bắt dao rơi.
+//!   + `kama_slope_atr`: Độ dốc xu hướng KAMA chuẩn hóa theo ATR để tránh bẫy cản tàu hoặc bắt dao rơi.
 //! - **Hệ Thống Phòng Ngự 2 Tầng:**
 //!   + Tầng 1 (Price Action & Mean Alignment): Phải có sự đồng thuận giữa VWMA và Close so với BB Middle.
 //!     - Long: Cả VWMA và Close đều phải nằm trên hoặc bằng BB Middle.
 //!     - Short: Cả VWMA và Close đều phải nằm dưới hoặc bằng BB Middle.
-//!   + Tầng 2 (Macro Trend Alignment): VETO chặn bắt dao rơi khi `trend_dir` dốc ngược chiều vượt ngưỡng `max_adverse_slope`.
+//!   + Tầng 2 (Macro Trend Alignment): VETO chặn bắt dao rơi khi `kama_slope_atr` dốc ngược chiều vượt ngưỡng `max_adverse_slope`.
 //! - **Thiết lập Vị thế:**
 //!   + Long: SL neo dưới đáy nến hoặc biên dưới BB: `low.min(bb_lower) - buffer`.
 //!   + Short: SL neo trên đỉnh nến hoặc biên trên BB: `high.max(bb_upper) + buffer`.
@@ -102,18 +102,18 @@ impl TacticalScanner for AbsorptionScanner {
 
             // 🛡️ FLAW-REG.9 TẦNG 2: Macro Trend Direction Alignment (100% Dynamic qua DNA)
             // Ngăn chặn triệt để bẫy bắt dao rơi khi xả lũ hoặc cản tàu khi bơm dốc:
-            // - Long: Nếu trend_dir < -max_adverse_slope -> VETO cấm bắt dao rơi!
-            // - Short: Nếu trend_dir > max_adverse_slope -> VETO cấm cản tàu!
-            let trend_dir = matrix.trend_dir.get(i).copied().unwrap_or(0.0);
+            // - Long: Nếu kama_slope < -max_adverse_slope -> VETO cấm bắt dao rơi!
+            // - Short: Nếu kama_slope > max_adverse_slope -> VETO cấm cản tàu!
+            let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
             let max_adverse = abs_cfg.max_adverse_slope.max(0.01);
             match signal_type {
                 SignalType::Long => {
-                    if trend_dir < -max_adverse {
+                    if kama_slope < -max_adverse {
                         return None;
                     }
                 }
                 SignalType::Short => {
-                    if trend_dir > max_adverse {
+                    if kama_slope > max_adverse {
                         return None;
                     }
                 }

@@ -1419,7 +1419,7 @@ mod tests {
         let mut matrix_range = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix_range.trend_strength = std::sync::Arc::new(vec![0.2; len]);
         matrix_range.bb_width_norm = std::sync::Arc::new(vec![0.04; len]);
-        matrix_range.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        matrix_range.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
 
         let raw_cache_range = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
@@ -1481,7 +1481,7 @@ mod tests {
         };
         let mut matrix_abs = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix_abs.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix_abs.trend_dir = std::sync::Arc::new(vec![0.02; len]);
+        matrix_abs.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
         let abs_prop = AbsorptionScanner.scan(&tick_abs, &sensors, &matrix_abs, &config);
         assert!(abs_prop.is_some(), "AbsorptionScanner phải sinh Proposal Long khi tích lũy rút chân ở nửa dưới BB!");
         let abs_p = abs_prop.unwrap();
@@ -1549,15 +1549,15 @@ mod tests {
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
 
-        // KỊCH BẢN 1: Bẫy bắt dao rơi (trend_dir = -0.25 < -0.15) -> VETO Long
-        matrix.trend_dir = std::sync::Arc::new(vec![-0.25; len]);
+        // KỊCH BẢN 1: Bẫy bắt dao rơi (kama_slope_atr = -0.25 < -0.15) -> VETO Long
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.25; len]);
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
-        assert!(prop.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Long bắt dao rơi khi trend_dir = -0.25!");
+        assert!(prop.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Long bắt dao rơi khi kama_slope_atr = -0.25!");
 
-        // KỊCH BẢN 2: Bẫy cản tàu Short (trend_dir = +0.25 > +0.15) -> VETO Short
+        // KỊCH BẢN 2: Bẫy cản tàu Short (kama_slope_atr = +0.25 > +0.15) -> VETO Short
         let mut sensors_short = sensors.clone();
         sensors_short.vwma = std::sync::Arc::new(vec![2008.0; len]); // vwma > bb_middle -> Short
-        matrix.trend_dir = std::sync::Arc::new(vec![0.25; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.25; len]);
         let raw_cache_short = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
             open: std::sync::Arc::new(vec![2012.0; len]),
@@ -1579,10 +1579,10 @@ mod tests {
             position: Position::default(),
         };
         let prop_short = AbsorptionScanner.scan(&tick_short, &sensors_short, &matrix, &config);
-        assert!(prop_short.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Short cản tàu khi trend_dir = +0.25!");
+        assert!(prop_short.is_none(), "AbsorptionScanner PHẢI VETO chặn lệnh Short cản tàu khi kama_slope_atr = +0.25!");
 
         // KỊCH BẢN 3: Nến cắm đầu rơi tự do (CLV âm, Marubozu đỏ tại nửa dưới) -> PHẢI LỌC BỎ
-        matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
         let raw_cache_knife = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
             open: std::sync::Arc::new(vec![1995.0; len]),
@@ -1665,7 +1665,7 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![0.02; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "AbsorptionScanner PHẢI sinh Proposal Long khi thị trường tích lũy chuẩn trong vùng phẳng!");
@@ -1737,7 +1737,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
         matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
         matrix.trend_strength = std::sync::Arc::new(vec![0.20; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![-0.05; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.05; len]);
         matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
 
         let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
@@ -1808,7 +1808,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
         matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
         matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
         matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
 
         let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
@@ -1884,7 +1884,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
         matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
         matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![0.0; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
         matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
 
         let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
@@ -1955,7 +1955,7 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![0.15; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
 
         let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "TrendPB PHẢI cấp Proposal Long khi nhịp hồi KAMA lành mạnh và có lực cầu CLV!");
@@ -2018,7 +2018,7 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![0.15; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
 
         let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "TrendPB PHẢI VETO triệt để khi giá sập gãy KAMA (delta < -invalidation_buffer)!");
@@ -2075,7 +2075,7 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![0.15; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
 
         let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "TrendPB PHẢI VETO triệt để khi giá bay quá xa KAMA (delta > max_pullback_dist) chống mua đu đỉnh!");
@@ -2144,7 +2144,7 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![0.15; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
 
         let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "TrendPB PHẢI VETO khi nến cắm đầu rơi tự do (CLV < 0.15)!");
@@ -2215,7 +2215,7 @@ mod tests {
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
-        matrix.trend_dir = std::sync::Arc::new(vec![-0.15; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.15; len]);
 
         let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "TrendPB PHẢI cấp Proposal Short đối xứng khi trend giảm hồi phục!");

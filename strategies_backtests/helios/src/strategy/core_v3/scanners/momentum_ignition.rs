@@ -83,18 +83,18 @@ impl TacticalScanner for MomentumIgnitionScanner {
         };
 
         // 🛡️ VẤN ĐỀ 3 (TODO-P0-05): Macro Trend Veto (Chống bắt dao rơi & cản đầu xe tăng)
-        let trend_dir = matrix.trend_dir.get(i).copied()
+        let kama_slope = matrix.kama_slope_atr.get(i).copied()
             .or_else(|| sensors.kama_slope_adj.get(i).copied())
             .unwrap_or(0.0);
         let max_adverse = if mom_cfg.max_adverse_slope <= 0.0 { 0.15 } else { mom_cfg.max_adverse_slope.max(0.01) };
         match signal_type {
             SignalType::Long => {
-                if trend_dir < -max_adverse {
+                if kama_slope < -max_adverse {
                     return None; // KAMA dốc xuống -> Cấm Long bùng nổ ngược thác lũ
                 }
             }
             SignalType::Short => {
-                if trend_dir > max_adverse {
+                if kama_slope > max_adverse {
                     return None; // KAMA dốc lên -> Cấm Short bùng nổ cản đầu xe tăng
                 }
             }
