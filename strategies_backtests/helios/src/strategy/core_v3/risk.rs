@@ -317,6 +317,9 @@ impl RiskManager {
                 ),
             };
 
+            // 🚀 TASK-MAT-02: Đọc trực tiếp từ squeeze_intensity (thay cho biến clone thừa vol_axis đã xóa sổ).
+            // - Khi thị trường nén mạnh (squeeze_intensity cao): mở rộng ngưỡng BE để tránh dời SL quá sớm khi biến động chuẩn bị bùng nổ.
+            // - Khi thị trường bung nén/xu hướng (squeeze_intensity thấp -> 0.0): không thổi phồng min_be_roe, bảo vệ hòa vốn kịp thời.
             let sqz_multiplier = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0).max(0.0);
             let effective_be_trigger_atr = be_trigger_mult * (1.0 + 0.5 * sqz_multiplier);
             let required_profit = current_atr * effective_be_trigger_atr * trade.size.abs();

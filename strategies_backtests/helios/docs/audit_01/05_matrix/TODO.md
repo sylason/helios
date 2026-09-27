@@ -12,7 +12,7 @@
 | :---: | :--- | :--- | :---: | :---: | :--- |
 | **1** | `TASK-MAT-01` | Tái cấu trúc trục volume: Xóa `flow_axis` & gen `vol_z_sensitivity` (Occam) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs`, `scanners/momentum_ignition.rs` |
 | **2** | `TASK-MAT-02` | Tái cấu trúc công thức Squeeze Intensity thoát khỏi bẫy 0.50 (Xóa clone `vol_axis`) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs:58–67`, `risk.rs:320` |
-| **3** | `TASK-MAT-03` | Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:71–81` |
+| **3** | `TASK-MAT-03` | Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs:75–86` |
 | **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone `Vec<f64>` thừa thãi, chuyển sang Arc aliasing | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:102, 126, 128` |
 | **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🔴 Chưa xử lý | `core_v3/config.rs:103–124` |
 | **6** | `TASK-MAT-06` | Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs:51–73, 108–124` |
@@ -89,19 +89,17 @@
 
 ---
 
-### 🟠 TASK-MAT-03: Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm
+### 🟢 TASK-MAT-03: Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-03` (High).
-- **Hiện trạng:**
-  - Tại `core_v3/matrix.rs:72, 81`, `trend_strength` được tính bằng `tanh((adx - 20.0) / z_sens)`. Khi ADX $< 20.0$ (thị trường sideway/không trend), giá trị trả về âm sâu xuống tới $-1.0$.
-  - Trong khi đó, định nghĩa trường tại dòng 22 ghi rõ: `0.0 to 1.0 (ADX Tanh Scaled)`.
-  - Scanner `scanners/range_osc.rs:62` kiểm tra `trend_strength > max_trend`, khi gặp số âm có thể bị sai lệch logic chặn.
-  - Đồng thời, tồn tại song song cả `trend_axis` và `trend_strength` cùng đo ADX nhưng theo hai chuẩn khác nhau.
-- **Hành động cần làm:**
-  1. Chuẩn hóa lại công thức `trend_strength` về $[0.0, 1.0]$ không có số âm:
-     $$\text{trend\_strength}[i] = \tanh\left(\frac{\text{ADX}[i]}{\text{adx\_trend\_threshold}}\right) \in [0.0, 1.0]$$
-  2. Đồng nhất hóa `trend_axis` và `trend_strength` hoặc phân định rõ: `trend_dir` là hướng $[-1.0, 1.0]$, `trend_strength` là độ mạnh $[0.0, 1.0]$.
-- **Tiêu chuẩn nghiệm thu:**
-  - Unit test khẳng định với mọi giá trị ADX từ $0.0$ đến $100.0$, `trend_strength` luôn thuộc $[0.0, 1.0]$, không bao giờ $< 0.0$.
+- **Kết quả thực hiện:**
+  - [x] Đã tái cấu trúc công thức tính `trend_strength` sang chuẩn hóa tuyến tính thuần khiết:
+    $$\text{trend\_strength} = \left(\frac{\text{ADX}}{100.0}\right).\text{clamp}(0.0, 1.0)$$
+    + Triệt tiêu hoàn toàn số âm $[-1.0, 0.0]$, đưa dải đo về đúng tính chất đại lượng vô hướng $[0.0, 1.0]$ ($\text{ADX} = 25.0 \implies 0.25$).
+    + Xóa bỏ hoàn toàn vector cấp phát đệm thừa `adx_centered: Vec<f64>` và phép trừ `adx - 20.0` trong vòng lặp.
+    + Chấm dứt ô nhiễm dữ liệu chéo: không còn mượn `z_score_sensitivity` để chia cho ADX.
+  - [x] Thống nhất sau phiên `/grill-me`: Giữ nguyên 100% `config.rs` (không can thiệp vào dải gene của `RangeOscillator` vì scanner này đang ngủ đông).
+  - [x] Bổ sung unit test `test_trend_strength_linear_bounds` kiểm chứng 100% các mốc ADX từ NaN, số âm, $15.0 \to 0.15$ đến $120.0 \to 1.0$ (kẹp trần) (PASS).
+  - [x] Kiểm thử tự động: 100% tests `helios` (67/67) và `bot_engine` (39 passed, 1 ignored) vượt qua.
 
 ---
 

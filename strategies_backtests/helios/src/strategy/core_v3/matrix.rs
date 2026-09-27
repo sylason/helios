@@ -10,7 +10,8 @@ use crate::strategy::core_v3::config::HeliosConfigV3;
 /// Bổ sung thêm các Regime Multipliers chuẩn Quant phục vụ cho Arbiter.
 #[derive(Clone, Debug, Default)]
 pub struct MarketMatrixV3 {
-    // --- 🚀 4 TRỤC ĐO VẬT LÝ TRỰC GIAO MỚI (DE-OVERENGINEERED ORTHOGONAL AXES) ---
+    // --- 🚀 3 TRỤC ĐO VẬT LÝ TRỰC GIAO (DE-OVERENGINEERED ORTHOGONAL AXES) ---
+    // (vol_axis đã được xóa bỏ hoàn toàn do trùng lặp 100% với squeeze_intensity)
     pub kama_slope_atr: Arc<Vec<f64>>,   // Độ dốc KAMA chuẩn hóa theo ATR phi thứ nguyên [-1.0, 1.0]
     pub trend_axis: Arc<Vec<f64>>,       // Trục xu hướng ADX chuẩn hóa theo adx_trend_threshold [0.0, 1.0]
     pub chaos_index: Arc<Vec<f64>>,      // Chỉ số bão hỗn loạn Whipsaw [0.0, 1.0]
@@ -43,7 +44,6 @@ impl MarketMatrixV3 {
         let mut chaos = Vec::with_capacity(len);
         let mut bb_width_norm = Vec::with_capacity(len);
         let mut sqz_raw = Vec::with_capacity(len);
-        let mut adx_centered = Vec::with_capacity(len);
 
         for i in 0..len {
             let natr_val = sensors.natr.get(i).copied().unwrap_or(0.0);
@@ -70,10 +70,6 @@ impl MarketMatrixV3 {
                 let sqz_continuous = 1.0 / (1.0 + ratio * ratio);
                 sqz_raw.push(sqz_continuous.clamp(0.0, 1.0));
             }
-
-            // ADX Centered tại ngưỡng 20.0 để dùng Tanh Scale
-            let adx_v = sensors.adx.get(i).copied().unwrap_or(0.0);
-            adx_centered.push(if adx_v.is_nan() { 0.0 } else { adx_v - 20.0 });
         }
 
         // TÍNH TOÁN CÁC DÒNG CHUẨN HÓA V3.3
@@ -82,7 +78,19 @@ impl MarketMatrixV3 {
         let trend_lb = if config.matrix.trend_lookback == 0 { 20 } else { config.matrix.trend_lookback };
         let mom_lb = if config.matrix.momentum_lookback == 0 { 20 } else { config.matrix.momentum_lookback };
 
-        let trend_strength = normalization::tanh_scale(&adx_centered, z_sens);
+        // 🚀 TASK-MAT-03: Chuẩn hóa tuyến tính thuần khiết ADX / 100.0 (Occam's Scalpel)
+        // - Triệt tiêu vĩnh viễn số âm, đưa dải đo về chuẩn vô hướng [0.0, 1.0] (ADX 25.0 = 0.25).
+        // - Loại bỏ hoàn toàn vector đệm adx_centered và chấm dứt ô nhiễm chéo z_score_sensitivity.
+        let mut trend_strength = Vec::with_capacity(len);
+        for i in 0..len {
+            let adx_v = sensors.adx.get(i).copied().unwrap_or(0.0);
+            let val = if adx_v.is_nan() || adx_v <= 0.0 {
+                0.0
+            } else {
+                (adx_v / 100.0).min(1.0)
+            };
+            trend_strength.push(val);
+        }
 
         let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, sqz_lb);
         let liquidity = normalization::rolling_percentile(&sensors.mfi, mom_lb);
@@ -404,5 +412,30 @@ mod tests {
             "Khi biến động bung mạnh nhất, Squeeze Intensity ({}) phải ở vùng đáy (< 0.20), không được kẹt ở 0.50!",
             last_sqz
         );
+    }
+
+    #[test]
+    fn test_trend_strength_linear_bounds() {
+        let mut sensors = HeliosSensors::default();
+        let test_adx = vec![f64::NAN, -5.0, 0.0, 15.0, 25.0, 50.0, 100.0, 120.0];
+        let len = test_adx.len();
+
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![105.0; len]);
+        sensors.lows = Arc::new(vec![95.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+        sensors.adx = Arc::new(test_adx);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        assert_eq!(matrix.trend_strength[0], 0.0, "NaN phải trả về 0.0");
+        assert_eq!(matrix.trend_strength[1], 0.0, "Số âm phải kẹp về 0.0");
+        assert_eq!(matrix.trend_strength[2], 0.0, "ADX 0 phải trả về 0.0");
+        assert!((matrix.trend_strength[3] - 0.15).abs() < 1e-6, "ADX 15 phải là 0.15 (không được âm!)");
+        assert!((matrix.trend_strength[4] - 0.25).abs() < 1e-6, "ADX 25 phải là 0.25");
+        assert!((matrix.trend_strength[5] - 0.50).abs() < 1e-6, "ADX 50 phải là 0.50");
+        assert_eq!(matrix.trend_strength[6], 1.0, "ADX 100 phải là 1.0");
+        assert_eq!(matrix.trend_strength[7], 1.0, "ADX > 100 phải kẹp trần 1.0");
     }
 }
