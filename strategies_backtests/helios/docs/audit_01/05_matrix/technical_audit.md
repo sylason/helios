@@ -262,6 +262,19 @@ Khi một biến $x$ mang giá trị `f64::NAN`:
   `f64::NAN.min(1.0)` trả về `1.0`! Sau đó `1.0.max(0.0)` trả về $\mathbf{1.0}$!
 - Việc phụ thuộc vào thứ tự gọi của hàm thư viện để triệt tiêu NaN là một hành vi lập trình cực kỳ mong manh (fragile code) và tiềm ẩn nguy cơ lỗi runtime ngầm.
 
+#### ⚠️ CẢNH BÁO RỦI RO TIỀM TÀNG CỦA `sanitize_f64` TRONG TƯƠNG LAI:
+Dù `sanitize_f64(val, fallback)` là giải pháp triệt tiêu bẫy `unwrap_or(0.0)`, việc lạm dụng nó mang lại 3 nguy cơ tiềm tàng:
+1. **Che đậy lỗi ngầm (Defect Masking):** Nếu một indicator bị lỗi thuật toán (chia cho 0, cấu hình period sai), `sanitize_f64` sẽ âm thầm nuốt lỗi và bơm giá trị fallback vào hệ thống. Chiến lược vẫn chạy bình thường nhưng thực chất $50-100\%$ quyết định được đưa ra dựa trên dữ liệu nhân tạo!
+2. **Sai lệch ngữ cảnh đại lượng (Contextual Fallback Mismatch):** Nếu dùng chung một mức fallback cho mọi loại dữ liệu:
+   - Gán $0.0$ cho MFI ($[0, 100]$) sẽ đánh lừa hệ thống rằng thị trường đang bị bán tháo kiệt cùng $\implies$ Bắn tín hiệu Long phá sản tài khoản! (MFI fallback bắt buộc phải là $50.0$).
+   - Gán $0.0$ cho đường giá KAMA/SMA sẽ khiến giá trị trung bình rơi về 0 $\implies$ Kích hoạt Stop Loss khẩn cấp hoặc méo mó tín hiệu (KAMA fallback phải là `current_close`).
+   - Gán $0.0$ cho độ lệch chuẩn hoặc ATR sẽ gây lỗi chia cho 0 ở các phép tính tiếp theo (fallback phải là $\epsilon = 10^{-5}$).
+3. **Làm mù thuật toán tối ưu di truyền (GA Optimizer Blindness):** GA không nhận biết được các bộ tham số dị tật sinh ra chuỗi NaN, làm giảm hiệu quả chọn lọc tự nhiên.
+
+> **Nguyên Tắc Bất Di Bất Dịch:**  
+> `sanitize_f64` **CHỈ LÀ VỆ SĨ RUNTIME (Seatbelt)** chống đột tử hệ thống (phép chia cho 0 khi nến phẳng lì, căn bậc 2 số âm do sai số float, nến sàn mất kết nối).  
+> Nó **TUYỆT ĐỐI KHÔNG ĐƯỢC THAY THẾ CHO HARD WARMUP GATE**: Hệ thống phải kiểm tra đủ dữ liệu lịch sử ($\ge 43,200$ nến 1m cho các khung 4h/12h) và từ chối chạy bot nếu dữ liệu chưa sẵn sàng.
+
 ---
 
 ### 3.5 Thiếu kẹp biên (Clamping) trên `bb_width_norm`, `bb_middle_slope_adj`, `kama_slope_adj`

@@ -254,7 +254,7 @@ impl Strategy for HeliosStrategyV3 {
                     bb_slope.push(0.0);
                 } else {
                     let raw_slope = (m_curr - m_prev) / (k_bars as f64 * atr);
-                    bb_slope.push(raw_slope);
+                    bb_slope.push(raw_slope.clamp(-2.0, 2.0));
                 }
             }
         }

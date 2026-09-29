@@ -45,30 +45,37 @@ impl MarketMatrixV3 {
         let mut sqz_raw = Vec::with_capacity(len);
 
         for i in 0..len {
-            let natr_val = sensors.natr.get(i).copied().unwrap_or(0.0);
-            chaos.push(natr_val / 100.0);
+            let natr_val = sensors.natr.get(i).copied().unwrap_or(f64::NAN);
+            chaos.push(if natr_val.is_finite() && natr_val > 0.0 { natr_val / 100.0 } else { 0.0 });
             
-            let bu = sensors.bb_upper.get(i).copied().unwrap_or(0.0);
-            let bl = sensors.bb_lower.get(i).copied().unwrap_or(0.0);
-            let bm = sensors.bb_middle.get(i).copied().unwrap_or(0.0);
-            bb_width_norm.push(if bm > 0.0 { (bu - bl) / bm } else { 0.0 });
-
-            let ku = sensors.kc_upper.get(i).copied().unwrap_or(0.0);
-            let kl = sensors.kc_lower.get(i).copied().unwrap_or(0.0);
-            let kc_w = ku - kl;
+            let bu = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
+            let bl = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
+            let bm = sensors.bb_middle.get(i).copied().unwrap_or(f64::NAN);
             let bb_w = bu - bl;
-            if kc_w < 1e-9 || kc_w.is_nan() || bb_w.is_nan() || bu.is_nan() || bl.is_nan() || ku.is_nan() || kl.is_nan() {
-                sqz_raw.push(0.0);
+
+            // 🛡️ TASK-MAT-08: Kẹp trần 1.0 cho bb_width_norm chống bùng nổ vô tận khi flash crash
+            let norm = if bm > 1e-9 && bb_w.is_finite() {
+                (bb_w.max(0.0) / bm).clamp(0.0, 1.0)
             } else {
-                // 🚀 TASK-MAT-02 (Inverse Quadratic Soft Squeeze):
-                // sqz_raw = 1.0 / (1.0 + (BB_w / KC_w)^2)
-                // - Khi BB_w << KC_w (nén cực đại): sqz_raw -> 1.0
-                // - Khi BB_w == KC_w (ngưỡng Carter): sqz_raw = 0.50
-                // - Khi BB_w >> KC_w (bung nén/bão): sqz_raw -> 0.0 (không bao giờ kẹt 0.0 phẳng lỳ)
+                0.0
+            };
+            bb_width_norm.push(norm);
+
+            let ku = sensors.kc_upper.get(i).copied().unwrap_or(f64::NAN);
+            let kl = sensors.kc_lower.get(i).copied().unwrap_or(f64::NAN);
+            let kc_w = ku - kl;
+
+            // 🚀 TASK-MAT-02 & TASK-MAT-06 (Safe Math Soft Squeeze):
+            // - Mẫu số kc_w > 1e-9 và tử số bb_w hữu hạn
+            // - Khi kc_w <= 1e-9 hoặc dữ liệu không hợp lệ -> sqz_raw = 0.0 (không nén)
+            let sqz_continuous = if kc_w > 1e-9 && bb_w.is_finite() {
                 let ratio = (bb_w.max(0.0) / kc_w).max(0.0);
-                let sqz_continuous = 1.0 / (1.0 + ratio * ratio);
-                sqz_raw.push(sqz_continuous.clamp(0.0, 1.0));
-            }
+                let val = 1.0 / (1.0 + ratio * ratio);
+                val.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            sqz_raw.push(sqz_continuous);
         }
 
         // TÍNH TOÁN CÁC DÒNG CHUẨN HÓA V3.3
@@ -77,16 +84,14 @@ impl MarketMatrixV3 {
         let trend_lb = if config.matrix.trend_lookback == 0 { 20 } else { config.matrix.trend_lookback };
         let mom_lb = if config.matrix.momentum_lookback == 0 { 20 } else { config.matrix.momentum_lookback };
 
-        // 🚀 TASK-MAT-03: Chuẩn hóa tuyến tính thuần khiết ADX / 100.0 (Occam's Scalpel)
-        // - Triệt tiêu vĩnh viễn số âm, đưa dải đo về chuẩn vô hướng [0.0, 1.0] (ADX 25.0 = 0.25).
-        // - Loại bỏ hoàn toàn vector đệm adx_centered và chấm dứt ô nhiễm chéo z_score_sensitivity.
+        // 🚀 TASK-MAT-03 & TASK-MAT-06: Chuẩn hóa tuyến tính thuần khiết ADX / 100.0 (Occam's Scalpel)
         let mut trend_strength = Vec::with_capacity(len);
         for i in 0..len {
-            let adx_v = sensors.adx.get(i).copied().unwrap_or(0.0);
-            let val = if adx_v.is_nan() || adx_v <= 0.0 {
-                0.0
+            let adx_v = sensors.adx.get(i).copied().unwrap_or(f64::NAN);
+            let val = if adx_v.is_finite() && adx_v > 0.0 {
+                (adx_v / 100.0).clamp(0.0, 1.0)
             } else {
-                (adx_v / 100.0).min(1.0)
+                0.0
             };
             trend_strength.push(val);
         }
@@ -100,46 +105,45 @@ impl MarketMatrixV3 {
         // 🚀 1. DỐC KAMA CHUẨN HÓA THEO ATR (PHI THỨ NGUYÊN - ASSET AGNOSTIC)
         let scale_atr = if config.matrix.kama_slope_scale_atr <= 0.0 { 0.20 } else { config.matrix.kama_slope_scale_atr };
         let kama_slope_atr: Vec<f64> = sensors.kama_slope_adj.iter().map(|&s| {
-            if s.is_nan() { 0.0 } else { (s / scale_atr).max(-1.0).min(1.0) }
+            if s.is_finite() { (s / scale_atr).clamp(-1.0, 1.0) } else { 0.0 }
         }).collect();
 
         // 🚀 2. TRỤC XU HƯỚNG TRỰC GIAO (ADX THEO GEN adx_trend_threshold)
         let adx_thresh = if config.matrix.adx_trend_threshold <= 0.0 { 25.0 } else { config.matrix.adx_trend_threshold };
         let trend_axis: Vec<f64> = sensors.adx.iter().map(|&adx_v| {
-            if adx_v.is_nan() { 0.0 } else { (adx_v / adx_thresh).max(0.0).min(1.0) }
+            if adx_v.is_finite() && adx_v > 0.0 { (adx_v / adx_thresh).clamp(0.0, 1.0) } else { 0.0 }
         }).collect();
 
         // 🚀 3. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index)
         // chaos_index = c_r * (1.0 - entropy)
-        // Trong đó:
-        // - c_r: Chaos Ratio (tỷ lệ biến động rối loạn, từ sensors.chaos_ratio)
-        // - entropy: Kaufman Efficiency Ratio (ER), đo độ mượt của xu hướng (1.0 = đi thẳng một mạch, 0.0 = hoàn toàn ngẫu nhiên)
-        // - (1.0 - entropy): Mức độ nhiễu loạn/ziczac (Noise/Whipsaw)
-        // Khi Super Trend bùng nổ: c_r cao nhưng entropy ~ 1.0 -> (1.0 - entropy) ~ 0.0 -> chaos_index ~ 0.0 (không bị phạt oan)
-        // Khi Bão Whipsaw: c_r cao và entropy ~ 0.0 -> (1.0 - entropy) ~ 1.0 -> chaos_index cao (kích hoạt phòng vệ)
         let mut chaos_index = Vec::with_capacity(len);
         for i in 0..len {
             let c_r_raw = chaos_ratio.get(i).copied().unwrap_or(f64::NAN);
             let ent_raw = entropy.get(i).copied().unwrap_or(f64::NAN);
 
-            let ch = if c_r_raw.is_nan() || ent_raw.is_nan() {
-                0.0
-            } else {
+            let ch = if c_r_raw.is_finite() && ent_raw.is_finite() {
                 let c_r = c_r_raw.clamp(0.0, 1.0);
                 let noise = (1.0 - ent_raw.clamp(0.0, 1.0)).clamp(0.0, 1.0);
                 c_r * noise
+            } else {
+                0.0
             };
 
             chaos_index.push(ch);
         }
         
+        // 🚀 4. ĐỘ DỐC TRỤC GIỮA BB MIDDLE (KẸP BIÊN [-2.0, 2.0] THEO TASK-MAT-08)
+        let bb_middle_slope_adj: Vec<f64> = sensors.bb_middle_slope_adj.iter().map(|&s| {
+            if s.is_finite() { s.clamp(-2.0, 2.0) } else { 0.0 }
+        }).collect();
+
         Self {
             kama_slope_atr: Arc::new(kama_slope_atr),
             trend_axis: Arc::new(trend_axis),
             chaos_index: Arc::new(chaos_index),
             trend_strength: Arc::new(trend_strength),
             kama_slope_adj: sensors.kama_slope_adj.clone(),
-            bb_middle_slope_adj: sensors.bb_middle_slope_adj.clone(),
+            bb_middle_slope_adj: Arc::new(bb_middle_slope_adj),
             squeeze_intensity: Arc::new(squeeze_intensity),
             bb_width_norm: Arc::new(bb_width_norm),
             liquidity: Arc::new(liquidity),
@@ -433,5 +437,102 @@ mod tests {
         assert!((matrix.trend_strength[5] - 0.50).abs() < 1e-6, "ADX 50 phải là 0.50");
         assert_eq!(matrix.trend_strength[6], 1.0, "ADX 100 phải là 1.0");
         assert_eq!(matrix.trend_strength[7], 1.0, "ADX > 100 phải kẹp trần 1.0");
+    }
+
+    #[test]
+    fn test_matrix_safe_math_nan_resilience() {
+        // 🛡️ TASK-MAT-06: Kiểm chứng Safe Math Guards triệt tiêu hoàn toàn NaN, Infinity, NegInfinity
+        let len = 20;
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![105.0; len]);
+        sensors.lows = Arc::new(vec![95.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+
+        // Trộn lẫn các giá trị dị tật toán học
+        sensors.natr = Arc::new(vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 2.0].into_iter().cycle().take(len).collect());
+        sensors.bb_upper = Arc::new(vec![f64::NAN, 110.0, f64::INFINITY, 105.0].into_iter().cycle().take(len).collect());
+        sensors.bb_lower = Arc::new(vec![90.0, f64::NAN, 95.0, f64::NEG_INFINITY].into_iter().cycle().take(len).collect());
+        sensors.bb_middle = Arc::new(vec![0.0, f64::NAN, 100.0, f64::INFINITY].into_iter().cycle().take(len).collect());
+        sensors.kc_upper = Arc::new(vec![f64::NAN, 108.0, 104.0, f64::INFINITY].into_iter().cycle().take(len).collect());
+        sensors.kc_lower = Arc::new(vec![92.0, f64::NAN, 96.0, f64::NEG_INFINITY].into_iter().cycle().take(len).collect());
+        sensors.adx = Arc::new(vec![f64::NAN, f64::INFINITY, -10.0, 35.0].into_iter().cycle().take(len).collect());
+        sensors.kama_slope_adj = Arc::new(vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.5].into_iter().cycle().take(len).collect());
+        sensors.chaos_ratio = Arc::new(vec![f64::NAN, f64::INFINITY, 1.2, 0.8].into_iter().cycle().take(len).collect());
+        sensors.efficiency_ratio = Arc::new(vec![f64::NAN, 0.5, f64::INFINITY, 0.9].into_iter().cycle().take(len).collect());
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        for i in 0..len {
+            assert!(matrix.bb_width_norm[i].is_finite(), "bb_width_norm[{}] phải là số hữu hạn", i);
+            assert!(matrix.bb_width_norm[i] >= 0.0 && matrix.bb_width_norm[i] <= 1.0, "bb_width_norm[{}] phải trong [0.0, 1.0]", i);
+
+            assert!(matrix.squeeze_intensity[i].is_finite(), "squeeze_intensity[{}] phải là số hữu hạn", i);
+            assert!(matrix.squeeze_intensity[i] >= 0.0 && matrix.squeeze_intensity[i] <= 1.0, "squeeze_intensity[{}] phải trong [0.0, 1.0]", i);
+
+            assert!(matrix.trend_strength[i].is_finite(), "trend_strength[{}] phải là số hữu hạn", i);
+            assert!(matrix.trend_strength[i] >= 0.0 && matrix.trend_strength[i] <= 1.0, "trend_strength[{}] phải trong [0.0, 1.0]", i);
+
+            assert!(matrix.kama_slope_atr[i].is_finite(), "kama_slope_atr[{}] phải là số hữu hạn", i);
+            assert!(matrix.kama_slope_atr[i] >= -1.0 && matrix.kama_slope_atr[i] <= 1.0, "kama_slope_atr[{}] phải trong [-1.0, 1.0]", i);
+
+            assert!(matrix.trend_axis[i].is_finite(), "trend_axis[{}] phải là số hữu hạn", i);
+            assert!(matrix.trend_axis[i] >= 0.0 && matrix.trend_axis[i] <= 1.0, "trend_axis[{}] phải trong [0.0, 1.0]", i);
+
+            assert!(matrix.chaos_index[i].is_finite(), "chaos_index[{}] phải là số hữu hạn", i);
+            assert!(matrix.chaos_index[i] >= 0.0 && matrix.chaos_index[i] <= 1.0, "chaos_index[{}] phải trong [0.0, 1.0]", i);
+        }
+    }
+
+    #[test]
+    fn test_bb_width_norm_clamped() {
+        // 🛡️ TASK-MAT-08: Kiểm chứng kẹp trần 1.0 khi Flash Crash bung band cực đại
+        let len = 5;
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![1000.0; len]);
+        sensors.lows = Arc::new(vec![10.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+
+        // BB Upper = 1000.0, Lower = 10.0, Middle = 50.0 => (1000 - 10) / 50 = 19.8 => phải kẹp về 1.0
+        sensors.bb_upper = Arc::new(vec![1000.0; len]);
+        sensors.bb_lower = Arc::new(vec![10.0; len]);
+        sensors.bb_middle = Arc::new(vec![50.0; len]);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        for i in 0..len {
+            assert_eq!(matrix.bb_width_norm[i], 1.0, "bb_width_norm phải được kẹp trần chính xác tại 1.0 khi bung band cực đại");
+        }
+    }
+
+    #[test]
+    fn test_zero_volatility_flat_bars() {
+        // 🛡️ Safe Math Guard: Thị trường đứng im phẳng lì (High = Low = Close, BB_w = 0, KC_w = 0)
+        let len = 10;
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![100.0; len]);
+        sensors.lows = Arc::new(vec![100.0; len]);
+        sensors.volumes = Arc::new(vec![0.0; len]);
+
+        sensors.bb_upper = Arc::new(vec![100.0; len]);
+        sensors.bb_lower = Arc::new(vec![100.0; len]);
+        sensors.bb_middle = Arc::new(vec![100.0; len]);
+        sensors.kc_upper = Arc::new(vec![100.0; len]);
+        sensors.kc_lower = Arc::new(vec![100.0; len]);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        for i in 0..len {
+            assert_eq!(matrix.bb_width_norm[i], 0.0, "Độ rộng BB nến phẳng lì phải là 0.0");
+            assert!(matrix.squeeze_intensity[i].is_finite(), "KC_w = 0 không được panic chia cho 0");
+            assert!(matrix.squeeze_intensity[i] >= 0.0 && matrix.squeeze_intensity[i] <= 1.0, "squeeze_intensity phải trong [0.0, 1.0]");
+            // Khi toàn bộ mảng sqz_raw đều bằng 0.0 (tất cả phần tử bằng nhau), rolling_percentile trả về 0.50 (trung vị thống kê)
+            assert_eq!(matrix.squeeze_intensity[i], 0.5, "Khi mọi phần tử đều bằng nhau (0.0), rolling percentile rơi vào trung vị 0.50");
+        }
     }
 }

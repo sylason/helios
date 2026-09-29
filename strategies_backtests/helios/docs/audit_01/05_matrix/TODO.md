@@ -15,9 +15,9 @@
 | **3** | `TASK-MAT-03` | Đồng bộ hóa dải giá trị `trend_strength` về $[0.0, 1.0]$ và khử số âm | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs:75–86` |
 | **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone & Xóa biến nhân bản `trend_dir`, chuẩn hóa `kama_slope_atr` | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs`, scanners, `mod.rs` |
 | **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🟢 Đã xử lý | `core_v3/config.rs:114–124`, `core_v3/mod.rs:142–195` |
-| **6** | `TASK-MAT-06` | Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs:51–73, 108–124` |
+| **6** | `TASK-MAT-06` | Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` | **MEDIUM** | 🟢 Đã xử lý | `core_v3/matrix.rs:51–73, 108–124` |
 | **7** | `TASK-MAT-07` | Giữ lại `entropy`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs`, `core_v3/config.rs:266` |
-| **8** | `TASK-MAT-08` | Bổ sung kẹp biên an toàn cho `bb_width_norm`, `bb_middle_slope_adj` | **LOW** | 🔴 Chưa xử lý | `core_v3/matrix.rs:58, 139` |
+| **8** | `TASK-MAT-08` | Bổ sung kẹp biên an toàn cho `bb_width_norm`, `bb_middle_slope_adj` | **LOW** | 🟢 Đã xử lý | `core_v3/matrix.rs:58, 139`, `core_v3/mod.rs:257` |
 | **9** | `TASK-MAT-09` | Xây dựng bộ Unit Tests chuyên sâu bao phủ các lỗi toán học & edge cases | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:152–300` |
 | **10** | `TASK-MAT-10` | Tái cấu trúc `chaos_index` bằng Kaufman ER (`entropy`) trị dứt điểm bẫy Super Trend | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs:116–124` |
 
@@ -155,25 +155,32 @@
 
 ---
 
-### 🟡 TASK-MAT-06: Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or`
+### 🟢 TASK-MAT-06: Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-06` (Medium).
+- **Kết quả thực hiện:**
+  - [x] Áp dụng triệt để **Phương Án C (In-situ Defensive Arithmetic & Semantic Neutral Fallback)** trực tiếp trong `MarketMatrixV3::from_sensors` mà không tạo helper rác `sanitize_f64`.
+  - [x] Phòng thủ chia cho 0 và lọc NaN an toàn tuyệt đối:
+    + `bb_width_norm`: Chỉ tính khi `bm > 1e-9 && bb_w.is_finite()`, ngược lại trả về $0.0$; kẹp trần an toàn `.clamp(0.0, 1.0)`.
+    + `sqz_raw`: Kiểm tra mẫu số $KC_w > 10^{-9}$ và tử số $BB_w$ hữu hạn; rơi về phần tử trung tính vật lý $0.0$ khi thiếu biến động hoặc dữ liệu rỗng.
+    + `trend_strength`: Kiểm tra `adx_v.is_finite() && adx_v > 0.0`, chuẩn hóa mượt về $[0.0, 1.0]$.
+    + `kama_slope_atr`: Kiểm tra `s.is_finite()`, chuẩn hóa và kẹp biên an toàn $[-1.0, 1.0]$.
+    + `trend_axis`: Kiểm tra `adx_v.is_finite() && adx_v > 0.0`, chuẩn hóa $[0.0, 1.0]$.
+    + `chaos_index`: Kiểm tra cả `c_r_raw` và `ent_raw` hữu hạn, rơi về mức an toàn $0.0$.
+  - [x] Unit test kiểm chứng: `test_matrix_safe_math_nan_resilience` và `test_zero_volatility_flat_bars` xác nhận không có bất kỳ giá trị NaN/Inf nào lọt qua ma trận.
+  - [x] 100% test cases của `helios` (71/71) và `bot_engine` (39/39) PASS hoàn hảo.
 - **Hiện trạng:**
   - Mẫu hình `.copied().unwrap_or(0.0)` không bắt được `f64::NAN` vì giá trị trả về là `Some(f64::NAN)`.
   - Kết quả phụ thuộc vào quirk ngầm của IEEE 754 trong `.max(0.0).min(1.0)`.
-- **Hành động cần làm:**
-  1. Viết một helper inline an toàn:
-     ```rust
-     #[inline(always)]
-     fn sanitize_f64(val: Option<f64>, fallback: f64) -> f64 {
-         match val {
-             Some(v) if v.is_finite() => v,
-             _ => fallback,
-         }
-     }
-     ```
-  2. Áp dụng helper này cho toàn bộ quá trình đọc dữ liệu từ `sensors` (`natr`, `bb`, `kc`, `adx`, `mfi`, `z_score`).
-- **Tiêu chuẩn nghiệm thu:**
-  - Unit test với mảng đầu vào chứa `f64::NAN`, `f64::INFINITY`, `f64::NEG_INFINITY` xác nhận ma trận đầu ra không có bất kỳ giá trị phi thực nào lọt qua.
+- **⚠️ CẢNH BÁO RỦI RO TIỀM TÀNG CỦA `sanitize_f64` TRONG TƯƠNG LAI:**
+  1. *Bẫy che giấu bug gốc (Silent Defect Masking):* Nếu chỉ báo bị lỗi logic toán học (như chia cho 0, config period sai, warmup lỗi), `sanitize_f64` sẽ âm thầm nuốt lỗi và thay bằng `fallback`. Hệ thống có thể chạy ngầm trên $100\%$ dữ liệu giả mà không có bất kỳ cảnh báo nào.
+  2. *Bẫy sai lệch ngữ cảnh (Contextual Fallback Mismatch):* Áp dụng cẩu thả `fallback = 0.0` cho mọi chỉ báo sẽ gây thảm họa:
+     - MFI (dao động 0–100): fallback phải là mức trung tính `50.0` (thay vì `0.0` báo hiệu quá bán ảo).
+     - Đường giá KAMA/SMA: fallback phải là `current_close` (thay vì `0.0` làm sập giá kích hoạt SL khẩn cấp).
+     - Độ lệch chuẩn $\sigma$ / Độ rộng ATR: fallback phải là $\epsilon = 10^{-5}$ (thay vì `0.0` gây lỗi chia cho 0 ở phép tính sau).
+  3. *Điểm mù của GA Optimizer:* Khiến thuật toán di truyền không đào thải được các bộ tham số dị tật sinh ra chuỗi NaN kéo dài.
+  4. *Quy tắc phối hợp 2 tầng (Defense-in-Depth):*
+     - **Tầng 1 (Entry Gate):** Hard Warmup Gate & Data Sufficiency Check (bắt buộc đủ $\ge 43,200$ nến cho các khung lớn như 4h/12h; từ chối chạy bot nếu thiếu dữ liệu).
+     - **Tầng 2 (Runtime Seatbelt):** Safe Math Guards tại chỗ bảo vệ hệ thống khỏi đột tử do các dị tật toán học giữa chừng (chia cho 0 khi nến đơ, căn bậc hai số âm do floating-point, sàn lag).
 
 ---
 
@@ -216,13 +223,16 @@
 
 ---
 
-### 🟢 TASK-MAT-08: Bổ sung kẹp biên an toàn cho `bb_width_norm`, `bb_middle_slope_adj`
+### 🟢 TASK-MAT-08: Bổ sung kẹp biên an toàn cho `bb_width_norm`, `bb_middle_slope_adj` - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-08` (Low).
+- **Kết quả thực hiện:**
+  - [x] Kẹp biên `bb_width_norm`: `.clamp(0.0, 1.0)` ngăn chặn bung band vô tận khi xảy ra Flash Crash.
+  - [x] Kẹp biên `bb_middle_slope_adj`: `.clamp(-2.0, 2.0)` tại cả 2 tầng:
+    + Tầng khởi tạo `core_v3/mod.rs:257`: tính độ dốc SMA 20 trên ATR.
+    + Tầng ma trận `core_v3/matrix.rs:136`: chuẩn hóa an toàn kèm kiểm tra `is_finite()`, rơi về $0.0$ nếu thiếu dữ liệu.
+  - [x] Unit test kiểm chứng: `test_bb_width_norm_clamped` PASS $100\%$ khi mô phỏng râu nến kéo giãn band 19.8x.
 - **Hiện trạng:**
   - `bb_width_norm` và `bb_middle_slope_adj` không có kẹp biên trên, có thể bùng nổ vô tận khi flash crash.
-- **Hành động cần làm:**
-  1. Kẹp biên `bb_width_norm`: `.clamp(0.0, 1.0)`.
-  2. Kẹp biên `bb_middle_slope_adj`: `.clamp(-2.0, 2.0)` (độ dốc SMA 20 trên ATR).
 - **Tiêu chuẩn nghiệm thu:**
   - Giá trị không bao giờ tràn biên ngoài dải quy định ngay cả khi mô phỏng dữ liệu giá nhảy vọt $50\%$.
 
