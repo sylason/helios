@@ -11,9 +11,16 @@
   - [x] Đồng bộ hóa lưới biên nến `self.matrix.chaos_index.len() <= i` tại `mod.rs:269`.
   - [x] Dọn dẹp các assert cũ trong unit tests của `matrix.rs` và `mod.rs`.
 
+- [x] **Xây dựng Hệ thống Quant Decision Telemetry (Minh bạch Quyết định 360°):**
+  - [x] Thêm `set_telemetry_enabled` và `take_decision_telemetry` vào trait `Strategy` (`ferro_trade`).
+  - [x] Mở rộng `ArbiterDecision` với `AuctionStatus`, `AuctionCandidate`, `auction_ledger`, `chaos_val`, `chaos_penalty` (`arbiter.rs`).
+  - [x] Định dạng thẻ kiểm toán quyết định `format_decision_card` (Decision Audit Card) trong `core_v3/mod.rs`.
+  - [x] Kích hoạt và trích xuất telemetry trên `AssetActor` khi mở vị thế (`asset_actor.rs`).
+  - [x] Mở luồng ghi log `quant_telemetry=info` ra `trades.log` và hiển thị trên màn hình Console (`common/mod.rs`).
+
 ---
 
-## 🧪 Danh Sách Test Cases Xác Minh 5 Trụ Cột
+## 🧪 Danh Sách Test Cases Xác Minh 5 Trụ Cột & Telemetry
 
 | Mã Test | Tên Bài Test | Mục Đích Kiểm Thử | Trạng Thái |
 | :--- | :--- | :--- | :--- |
@@ -23,3 +30,6 @@
 | **TEST-PIL-04** | `test_squeeze_continuous_no_half_stuck` | Kiểm tra cường độ nén `squeeze_intensity` hoạt động mượt mà, không bị kẹt ở 0.50. | [x] PASS |
 | **TEST-PIL-05** | `test_kama_slope_atr_scale_asset_agnostic` | Kiểm tra tính phi thứ nguyên của `kama_slope_atr` trên các tài sản giá khác nhau (ETH vs DOGE). | [x] PASS |
 | **TEST-PIL-06** | `test_volume_zscore_differentiation_from_price` | Kiểm tra tính độc lập tuyệt đối giữa Z-Score giá (`sensors.z_score`) và Z-Score khối lượng (`sensors.vol_z_score`). | [x] PASS |
+| **TEST-TEL-01** | `test_conflict_resolution_higher_confidence_wins` | Kiểm tra Arbiter chọn Playbook tự tin cao nhất và ghi nhận vào ledger. | [x] PASS |
+| **TEST-TEL-02** | `test_conflict_resolution_opposite_signals_flat` | Kiểm tra Arbiter triệt tiêu xung đột giằng co (ConflictEliminated) bảo toàn vốn. | [x] PASS |
+| **TEST-TEL-03** | `test_soft_chaos_penalty_preserves_strong_signals` | Kiểm tra tính toán `chaos_penalty` bảo toàn tỷ lệ tự tin mềm dẻo. | [x] PASS |

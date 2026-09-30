@@ -49,6 +49,26 @@ pub struct Proposal {
     pub suggested_tp: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuctionStatus {
+    Won,
+    RunnerUp,
+    LowConfidence,
+    ConflictEliminated,
+    NotTriggered,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuctionCandidate {
+    pub scanner_id: ScannerId,
+    pub signal_type: Option<SignalType>,
+    pub raw_score: f64,
+    pub confidence: f64,
+    pub status: AuctionStatus,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ArbiterDecision {
     pub is_approved: bool,
     pub final_signal: Option<SignalType>,
@@ -56,6 +76,9 @@ pub struct ArbiterDecision {
     pub final_confidence: f64,
     pub final_sl: Option<f64>,
     pub final_tp: Option<f64>,
+    pub chaos_val: f64,
+    pub chaos_penalty: f64,
+    pub auction_ledger: Vec<AuctionCandidate>,
 }
 
 pub trait TacticalScanner: Send + Sync {
@@ -138,47 +161,90 @@ impl HeliosArbiter {
         let conflict_margin = config.arbiter.conflict_confidence_margin;
         let max_chaos_penalty = config.arbiter.max_chaos_penalty;
 
-        let mut all_scanned: Vec<(Proposal, f64, bool)> = Vec::new();
+        // Tính chaos penalty thực tế
+        let cap = max_chaos_penalty.clamp(0.0, 1.0);
+        let c_clamped = chaos_val.clamp(0.0, 1.0);
+        let chaos_penalty = (cap * c_clamped * c_clamped).min(cap);
+
+        let mut scanned_info: Vec<(ScannerId, Option<Proposal>, f64, bool)> = Vec::with_capacity(self.scanners.len());
         let mut approved_proposals: Vec<(Proposal, f64)> = Vec::new();
 
         // 1. THU THẬP & CHẤM ĐIỂM TỰ TIN PHI TUYẾN O(1) CHO CÁC PROPOSALS
         for scanner in &self.scanners {
-            if let Some(proposal) = scanner.scan(tick, sensors, matrix, config) {
+            let id = scanner.id();
+            let opt_prop = scanner.scan(tick, sensors, matrix, config);
+            let (conf, passed) = if let Some(ref proposal) = opt_prop {
                 let confidence = Self::compute_confidence(proposal.raw_score, chaos_val, max_chaos_penalty);
-                let passed = confidence >= min_threshold;
-                if passed {
+                let ok = confidence >= min_threshold;
+                if ok {
                     approved_proposals.push((proposal.clone(), confidence));
                 }
-                if debug_mode {
-                    all_scanned.push((proposal, confidence, passed));
-                }
-            }
+                (confidence, ok)
+            } else {
+                (0.0, false)
+            };
+            scanned_info.push((id, opt_prop, conf, passed));
         }
 
         // TELEMETRY: In biên bản đấu thầu nếu có ít nhất 1 proposal và debug_mode được bật
-        if debug_mode && !all_scanned.is_empty() {
-            info!(
-                "⚖️ [ARBITER AUCTION] Bar: {} | Scanned Proposals: {} | Approved: {} | Chaos: {:.3} | Min Conf Thresh: {:.3} | Margin: {:.3}",
-                i, all_scanned.len(), approved_proposals.len(), chaos_val, min_threshold, conflict_margin
-            );
-            for (p, conf, passed) in &all_scanned {
+        if debug_mode {
+            let triggered_proposals: Vec<_> = scanned_info.iter().filter_map(|(_, opt_p, conf, passed)| {
+                opt_p.as_ref().map(|p| (p, *conf, *passed))
+            }).collect();
+
+            if !triggered_proposals.is_empty() {
                 info!(
-                    "   - [{:<8}] Scanner: {:<12} | Side: {:<5} | Raw: {:.3} | Conf: {:.3} | SL: {:?} | TP: {:?}",
-                    if *passed { "APPROVED" } else { "REJECTED" },
-                    p.scanner_id.as_str(),
-                    format!("{:?}", p.signal_type),
-                    p.raw_score,
-                    conf,
-                    p.suggested_sl,
-                    p.suggested_tp
+                    "⚖️ [ARBITER AUCTION] Bar: {} | Scanned Proposals: {} | Approved: {} | Chaos: {:.3} | Min Conf Thresh: {:.3} | Margin: {:.3}",
+                    i, triggered_proposals.len(), approved_proposals.len(), chaos_val, min_threshold, conflict_margin
                 );
+                for (p, conf, passed) in &triggered_proposals {
+                    info!(
+                        "   - [{:<8}] Scanner: {:<12} | Side: {:<5} | Raw: {:.3} | Conf: {:.3} | SL: {:?} | TP: {:?}",
+                        if *passed { "APPROVED" } else { "REJECTED" },
+                        p.scanner_id.as_str(),
+                        format!("{:?}", p.signal_type),
+                        p.raw_score,
+                        conf,
+                        p.suggested_sl,
+                        p.suggested_tp
+                    );
+                }
             }
         }
 
         if approved_proposals.is_empty() {
-            if debug_mode && !all_scanned.is_empty() {
+            if debug_mode && scanned_info.iter().any(|(_, opt_p, _, _)| opt_p.is_some()) {
                 info!("   => [ARBITER RESULT] REJECTED: All proposals failed min_confidence_threshold ({:.3})", min_threshold);
             }
+            let auction_ledger = scanned_info
+                .into_iter()
+                .map(|(id, opt_p, conf, _)| {
+                    let (sig, raw, status, reason) = if let Some(p) = opt_p {
+                        (
+                            Some(p.signal_type),
+                            p.raw_score,
+                            AuctionStatus::LowConfidence,
+                            format!("Confidence {:.3} < min_threshold {:.3}", conf, min_threshold),
+                        )
+                    } else {
+                        (
+                            None,
+                            0.0,
+                            AuctionStatus::NotTriggered,
+                            "Pattern conditions not met".to_string(),
+                        )
+                    };
+                    AuctionCandidate {
+                        scanner_id: id,
+                        signal_type: sig,
+                        raw_score: raw,
+                        confidence: conf,
+                        status,
+                        reason,
+                    }
+                })
+                .collect();
+
             return ArbiterDecision {
                 is_approved: false,
                 final_signal: None,
@@ -186,6 +252,9 @@ impl HeliosArbiter {
                 final_confidence: 0.0,
                 final_sl: None,
                 final_tp: None,
+                chaos_val,
+                chaos_penalty,
+                auction_ledger,
             };
         }
 
@@ -199,6 +268,51 @@ impl HeliosArbiter {
                     proposal.scanner_id.as_str(), proposal.signal_type, confidence, proposal.suggested_sl, proposal.suggested_tp
                 );
             }
+
+            let winner_id = proposal.scanner_id;
+            let winner_conf = confidence;
+            let runner_up_conf = scanned_info
+                .iter()
+                .filter(|(id, _, _, passed)| *id != winner_id && *passed)
+                .map(|(_, _, conf, _)| *conf)
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+            let auction_ledger = scanned_info
+                .into_iter()
+                .map(|(id, opt_p, conf, passed)| {
+                    let sig = opt_p.as_ref().map(|p| p.signal_type);
+                    let raw = opt_p.as_ref().map(|p| p.raw_score).unwrap_or(0.0);
+                    let (status, reason) = if id == winner_id {
+                        let reason_str = if let Some(r_conf) = runner_up_conf {
+                            format!("Won auction with confidence {:.3} (Lead: +{:.3} over runner-up)", winner_conf, winner_conf - r_conf)
+                        } else {
+                            format!("Won auction with confidence {:.3} (Sole approved proposal)", winner_conf)
+                        };
+                        (AuctionStatus::Won, reason_str)
+                    } else if passed {
+                        let reason_str = if sig == Some(proposal.signal_type) {
+                            format!("Subordinate to winner on same side (Conf: {:.3} < {:.3})", conf, winner_conf)
+                        } else {
+                            format!("Defeated in inter-side face-off (Conf: {:.3} vs {:.3})", conf, winner_conf)
+                        };
+                        (AuctionStatus::RunnerUp, reason_str)
+                    } else if opt_p.is_some() {
+                        (AuctionStatus::LowConfidence, format!("Confidence {:.3} < min_threshold {:.3}", conf, min_threshold))
+                    } else {
+                        (AuctionStatus::NotTriggered, "Pattern conditions not met".to_string())
+                    };
+
+                    AuctionCandidate {
+                        scanner_id: id,
+                        signal_type: sig,
+                        raw_score: raw,
+                        confidence: conf,
+                        status,
+                        reason,
+                    }
+                })
+                .collect();
+
             ArbiterDecision {
                 is_approved: true,
                 final_signal: Some(proposal.signal_type),
@@ -206,11 +320,39 @@ impl HeliosArbiter {
                 final_confidence: confidence,
                 final_sl: proposal.suggested_sl,
                 final_tp: proposal.suggested_tp,
+                chaos_val,
+                chaos_penalty,
+                auction_ledger,
             }
         } else {
             if debug_mode {
                 info!("   => [ARBITER RESULT] 🛡️ FLAT: Conflict deadlock between Long and Short (|diff| <= margin {:.3})", conflict_margin);
             }
+
+            let auction_ledger = scanned_info
+                .into_iter()
+                .map(|(id, opt_p, conf, passed)| {
+                    let sig = opt_p.as_ref().map(|p| p.signal_type);
+                    let raw = opt_p.as_ref().map(|p| p.raw_score).unwrap_or(0.0);
+                    let (status, reason) = if passed {
+                        (AuctionStatus::ConflictEliminated, format!("Opposing signals deadlock (|diff| <= margin {:.3})", conflict_margin))
+                    } else if opt_p.is_some() {
+                        (AuctionStatus::LowConfidence, format!("Confidence {:.3} < min_threshold {:.3}", conf, min_threshold))
+                    } else {
+                        (AuctionStatus::NotTriggered, "Pattern conditions not met".to_string())
+                    };
+
+                    AuctionCandidate {
+                        scanner_id: id,
+                        signal_type: sig,
+                        raw_score: raw,
+                        confidence: conf,
+                        status,
+                        reason,
+                    }
+                })
+                .collect();
+
             ArbiterDecision {
                 is_approved: false,
                 final_signal: None,
@@ -218,6 +360,9 @@ impl HeliosArbiter {
                 final_confidence: 0.0,
                 final_sl: None,
                 final_tp: None,
+                chaos_val,
+                chaos_penalty,
+                auction_ledger,
             }
         }
     }
