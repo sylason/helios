@@ -141,7 +141,8 @@ impl AssetActor {
     }
 
     /// Thiết lập Strategy cho Actor (Dependency Injection)
-    pub fn with_strategy(mut self, strategy: Box<dyn Strategy + Send>) -> Self {
+    pub fn with_strategy(mut self, mut strategy: Box<dyn Strategy + Send>) -> Self {
+        strategy.set_telemetry_enabled(true);
         self.strategy = Some(strategy);
         self
     }
@@ -268,6 +269,10 @@ impl AssetActor {
         self.update_state(AssetState::Trading, "Hệ thống Helios đã sẵn sàng!").await;
         info!("✅ [{}] is now TRADING.", self.symbol);
 
+        if let Some(ref mut strategy) = self.strategy {
+            strategy.set_telemetry_enabled(true);
+        }
+
         let has_sync_rx = self.sync_data_rx.is_some();
         let mut sync_rx = self.sync_data_rx.take();
 
@@ -339,15 +344,23 @@ impl AssetActor {
                 }
 
                 // Lắng nghe nến đồng bộ có Backpressure (MPSC - Walk-Forward / Fast Simulation)
-                Some((candle, is_historical)) = async {
+                res = async {
                     if let Some(ref mut rx) = sync_rx {
                         rx.recv().await
                     } else {
                         std::future::pending().await
                     }
                 }, if has_sync_rx => {
-                    if candle.symbol == self.symbol {
-                        self.on_new_candle(candle, is_historical).await;
+                    match res {
+                        Some((candle, is_historical)) => {
+                            if candle.symbol == self.symbol {
+                                self.on_new_candle(candle, is_historical).await;
+                            }
+                        }
+                        None => {
+                            info!("ℹ️ [{}] sync_rx channel closed. Stopping AssetActor loop gracefully.", self.symbol);
+                            break;
+                        }
                     }
                 }
 
@@ -609,6 +622,16 @@ impl AssetActor {
                     for action in valid_actions {
                         if let Err(e) = self.execution_engine.execute_action_ctx(&action, current_close, candle.timestamp, current_bar_idx).await {
                             error!("❌ [{}] Lỗi thực thi action {:?}: {:?}", self.symbol, action, e);
+                        } else {
+                            // 🎯 QUANT DECISION TELEMETRY: Xuất thẻ kiểm toán quyết định ra target quant_telemetry
+                            match action {
+                                Action::Buy { .. } | Action::Sell { .. } => {
+                                    if let Some(card) = self.strategy.as_mut().and_then(|s| s.take_decision_telemetry()) {
+                                        info!(target: "quant_telemetry", "\n{}", card);
+                                    }
+                                }
+                                _ => {}
+                            }
                         }
                     }
                 } else {

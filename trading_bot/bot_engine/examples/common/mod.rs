@@ -17,19 +17,26 @@ pub struct LoggingGuards {
 }
 
 /// Khởi tạo Logger kép độc lập (Dual-Appender: System Log + Trades OOS Telemetry Log + Lean Console)
+/// Tự động tạo thư mục riêng biệt theo ngày giờ: examples/logs/run_{strategy_id}_{timestamp}/
 pub fn init_logging(strategy_id: &str) -> Result<LoggingGuards, Box<dyn Error>> {
-    std::fs::create_dir_all("examples/logs")?;
+    use chrono::Local;
 
-    // 1. File Log Hệ Thống ({strategy_id}_system.log)
-    let system_log_filename = format!("{}_system.log", strategy_id);
-    let system_appender = tracing_appender::rolling::never("examples/logs", &system_log_filename);
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let log_dir = format!("examples/logs/run_{}_{}", strategy_id, timestamp);
+    std::fs::create_dir_all(&log_dir)?;
+
+    println!("📁 [LOGGING SETUP] Thư mục log độc lập phiên này: {}", log_dir);
+
+    // 1. File Log Hệ Thống (system.log) - CHẶN 100% RÁC TỪ HELIOS GA BACKTEST
+    let system_appender = tracing_appender::rolling::never(&log_dir, "system.log");
     let (system_non_blocking, system_guard) = tracing_appender::non_blocking(system_appender);
 
     let system_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("warn")
             .add_directive("bot_engine=info".parse().unwrap())
             .add_directive("walk_forward_smart_seed=info".parse().unwrap())
-            .add_directive("helios=info".parse().unwrap())
+            .add_directive("quant_telemetry=info".parse().unwrap())
+            .add_directive("helios=warn".parse().unwrap()) // Chặn đứng hàng triệu dòng log backtest GA
     });
 
     let system_layer = fmt::layer()
@@ -37,27 +44,28 @@ pub fn init_logging(strategy_id: &str) -> Result<LoggingGuards, Box<dyn Error>> 
         .with_ansi(false)
         .with_filter(system_filter);
 
-    // 2. File Log Giao Dịch OOS Chuyên Biệt ({strategy_id}_trades.log)
-    let trades_log_filename = format!("{}_trades.log", strategy_id);
-    let trades_appender = tracing_appender::rolling::never("examples/logs", &trades_log_filename);
+    // 2. File Log Giao Dịch OOS Chuyên Biệt (trades.log) - 100% SẠCH SẼ
+    let trades_appender = tracing_appender::rolling::never(&log_dir, "trades.log");
     let (trades_non_blocking, trades_guard) = tracing_appender::non_blocking(trades_appender);
 
     let trades_filter = EnvFilter::new("off")
         .add_directive("bot_engine::execution::paper_trader=info".parse().unwrap())
         .add_directive("bot_engine::controller::asset_actor=info".parse().unwrap())
-        .add_directive("helios::strategy::core_v3::arbiter=info".parse().unwrap())
-        .add_directive("helios::strategy::core_v3=info".parse().unwrap())
-        .add_directive("walk_forward_smart_seed=info".parse().unwrap());
+        .add_directive("walk_forward_smart_seed=info".parse().unwrap())
+        .add_directive("quant_telemetry=info".parse().unwrap());
+        // Gỡ bỏ hoàn toàn helios::strategy::core_v3 để không bị ô nhiễm log GA đa luồng Rayon!
 
     let trades_layer = fmt::layer()
         .with_writer(trades_non_blocking)
         .with_ansi(false)
         .with_filter(trades_filter);
 
-    // 3. Console Output (Chỉ in các mốc quan trọng, không spam terminal)
+    // 3. Console Output (In các mốc quan trọng và bảng tổng kết CUMULATIVE PAPER REPORT)
     let stdout_filter = EnvFilter::new("warn")
         .add_directive("walk_forward_smart_seed=info".parse().unwrap())
-        .add_directive("bot_engine::execution::paper_trader=info".parse().unwrap());
+        .add_directive("bot_engine::execution::paper_trader=info".parse().unwrap())
+        .add_directive("bot_engine::controller::asset_actor=info".parse().unwrap()) // Hiển thị Final Run Summary
+        .add_directive("quant_telemetry=info".parse().unwrap()); // Hiển thị trực tiếp trên Console màn hình
 
     let stdout_layer = fmt::layer()
         .with_writer(std::io::stdout)

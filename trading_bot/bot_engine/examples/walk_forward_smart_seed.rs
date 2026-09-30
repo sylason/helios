@@ -80,8 +80,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           INITIAL_CASH, LEVERAGE, COMMISSION_RATE);
     info!("   🧠 [MEMORY] Max Live Candles: {} (Đảm bảo 50+ nến MTF 4h)", MAX_LIVE_MEM_CANDLES);
     info!("   🌱 [SMART SEEDING]: Chiếm 0.5% quần thể (chỉ 1 Champion Rank 1), 99.5% cá thể mới");
-    info!("   🎯 [PAPER TRADING]: {}", if ENABLE_PAPER_TRADE { "BẬT (Active)" } else { "TẮT (Only Diagnostic)" });
     info!("================================================================================");
+
+    // 0. Dọn dẹp sạch sẽ storage cũ trước khi khởi động bài test mới (Zero Stale State)
+    let prospector_db_init = format!("examples/storage/{}_prospector.db", STRATEGY_ID);
+    let main_db_init = format!("examples/storage/{}.db", STRATEGY_ID);
+    for path in [&prospector_db_init, &main_db_init] {
+        if Path::new(path).exists() {
+            let _ = std::fs::remove_file(path);
+        }
+        let shm = format!("{}-shm", path);
+        let wal = format!("{}-wal", path);
+        let _ = std::fs::remove_file(&shm);
+        let _ = std::fs::remove_file(&wal);
+    }
 
     // 2. Khởi tạo Database SQLite & Weight Monitor qua module dùng chung
     let (db_store, monitor) = common::setup_sqlite_and_monitor(STRATEGY_ID, WEIGHT_LIMIT)?;
@@ -146,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // 6. KHỞI TẠO BỘ MÁY ASSETACTOR PAPER MODE
-    let sync_tx = if ENABLE_PAPER_TRADE {
+    let (sync_tx, actor_handle) = if ENABLE_PAPER_TRADE {
         info!("--------------------------------------------------------------------------------");
         info!("🚀 [ENGINE SETUP] Khởi tạo AssetActor ở chế độ ExecutionMode::Paper...");
 
@@ -211,14 +223,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_sync_until(train_end_ts)
         .with_sync_data_rx(rx);
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             actor.run().await;
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        Some(tx)
+        (Some(tx), Some(handle))
     } else {
-        None
+        (None, None)
     };
 
     // 7. GIAI ĐOẠN OUT-OF-SAMPLE WITH PERIODIC RE-OPT & BACKTEST EVALUATION (CÓ SMART SEEDING)
@@ -334,15 +346,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Đóng kênh truyền nến để AssetActor hoàn tất các nến còn đọng và xuất báo cáo tổng kết
     drop(sync_tx);
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    if let Some(handle) = actor_handle {
+        let _ = handle.await;
+    }
 
     info!("================================================================================");
     info!("✅ KẾT THÚC BÀI ĐÁNH GIÁ WALK-FORWARD EVALUATOR VỚI SMART SEEDING!");
     info!("   Tổng số lần chạy Re-Optimize (N mins): {}", reopt_count);
     info!("   Tổng số lần chạy Single Backtest Eval (M mins): {}", backtest_count);
-    info!("   Log Hệ Thống & GA: examples/logs/{}_system.log", STRATEGY_ID);
-    info!("   Log Giao Dịch OOS & Auction: examples/logs/{}_trades.log", STRATEGY_ID);
     info!("================================================================================");
+
+    // Dọn dẹp sạch sẽ các file database SQLite trong examples/storage sau khi bài test hoàn tất
+    info!("🧹 [STORAGE CLEANUP] Đang dọn dẹp các database trong examples/storage...");
+    let prospector_db_end = format!("examples/storage/{}_prospector.db", STRATEGY_ID);
+    let main_db_end = format!("examples/storage/{}.db", STRATEGY_ID);
+    for path in [&prospector_db_end, &main_db_end] {
+        if Path::new(path).exists() {
+            let _ = std::fs::remove_file(path);
+        }
+        let shm = format!("{}-shm", path);
+        let wal = format!("{}-wal", path);
+        let _ = std::fs::remove_file(&shm);
+        let _ = std::fs::remove_file(&wal);
+    }
+    info!("✅ [STORAGE CLEANUP] Đã dọn dẹp sạch sẽ database storage.");
 
     Ok(())
 }
