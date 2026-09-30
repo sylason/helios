@@ -260,20 +260,22 @@ pub struct MatrixConfig {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub squeeze_lookback: usize,
     
-    #[dna(min = 100.0, max = 1000.0, step = 30.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    // 🛡️ TASK-MAT-07: Bỏ gen DNA momentum_lookback (cấu hình mảng chết liquidity)
+    #[dna(skip)]
+    #[serde(default = "default_matrix_lookback", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub momentum_lookback: usize,
     
-    #[dna(min = 100.0, max = 1000.0, step = 30.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    // 🛡️ TASK-MAT-07: Bỏ gen DNA volume_lookback (gen mồ côi 100% không nơi nào đọc)
+    #[dna(skip)]
+    #[serde(default = "default_matrix_lookback", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub volume_lookback: usize,
     
     #[dna(min = 1.0, max = 10.0, step = 0.3)]
     pub z_score_sensitivity: f64,
 
-    /// 🚀 3 GEN TRỰC GIAO MỚI CHO DE-OVERENGINEERED MATRIX:
-    /// 1. Ngưỡng ADX xác nhận xu hướng rõ rệt (15.0 -> 40.0, Step 1.0 -> 26 nấc)
-    #[dna(min = 15.0, max = 40.0, step = 1.0)]
+    /// 🚀 3 GEN TRỰC GIAO CHO DE-OVERENGINEERED MATRIX:
+    // 🛡️ TASK-MAT-07: Bỏ gen DNA adx_trend_threshold (trục trực giao chết trend_axis)
+    #[dna(skip)]
     #[serde(default = "default_adx_trend_threshold")]
     pub adx_trend_threshold: f64,
 
@@ -287,6 +289,7 @@ pub struct MatrixConfig {
     pub vol_z_sensitivity: f64,
 }
 
+fn default_matrix_lookback() -> usize { 20 }
 fn default_adx_trend_threshold() -> f64 { 25.0 }
 fn default_kama_slope_scale_atr() -> f64 { 0.20 }
 fn default_vol_z_sensitivity() -> f64 { 1.50 }

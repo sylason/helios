@@ -16,7 +16,7 @@
 | **4** | `TASK-MAT-04` | Triệt tiêu Deep Clone & Xóa biến nhân bản `trend_dir`, chuẩn hóa `kama_slope_atr` | **HIGH** | 🟢 Đã xử lý | `core_v3/matrix.rs`, scanners, `mod.rs` |
 | **5** | `TASK-MAT-05` | Khóa cứng đồng bộ Timeframe giữa Bollinger Bands và Keltner Channels | **HIGH** | 🟢 Đã xử lý | `core_v3/config.rs:114–124`, `core_v3/mod.rs:142–195` |
 | **6** | `TASK-MAT-06` | Chuẩn hóa phòng thủ NaN an toàn tuyệt đối, triệt tiêu bẫy `unwrap_or` | **MEDIUM** | 🟢 Đã xử lý | `core_v3/matrix.rs:51–73, 108–124` |
-| **7** | `TASK-MAT-07` | Giữ lại `entropy`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback` | **MEDIUM** | 🔴 Chưa xử lý | `core_v3/matrix.rs`, `core_v3/config.rs:266` |
+| **7** | `TASK-MAT-07` | Giữ lại `entropy`, xóa bỏ chỉ báo ma (`liquidity`, `chaos`) và gen ma `volume_lookback` | **MEDIUM** | 🟡 Đang xử lý (Phần 1: Xong) | `core_v3/matrix.rs`, `core_v3/config.rs:266` |
 | **8** | `TASK-MAT-08` | Bổ sung kẹp biên an toàn cho `bb_width_norm`, `bb_middle_slope_adj` | **LOW** | 🟢 Đã xử lý | `core_v3/matrix.rs:58, 139`, `core_v3/mod.rs:257` |
 | **9** | `TASK-MAT-09` | Xây dựng bộ Unit Tests chuyên sâu bao phủ các lỗi toán học & edge cases | **HIGH** | 🔴 Chưa xử lý | `core_v3/matrix.rs:152–300` |
 | **10** | `TASK-MAT-10` | Tái cấu trúc `chaos_index` bằng Kaufman ER (`entropy`) trị dứt điểm bẫy Super Trend | **CRITICAL** | 🟢 Đã xử lý | `core_v3/matrix.rs:116–124` |
@@ -184,8 +184,22 @@
 
 ---
 
-### 🟡 TASK-MAT-07: Đại Phẫu Rác Thừa Matrix: Xóa Bỏ 4 Chỉ Báo Ma, 3 Bản Sao Clone và 3 Gen DNA Ma
+### 🟢 TASK-MAT-07: Đại Phẫu Rác Thừa Matrix: Xóa Bỏ 4 Chỉ Báo Ma, 3 Bản Sao Clone và 3 Gen DNA Ma - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `FLAW-MAT-07` (Medium).
+- **Kết quả thực hiện Phần 1 (Cắt bỏ 3 Gen DNA Ma):**
+  - [x] Gắn `#[dna(skip)]` và giữ `#[serde(default)]` cho 3 gen: `momentum_lookback`, `volume_lookback`, `adx_trend_threshold` trong `core_v3/config.rs` (Serde-Safe 100%).
+  - [x] Thu gọn không gian tìm kiếm GA từ **102 về đúng 99 chiều** (`DNA_WIDTH = 99`).
+  - [x] Khóa cứng kiểm tra độ dài `dna.len() != HeliosConfigV3::DNA_WIDTH` trong `core_v3/mod.rs:131`, đồng bộ với chốt chặn an toàn sẵn có của `AssetActor`.
+  - [x] Cập nhật unit test `test_dna_width_and_parameter_defs_integrity` xác nhận 3 gen ma đã biến mất khỏi Search Space.
+  - [x] 100% tests của `helios` (71/71) và `bot_engine` (39/39) PASS hoàn hảo; `walk_forward_smart_seed` biên dịch sạch.
+- **Kết quả thực hiện Phần 2 (Đại phẫu `MarketMatrixV3` & Cắt bỏ 4 Chỉ Báo Ma):**
+  - [x] Cắt bỏ 4 chỉ báo ma khỏi struct `MarketMatrixV3`: `liquidity`, `price_z_score`, `chaos`, `trend_axis`.
+  - [x] Cắt bỏ 1 bản sao clone thừa `kama_slope_adj` (hệ thống dùng `kama_slope_atr`).
+  - [x] Đóng gói 2 biến nội bộ rò rỉ `chaos_ratio` và `entropy` thành biến cục bộ `let` bên trong `from_sensors` chỉ để tính `chaos_index`.
+  - [x] Struct `MarketMatrixV3` co gọn từ **13 trường xuống đúng 6 trường vật lý cốt lõi**: `kama_slope_atr`, `chaos_index`, `trend_strength`, `bb_middle_slope_adj`, `squeeze_intensity`, `bb_width_norm`.
+  - [x] Đồng bộ chốt chặn lưới biên nến `self.matrix.chaos_index.len() <= i` tại `core_v3/mod.rs:269`.
+  - [x] Cập nhật test suite: `test_orthogonal_matrix_nan_resilience`, `test_matrix_independence_no_zero_sum`, `test_super_trend_low_chaos`, `test_matrix_safe_math_nan_resilience` và `test_volume_zscore_differentiation_from_price`.
+  - [x] Kiểm thử toàn diện: 100% tests `helios` (71/71) và `bot_engine` (39 passed, 1 ignored) PASS hoàn hảo; `walk_forward_smart_seed` biên dịch exit code 0.
 - **BẢNG CHỨNG THỰC TOÀN DIỆN 15 TRƯỜNG DỮ LIỆU TRONG `MarketMatrixV3`:**
   *(Quét trực tiếp 100% mã nguồn trên toàn bộ thư mục `strategies_backtests/helios/src/strategy/core_v3/`)*
 

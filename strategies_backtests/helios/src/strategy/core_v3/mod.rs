@@ -128,9 +128,9 @@ impl Strategy for HeliosStrategyV3 {
     }
 
     fn update_from_dna(&mut self, dna: &[f64]) {
-        if dna.len() < HeliosConfigV3::DNA_WIDTH {
+        if dna.len() != HeliosConfigV3::DNA_WIDTH {
             warn!(
-                "⚠️ [DNA LENGTH MISMATCH] Yêu cầu {} gen nhưng DNA chỉ có {} gen -> Bỏ qua nạp DNA không tương thích để chống crash!",
+                "⚠️ [DNA LENGTH MISMATCH] Yêu cầu {} gen nhưng DNA có {} gen -> Bỏ qua nạp DNA không tương thích để chống crash/lệch chỉ mục!",
                 HeliosConfigV3::DNA_WIDTH, dna.len()
             );
             return;
@@ -266,7 +266,7 @@ impl Strategy for HeliosStrategyV3 {
 
     fn next(&mut self, tick: &mut TickContext) {
         let i = tick.i;
-        if self.sensors.atr_sl.len() <= i || self.matrix.chaos_ratio.len() <= i {
+        if self.sensors.atr_sl.len() <= i || self.matrix.chaos_index.len() <= i {
             return;
         }
 
@@ -760,11 +760,11 @@ mod tests {
 
         let mut config = HeliosConfigV3::default();
         config.matrix.z_score_sensitivity = 2.0;
-        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        let _matrix = MarketMatrixV3::from_sensors(&config, &sensors);
 
         // 🎯 KIỂM CHỨNG FLAW-3.2:
         // Price Z-Score phải bằng 0.0 (giá phẳng)
-        assert_eq!(matrix.price_z_score[len - 1], 0.0, "Price Z-Score phải phản ánh giá phẳng = 0.0");
+        assert_eq!(sensors.z_score[len - 1], 0.0, "Price Z-Score phải phản ánh giá phẳng = 0.0");
         // Volume Z-Score phải phản ứng độc lập với Vol Z-Score = 3.5 -> phát hiện bùng nổ thanh khoản
         assert!(sensors.vol_z_score[len - 1] > 3.0, "Vol Z-Score phải độc lập phản ánh bùng nổ thanh khoản!");
     }
@@ -1191,7 +1191,7 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 102, "DNA_WIDTH phải là chính xác 102 chiều sau khi khóa cứng đồng bộ keltner.timeframe (-1) theo TASK-MAT-05!");
+        assert_eq!(width, 99, "DNA_WIDTH phải là chính xác 99 chiều sau khi loại bỏ 3 gen ma (volume_lookback, momentum_lookback, adx_trend_threshold) theo TASK-MAT-07!");
         let has_kc_tf = defs.iter().any(|(name, _)| name.contains("keltner.timeframe"));
         assert!(!has_kc_tf, "defs KHÔNG được chứa indicators.keltner.timeframe (đã khóa cứng theo bbands ở TASK-MAT-05)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
@@ -1203,6 +1203,8 @@ mod tests {
         assert!(has_max_chaos, "defs phải chứa max_chaos_penalty trong ArbiterConfig!");
         assert!(!has_act_score, "defs KHÔNG được chứa min_activation_score ở các Tactical Scanners!");
         let has_matrix_adx = defs.iter().any(|(name, _)| name.contains("adx_trend_threshold"));
+        let has_matrix_vol_lb = defs.iter().any(|(name, _)| name.contains("volume_lookback"));
+        let has_matrix_mom_lb = defs.iter().any(|(name, _)| name.contains("momentum_lookback"));
         let has_matrix_kama_scale = defs.iter().any(|(name, _)| name.contains("kama_slope_scale_atr"));
         let has_matrix_vol_z = defs.iter().any(|(name, _)| name.contains("vol_z_sensitivity"));
         let has_phantom_comp = defs.iter().any(|(name, _)| name.contains("min_confidence_compression"));
@@ -1247,8 +1249,9 @@ mod tests {
         assert!(has_rev_w_disp, "defs phải chứa tactical_sniper.reversal.w_displacement!");
         assert!(has_mom_adverse, "defs phải chứa tactical_sniper.momentum.max_adverse_slope!");
         assert!(has_mom_w_break, "defs phải chứa tactical_sniper.momentum.w_breakout!");
-        assert!(has_mom_w_vol, "defs phải chứa tactical_sniper.momentum.w_volume!");
-        assert!(has_matrix_adx, "defs phải chứa matrix.adx_trend_threshold!");
+        assert!(!has_matrix_adx, "defs KHÔNG được chứa matrix.adx_trend_threshold (đã loại bỏ theo TASK-MAT-07)!");
+        assert!(!has_matrix_vol_lb, "defs KHÔNG được chứa matrix.volume_lookback (đã loại bỏ theo TASK-MAT-07)!");
+        assert!(!has_matrix_mom_lb, "defs KHÔNG được chứa matrix.momentum_lookback (đã loại bỏ theo TASK-MAT-07)!");
         assert!(has_matrix_kama_scale, "defs phải chứa matrix.kama_slope_scale_atr!");
         assert!(!has_matrix_vol_z, "defs KHÔNG được chứa matrix.vol_z_sensitivity (đã loại bỏ theo TASK-MAT-01)!");
         assert!(!has_phantom_comp, "defs KHÔNG được chứa gen ma min_confidence_compression!");

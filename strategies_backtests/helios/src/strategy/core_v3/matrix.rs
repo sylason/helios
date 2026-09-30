@@ -10,27 +10,15 @@ use crate::strategy::core_v3::config::HeliosConfigV3;
 /// Bổ sung thêm các Regime Multipliers chuẩn Quant phục vụ cho Arbiter.
 #[derive(Clone, Debug, Default)]
 pub struct MarketMatrixV3 {
-    // --- 🚀 3 TRỤC ĐO VẬT LÝ TRỰC GIAO (DE-OVERENGINEERED ORTHOGONAL AXES) ---
-    // (vol_axis đã được xóa bỏ hoàn toàn do trùng lặp 100% với squeeze_intensity)
+    // --- 🚀 3 TRỤC ĐO VẬT LÝ TRỰC GIAO ---
     pub kama_slope_atr: Arc<Vec<f64>>,   // Độ dốc KAMA chuẩn hóa theo ATR phi thứ nguyên [-1.0, 1.0]
-    pub trend_axis: Arc<Vec<f64>>,       // Trục xu hướng ADX chuẩn hóa theo adx_trend_threshold [0.0, 1.0]
     pub chaos_index: Arc<Vec<f64>>,      // Chỉ số bão hỗn loạn Whipsaw [0.0, 1.0]
+    pub trend_strength: Arc<Vec<f64>>,   // Sức mạnh xu hướng ADX tuyến tính [0.0, 1.0]
 
-    // --- 🧭 Hướng & Sức mạnh (Directional) ---
-    pub trend_strength: Arc<Vec<f64>>,    // 0.0 to 1.0 (ADX Tanh Scaled)
-    pub kama_slope_adj: Arc<Vec<f64>>,    // KAMA Slope điều chỉnh theo ER
-    pub bb_middle_slope_adj: Arc<Vec<f64>>, // 🛡️ FLAW-REG.10: Độ dốc chuẩn hóa của trục giữa BB Middle (SMA 20)
-    
-    // --- 🌪️ Năng lượng & Biến động (Chaos) ---
-    pub squeeze_intensity: Arc<Vec<f64>>, // 0.0 to 1.0 (BB/KC Compression)
-    pub chaos: Arc<Vec<f64>>,             // 0.0 to 0.10+ (NATR - Biến động % giá)
-    pub chaos_ratio: Arc<Vec<f64>>,       // NATR / SMA(NATR)
-    pub entropy: Arc<Vec<f64>>,           // 0.0 to 1.0 (Efficiency Ratio)
-    pub liquidity: Arc<Vec<f64>>,         // 0.0 to 1.0 (MFI Scaled)
-    pub bb_width_norm: Arc<Vec<f64>>,     // (Upper - Lower) / Middle
-    
-    // --- 🌊 Động lượng (Velocity) ---
-    pub price_z_score: Arc<Vec<f64>>,     // Z-Score thực của giá (Tanh Scaled)
+    // --- 🧭 Hướng & Biến động Dải Bollinger/Keltner ---
+    pub bb_middle_slope_adj: Arc<Vec<f64>>, // 🛡️ FLAW-REG.10: Độ dốc chuẩn hóa của trục giữa BB Middle (SMA 20) [-2.0, 2.0]
+    pub squeeze_intensity: Arc<Vec<f64>>,   // Cường độ nén BB/KC [0.0, 1.0]
+    pub bb_width_norm: Arc<Vec<f64>>,       // (Upper - Lower) / Middle kẹp trần [0.0, 1.0]
 }
 
 impl MarketMatrixV3 {
@@ -40,14 +28,10 @@ impl MarketMatrixV3 {
             return Self::default();
         }
         
-        let mut chaos = Vec::with_capacity(len);
         let mut bb_width_norm = Vec::with_capacity(len);
         let mut sqz_raw = Vec::with_capacity(len);
 
         for i in 0..len {
-            let natr_val = sensors.natr.get(i).copied().unwrap_or(f64::NAN);
-            chaos.push(if natr_val.is_finite() && natr_val > 0.0 { natr_val / 100.0 } else { 0.0 });
-            
             let bu = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
             let bl = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
             let bm = sensors.bb_middle.get(i).copied().unwrap_or(f64::NAN);
@@ -79,10 +63,8 @@ impl MarketMatrixV3 {
         }
 
         // TÍNH TOÁN CÁC DÒNG CHUẨN HÓA V3.3
-        let z_sens = if config.matrix.z_score_sensitivity <= 0.0 { 1.0 } else { config.matrix.z_score_sensitivity };
         let sqz_lb = if config.matrix.squeeze_lookback == 0 { 20 } else { config.matrix.squeeze_lookback };
         let trend_lb = if config.matrix.trend_lookback == 0 { 20 } else { config.matrix.trend_lookback };
-        let mom_lb = if config.matrix.momentum_lookback == 0 { 20 } else { config.matrix.momentum_lookback };
 
         // 🚀 TASK-MAT-03 & TASK-MAT-06: Chuẩn hóa tuyến tính thuần khiết ADX / 100.0 (Occam's Scalpel)
         let mut trend_strength = Vec::with_capacity(len);
@@ -97,10 +79,9 @@ impl MarketMatrixV3 {
         }
 
         let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, sqz_lb);
-        let liquidity = normalization::rolling_percentile(&sensors.mfi, mom_lb);
+        // 🛡️ TASK-MAT-07: chaos_ratio và entropy là biến nội bộ tạm thời để tính chaos_index
         let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, sqz_lb);
         let entropy = normalization::rolling_percentile(&sensors.efficiency_ratio, trend_lb);
-        let price_z_score = normalization::tanh_scale(&sensors.z_score, z_sens);
 
         // 🚀 1. DỐC KAMA CHUẨN HÓA THEO ATR (PHI THỨ NGUYÊN - ASSET AGNOSTIC)
         let scale_atr = if config.matrix.kama_slope_scale_atr <= 0.0 { 0.20 } else { config.matrix.kama_slope_scale_atr };
@@ -108,14 +89,7 @@ impl MarketMatrixV3 {
             if s.is_finite() { (s / scale_atr).clamp(-1.0, 1.0) } else { 0.0 }
         }).collect();
 
-        // 🚀 2. TRỤC XU HƯỚNG TRỰC GIAO (ADX THEO GEN adx_trend_threshold)
-        let adx_thresh = if config.matrix.adx_trend_threshold <= 0.0 { 25.0 } else { config.matrix.adx_trend_threshold };
-        let trend_axis: Vec<f64> = sensors.adx.iter().map(|&adx_v| {
-            if adx_v.is_finite() && adx_v > 0.0 { (adx_v / adx_thresh).clamp(0.0, 1.0) } else { 0.0 }
-        }).collect();
-
-        // 🚀 3. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index)
-        // chaos_index = c_r * (1.0 - entropy)
+        // 🚀 2. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index = c_r * (1.0 - entropy))
         let mut chaos_index = Vec::with_capacity(len);
         for i in 0..len {
             let c_r_raw = chaos_ratio.get(i).copied().unwrap_or(f64::NAN);
@@ -132,25 +106,18 @@ impl MarketMatrixV3 {
             chaos_index.push(ch);
         }
         
-        // 🚀 4. ĐỘ DỐC TRỤC GIỮA BB MIDDLE (KẸP BIÊN [-2.0, 2.0] THEO TASK-MAT-08)
+        // 🚀 3. ĐỘ DỐC TRỤC GIỮA BB MIDDLE (KẸP BIÊN [-2.0, 2.0] THEO TASK-MAT-08)
         let bb_middle_slope_adj: Vec<f64> = sensors.bb_middle_slope_adj.iter().map(|&s| {
             if s.is_finite() { s.clamp(-2.0, 2.0) } else { 0.0 }
         }).collect();
 
         Self {
             kama_slope_atr: Arc::new(kama_slope_atr),
-            trend_axis: Arc::new(trend_axis),
             chaos_index: Arc::new(chaos_index),
             trend_strength: Arc::new(trend_strength),
-            kama_slope_adj: sensors.kama_slope_adj.clone(),
             bb_middle_slope_adj: Arc::new(bb_middle_slope_adj),
             squeeze_intensity: Arc::new(squeeze_intensity),
             bb_width_norm: Arc::new(bb_width_norm),
-            liquidity: Arc::new(liquidity),
-            chaos: Arc::new(chaos),
-            chaos_ratio: Arc::new(chaos_ratio), 
-            entropy: Arc::new(entropy),
-            price_z_score: Arc::new(price_z_score),
         }
     }
 }
@@ -189,12 +156,12 @@ mod tests {
 
         for i in 0..len {
             let slope = matrix.kama_slope_atr[i];
-            let trend = matrix.trend_axis[i];
+            let trend = matrix.trend_strength[i];
             let sqz = matrix.squeeze_intensity[i];
             let chaos = matrix.chaos_index[i];
 
             assert!(!slope.is_nan(), "kama_slope_atr không được là NaN tại index {}", i);
-            assert!(!trend.is_nan(), "trend_axis không được là NaN tại index {}", i);
+            assert!(!trend.is_nan(), "trend_strength không được là NaN tại index {}", i);
             assert!(!sqz.is_nan(), "squeeze_intensity không được là NaN tại index {}", i);
             assert!(!chaos.is_nan(), "chaos_index không được là NaN tại index {}", i);
 
@@ -304,7 +271,7 @@ mod tests {
         let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
 
         for i in 0..len {
-            assert!(matrix.trend_axis[i] > 0.8, "Trend axis phải mạnh khi ADX = 50");
+            assert!(matrix.trend_strength[i] >= 0.50, "Trend strength phải mạnh khi ADX = 50");
         }
     }
 
@@ -344,8 +311,6 @@ mod tests {
 
         // Tại phần tử cuối cùng: entropy percentile tiệm cận 1.0 (>= 0.95) => noise <= 0.05 => chaos_index ~ 0.024
         let last_idx = len - 1;
-        assert!(matrix.entropy[last_idx] >= 0.95, "Entropy percentile phải tiệm cận 1.0 (>= 0.95)");
-        assert!(matrix.chaos_ratio[last_idx] >= 0.95, "Chaos ratio percentile phải tiệm cận 1.0 (>= 0.95)");
         assert!(
             matrix.chaos_index[last_idx] < 0.03,
             "Khi xu hướng cực mượt (entropy >= 0.95), chaos_index ({}) phải tiệm cận 0.0 (< 0.03) bất kể biến động lớn!",
@@ -476,9 +441,6 @@ mod tests {
 
             assert!(matrix.kama_slope_atr[i].is_finite(), "kama_slope_atr[{}] phải là số hữu hạn", i);
             assert!(matrix.kama_slope_atr[i] >= -1.0 && matrix.kama_slope_atr[i] <= 1.0, "kama_slope_atr[{}] phải trong [-1.0, 1.0]", i);
-
-            assert!(matrix.trend_axis[i].is_finite(), "trend_axis[{}] phải là số hữu hạn", i);
-            assert!(matrix.trend_axis[i] >= 0.0 && matrix.trend_axis[i] <= 1.0, "trend_axis[{}] phải trong [0.0, 1.0]", i);
 
             assert!(matrix.chaos_index[i].is_finite(), "chaos_index[{}] phải là số hữu hạn", i);
             assert!(matrix.chaos_index[i] >= 0.0 && matrix.chaos_index[i] <= 1.0, "chaos_index[{}] phải trong [0.0, 1.0]", i);
