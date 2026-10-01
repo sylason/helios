@@ -39,8 +39,10 @@ const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
 
 // 2. Dữ liệu & Cửa sổ thời gian
-const TOTAL_FETCH_DAYS: i64 = 22;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 4 ngày OOS Paper Trade test
+const TOTAL_FETCH_DAYS: i64 = 22;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 8 ngày OOS Paper Trade test
 const TRAIN_WINDOW_DAYS: i64 = 14;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
+const VALIDATION_SPAN_DAYS: i64 = 3;     // Độ dài cửa sổ nến kiểm định Out-Of-Sample WFE Gate (3 ngày = 4.320 nến 1m)
+const VALIDATION_SPAN_BARS: usize = (VALIDATION_SPAN_DAYS * 24 * 60) as usize; // 4.320 nến (Tỷ lệ vàng 80/20)
 
 // 3. Chu kỳ Vòng lặp Tịnh tiến
 const REOPT_INTERVAL_MINS: i64 = 240;    // N MINUTES: Tần suất chạy lại GA Re-Optimizer (4h)
@@ -73,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("================================================================================");
     info!("🧪 BẮT ĐẦU ĐÁNH GIÁ CHIẾN LƯỢC TỊNH TIẾN CÓ SMART SEEDING 0.5%");
     info!("   Symbol: {}, Strategy: {}", SYMBOL, STRATEGY_ID);
-    info!("   Total Fetch: {} days | Train Window: {} days", TOTAL_FETCH_DAYS, TRAIN_WINDOW_DAYS);
+    info!("   Total Fetch: {} days | Train Window: {} days | WFE OOS: {} days ({} bars)", TOTAL_FETCH_DAYS, TRAIN_WINDOW_DAYS, VALIDATION_SPAN_DAYS, VALIDATION_SPAN_BARS);
     info!("   📌 [N MINS] Tần suất Re-Optimize GA:       {} phút", REOPT_INTERVAL_MINS);
     info!("   📌 [M MINS] Tần suất Single Backtest Eval:  {} phút", BACKTEST_INTERVAL_MINS);
     info!("   💰 [ACCOUNT] Initial Cash: ${:.2} | Leverage: {:.0}x | Comm: {:.4}", 
@@ -137,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (dna_tx, dna_rx) = tokio::sync::watch::channel(None);
 
-    ProspectorRunner::run_optimization_cycle_range(
+    ProspectorRunner::run_optimization_cycle_range_custom(
         SYMBOL,
         STRATEGY_ID,
         db_store.clone(),
@@ -145,7 +147,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &prospector_db,
         Some(dna_tx.clone()),
         train_start_ts,
-        train_end_ts
+        train_end_ts,
+        Some(VALIDATION_SPAN_BARS),
     ).await?;
 
     let initial_champ = db_store.get_best_dna(SYMBOL, STRATEGY_ID).await?;
@@ -326,7 +329,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let prospector_db_clone = prospector_db.clone();
             let config_path_owned = config_path.to_string();
 
-            if let Err(e) = ProspectorRunner::run_optimization_cycle_range_smart_seed(
+            if let Err(e) = ProspectorRunner::run_optimization_cycle_range_smart_seed_custom(
                 SYMBOL,
                 STRATEGY_ID,
                 db_opt,
@@ -336,6 +339,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 opt_start_ts,
                 current_ts,
                 rank1_seed_dna,
+                Some(VALIDATION_SPAN_BARS),
             ).await {
                 warn!("⚠️ Lỗi Re-Optimize lần {}: {}", reopt_count, e);
             } else if let Ok(Some(best_dna)) = db_store.get_best_dna(SYMBOL, STRATEGY_ID).await {

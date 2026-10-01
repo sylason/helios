@@ -80,6 +80,31 @@ pub struct FullOptimizerConfig {
     pub early_termination: Option<EarlyTerminationConfig>,
 }
 
+/// Cấu hình trọng số và biên độ điều chỉnh Win Rate trong Hàm Mục Tiêu Di Truyền (Loại bỏ 100% Magic Numbers)
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct WinRateFitnessConfig {
+    pub neutral_wr: f64,       // Điểm trung hòa: 50.0%
+    pub transition_span: f64,  // Dải chuyển tiếp: 15.0% (bao phủ dải 35% -> 65%)
+    pub amplitude: f64,        // Biên độ tác động: 0.60
+    pub min_multiplier: f64,   // Sàn phạt tối đa: 0.20 (không triệt tiêu cá thể)
+    pub max_multiplier: f64,   // Trần thưởng tối đa: 1.30 (chống bẫy cào scalp)
+}
+
+impl Default for WinRateFitnessConfig {
+    fn default() -> Self {
+        Self {
+            neutral_wr: 50.0,
+            transition_span: 15.0,
+            amplitude: 0.60,
+            min_multiplier: 0.20,
+            max_multiplier: 1.30,
+        }
+    }
+}
+
+/// Số nến kiểm định Out-Of-Sample mặc định: 3 ngày (72 giờ = 4320 nến 1m)
+pub const DEFAULT_VALIDATION_SPAN_BARS: usize = 4320;
+
 pub struct ProspectorRunner;
 
 impl ProspectorRunner {
@@ -137,7 +162,25 @@ impl ProspectorRunner {
         seed_dna: Option<Vec<f64>>,
     ) -> Result<(), String> {
         Self::run_optimization_cycle_range_internal(
-            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, seed_dna
+            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, seed_dna, None
+        ).await
+    }
+
+    /// Chạy 1 chu kỳ tối ưu hóa kèm Smart Seeding với cửa sổ validation tùy biến
+    pub async fn run_optimization_cycle_range_smart_seed_custom(
+        symbol: &str,
+        strategy_id: &str,
+        db: Arc<SqliteStore>,
+        config_path: &str,
+        prospector_db_path: &str,
+        dna_tx: Option<tokio::sync::watch::Sender<Option<crate::models::models::OptimizedDna>>>,
+        start_time: i64,
+        end_time: i64,
+        seed_dna: Option<Vec<f64>>,
+        validation_span_bars: Option<usize>,
+    ) -> Result<(), String> {
+        Self::run_optimization_cycle_range_internal(
+            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, seed_dna, validation_span_bars
         ).await
     }
 
@@ -153,7 +196,24 @@ impl ProspectorRunner {
         end_time: i64,
     ) -> Result<(), String> {
         Self::run_optimization_cycle_range_internal(
-            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, None
+            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, None, None
+        ).await
+    }
+
+    /// Chạy 1 chu kỳ tối ưu hóa với khoảng thời gian chỉ định và cửa sổ validation tùy biến
+    pub async fn run_optimization_cycle_range_custom(
+        symbol: &str,
+        strategy_id: &str,
+        db: Arc<SqliteStore>,
+        config_path: &str,
+        prospector_db_path: &str,
+        dna_tx: Option<tokio::sync::watch::Sender<Option<crate::models::models::OptimizedDna>>>,
+        start_time: i64,
+        end_time: i64,
+        validation_span_bars: Option<usize>,
+    ) -> Result<(), String> {
+        Self::run_optimization_cycle_range_internal(
+            symbol, strategy_id, db, config_path, prospector_db_path, dna_tx, start_time, end_time, None, validation_span_bars
         ).await
     }
 
@@ -167,6 +227,7 @@ impl ProspectorRunner {
         start_time: i64,
         end_time: i64,
         seed_dna: Option<Vec<f64>>,
+        validation_span_bars: Option<usize>,
     ) -> Result<(), String> {
         info!("🧬 [Optimizer] Bắt đầu chu kỳ tối ưu hóa cho {} (Khoảng MS: {} -> {})...", symbol, start_time, end_time);
 
@@ -189,24 +250,25 @@ impl ProspectorRunner {
         // =========================================================================
         // 🚪 WFE VALIDATION GATE: TÁCH CỬA SỔ HUẤN LUYỆN (IN-SAMPLE) & KIỂM ĐỊNH (OOS)
         // =========================================================================
-        // Dành 48 giờ gần nhất (2880 nến 1m) làm tập kiểm định Out-Of-Sample độc lập.
-        // Cần tối thiểu 8640 nến (5760 warmup + 2880 validation) để tách cửa sổ an toàn.
-        const VALIDATION_SPAN_BARS: usize = 2880; // 48 giờ
+        // Dành N giờ gần nhất làm tập kiểm định Out-Of-Sample độc lập (mặc định 3 ngày = 4320 nến 1m).
+        // Cần tối thiểu warmup + validation + 1440 nến để tách cửa sổ an toàn.
+        let val_span_bars = validation_span_bars.unwrap_or(DEFAULT_VALIDATION_SPAN_BARS);
         const WARMUP_SAFE_BARS: usize = 5760;     // Warmup indicators
-        let can_split_wfe = candles.len() >= (WARMUP_SAFE_BARS + VALIDATION_SPAN_BARS + 1440);
+        let can_split_wfe = candles.len() >= (WARMUP_SAFE_BARS + val_span_bars + 1440);
 
         let (train_candles, validation_slice) = if can_split_wfe {
-            let split_idx = candles.len() - VALIDATION_SPAN_BARS;
-            let val_start_idx = candles.len().saturating_sub(WARMUP_SAFE_BARS + VALIDATION_SPAN_BARS);
+            let split_idx = candles.len() - val_span_bars;
+            let val_start_idx = candles.len().saturating_sub(WARMUP_SAFE_BARS + val_span_bars);
             (candles[..split_idx].to_vec(), candles[val_start_idx..].to_vec())
         } else {
             (candles.clone(), Vec::new())
         };
 
         let num_train_candles = train_candles.len();
-        let num_val_candles = if validation_slice.is_empty() { 0 } else { VALIDATION_SPAN_BARS };
+        let num_val_candles = if validation_slice.is_empty() { 0 } else { val_span_bars };
         if can_split_wfe {
-            info!("🧬 [WFE Split] In-Sample Train: {} nến | Out-Of-Sample Validation: {} nến (48h)", num_train_candles, num_val_candles);
+            let val_days = val_span_bars as f64 / 1440.0;
+            info!("🧬 [WFE Split] In-Sample Train: {} nến | Out-Of-Sample Validation: {} nến ({:.1} ngày)", num_train_candles, num_val_candles, val_days);
         }
 
         // 1. Load Cấu hình Prospector & Cache từ file JSON trước
@@ -332,11 +394,17 @@ impl ProspectorRunner {
                             let val_trades = val_res.stats.total_trades;
                             let val_win_rate = val_res.stats.win_rate_pct;
 
-                            // TIÊU CHUẨN THẨM ĐỊNH (WFE GATE CRITERIA):
+                            // TIÊU CHUẨN THẨM ĐỊNH ĐA TIÊU CHÍ (MULTI-CRITERIA TOLERANT WFE GATE):
                             // 1. In-Sample bắt buộc phải có lệnh và Return > 0.0%
-                            // 2. Out-Of-Sample Validation bắt buộc phải có ít nhất 1 lệnh (val_trades >= 1), Return OOS phải dương (> 0.0%) và Max DD <= 15.0%
+                            // 2. Out-Of-Sample Validation:
+                            //    a) Solid Pass: val_ret > 0.0% và val_dd <= 15.0%
+                            //    b) Tolerant Fee Pass (Dung sai phí sàn do lệnh cuối bị ép đóng):
+                            //       val_ret >= -1.2% && val_win_rate >= 50.0% && ret > 80.0% && val_dd <= 12.0%
                             let is_in_sample_invalid = trades == 0 || ret <= 0.0;
-                            let is_oos_invalid = val_trades == 0 || val_ret <= 0.0 || val_dd > 15.0;
+
+                            let is_solid_pass = val_ret > 0.0 && val_dd <= 15.0;
+                            let is_tolerant_pass = val_ret >= -1.2 && val_win_rate >= 50.0 && ret > 80.0 && val_dd <= 12.0;
+                            let is_oos_invalid = val_trades == 0 || (!is_solid_pass && !is_tolerant_pass);
 
                             if is_in_sample_invalid || is_oos_invalid {
                                 warn!(
@@ -348,10 +416,11 @@ impl ProspectorRunner {
                                 return Ok(()); // 🛑 DỪNG LẠI, KHÔNG LƯU DB, KHÔNG BROADCAST!
                             }
 
+                            let pass_mode = if is_solid_pass { "SOLID PASS" } else { "TOLERANT FEE BUFFER PASS" };
                             info!(
-                                "✨ [WFE GATE: PASS] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% \
+                                "✨ [WFE GATE: {}] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% \
                                 | OOS Max DD: {:.2}% | OOS Trades: {} (Win Rate: {:.1}%) -> Approved for Deployment.",
-                                ret, val_ret, val_dd, val_trades, val_win_rate
+                                pass_mode, ret, val_ret, val_dd, val_trades, val_win_rate
                             );
                         }
                         Err(e) => {
@@ -477,7 +546,18 @@ impl ProspectorRunner {
             (1.0 - (trades - 55) as f64 * 0.008).max(0.70)
         };
 
-        base_score * pf_mult * sqn_mult * freq_weight
+        // 6. Hệ số Win Rate Phi Tuyến Tính (Tanh Scaling - Loại bỏ Magic Numbers)
+        let wr = stats.win_rate_pct;
+        let wr_cfg = WinRateFitnessConfig::default();
+        let wr_mult = if wr.is_nan() {
+            0.50
+        } else {
+            let normalized_diff = (wr - wr_cfg.neutral_wr) / wr_cfg.transition_span;
+            let scaled_factor = 1.0 + normalized_diff.tanh() * wr_cfg.amplitude;
+            scaled_factor.clamp(wr_cfg.min_multiplier, wr_cfg.max_multiplier)
+        };
+
+        base_score * pf_mult * sqn_mult * freq_weight * wr_mult
     }
 }
 
@@ -554,6 +634,33 @@ mod tests {
         let fit_fragile = ProspectorRunner::calculate_enhanced_fitness(&stats_fragile);
 
         assert!(fit_solid > fit_fragile * 2.0, "Hệ thống có PF dày và SQN cao phải có điểm số vượt trội");
+    }
+
+    #[test]
+    fn test_fitness_win_rate_multiplier() {
+        let mut stats_base = ferro_trade::stats::Stats::default();
+        stats_base.return_pct = 100.0;
+        stats_base.max_drawdown_pct = 10.0;
+        stats_base.total_trades = 20;
+        stats_base.profit_factor = 1.5;
+        stats_base.sqn = 2.0;
+
+        // 1. WR = 50% (Điểm chuẩn trung hòa WR_mult = 1.0)
+        let mut stats_neutral = stats_base.clone();
+        stats_neutral.win_rate_pct = 50.0;
+        let fit_neutral = ProspectorRunner::calculate_enhanced_fitness(&stats_neutral);
+
+        // 2. WR = 20% (Ăn may 1 lệnh to -> Phạt nặng > 50%)
+        let mut stats_lucky = stats_base.clone();
+        stats_lucky.win_rate_pct = 20.0;
+        let fit_lucky = ProspectorRunner::calculate_enhanced_fitness(&stats_lucky);
+        assert!(fit_lucky < fit_neutral * 0.50, "Win Rate 20% phải bị phạt hơn 50% điểm fitness so với Win Rate 50%");
+
+        // 3. WR = 65% (Win Rate cao ổn định -> Thưởng ~30%)
+        let mut stats_high_wr = stats_base.clone();
+        stats_high_wr.win_rate_pct = 65.0;
+        let fit_high_wr = ProspectorRunner::calculate_enhanced_fitness(&stats_high_wr);
+        assert!(fit_high_wr > fit_neutral * 1.25, "Win Rate 65% phải được thưởng ít nhất 25% điểm fitness so với Win Rate 50%");
     }
 
     #[test]
