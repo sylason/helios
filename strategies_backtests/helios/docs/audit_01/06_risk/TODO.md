@@ -38,10 +38,14 @@
     4. Tinh giản chấm điểm tự tin sang Pure Confidence ($Raw = Conf$), loại bỏ hoàn toàn phạt mềm hình thức cũ.
     5. Đã verify 100% với 6 unit tests riêng cho Gatekeeper, 8 tests cho Arbiter, và toàn bộ 77 tests của Helios PASS.
 
-- [ ] **TODO-RISK-10: Kẹp Cứng Trần Stop Loss $\le 15\%$ ROE Toàn Cục (`risk.rs`)**
-  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:30-61`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L30-L61), [`config.rs:554`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L554)
-  - **Vấn đề:** SL của Absorption bị GA nới rộng ra 1.77% giá, Trade #015 dính SL mất -$4.44 (-37.1% ROE), xóa sạch lợi nhuận 5 lệnh thắng và làm $EV$ âm (-$0.55/trade).
-  - **Giải pháp:** Trong `clamp_sl_price` và `calculate_initial_sl`, kẹp cứng trần ROE $\le 15\%$ (tương đương 0.75% biên độ giá ở đòn bẩy 20x).
+- [x] **TODO-RISK-10: Kẹp Cứng Trần Stop Loss $\le 15\%$ ROE Toàn Cục & Structural Risk Veto (`risk.rs`, `config.rs`, `arbiter.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs), [`config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs), [`arbiter.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (TẦNG 3)**.
+  - **Chi tiết đã triển khai:**
+    1. Thu hẹp dải tìm kiếm DNA của 7 gen `max_initial_sl_pct` (6 Playbooks + 1 Untagged) từ `[0.04, 0.40, step 0.015]` xuống `[0.04, 0.15, step 0.01]` (12 nấc mịn), giữ nguyên `DNA_WIDTH = 102`.
+    2. Thiết lập trần bất biến toàn cục `GLOBAL_HARD_MAX_ROE = 0.15` (15% ROE) trong `RiskManager::clamp_sl_price`, bảo vệ tuyệt đối không cho phép bất kỳ lệnh nào thua lỗ $> 15\%$ ROE.
+    3. Tích hợp cơ chế Sniper Entry Guard (`StructuralRiskVeto`) tại Arbiter: Nếu khoảng cách từ Entry đến SL cấu trúc vượt quá 15% ROE, proposal bị VETO ngay từ cửa, ghi nhận minh bạch vào Auction Ledger Telemetry.
+    4. Đã verify 100% với 5 unit tests mới kiểm chứng: kẹp trần SL, toán học chấp nhận SL cấu trúc, và 2 kịch bản Arbiter VETO / APPROVE.
 
 - [x] **TODO-RISK-11: Thêm Boundary Guard Z-Score Chống Đu Đỉnh & Chop Zone Cho TrendPB (`trend_pb.rs`, `config.rs`)**
   - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs), [`config.rs:449-460`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L449-L460)

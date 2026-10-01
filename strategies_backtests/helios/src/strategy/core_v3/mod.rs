@@ -578,6 +578,7 @@ impl HeliosStrategyV3 {
                 AuctionStatus::RunnerUp => "🥈 [RUNNER-UP]    ",
                 AuctionStatus::LowConfidence => "❌ [LOW-CONF]     ",
                 AuctionStatus::ConflictEliminated => "⚔️ [CONFLICT-FLAT]",
+                AuctionStatus::StructuralRiskVeto => "🛑 [RISK-VETO]    ",
                 AuctionStatus::NotTriggered => "⚪ [NOT-TRIGGERED]",
             };
             let side_str = candidate

@@ -5,7 +5,28 @@ use crate::strategy::sensors::HeliosSensors;
 
 pub struct RiskManager;
 
+/// 🛡️ TRẦN RỦI RO ROE TỐI ĐA TOÀN CỤC BẤT KHẢ XÂM PHẠM (15.0% ROE)
+/// Không một lệnh nào trên toàn hệ sinh thái được phép có mức cắt lỗ ban đầu vượt quá ngưỡng này.
+pub const GLOBAL_HARD_MAX_ROE: f64 = 0.15;
+
 impl RiskManager {
+    /// Kiểm tra xem mức Stop Loss cấu trúc đề xuất (suggested_sl) có nằm trong giới hạn rủi ro an toàn không.
+    /// Nếu khoảng cách từ Entry đến SL vượt quá trần ROE cho phép, trả về false để Arbiter VETO proposal (Sniper Entry Guard).
+    pub fn is_structural_sl_acceptable(price: f64, sl: f64, max_roe_cap: f64, leverage: f64) -> bool {
+        if price <= 0.0 || sl <= 0.0 || price.is_nan() || sl.is_nan() {
+            return false;
+        }
+        let lev = if leverage <= 0.0 { 1.0 } else { leverage };
+        let dist_pct = (price - sl).abs() / price;
+        let roe = dist_pct * lev;
+        let effective_cap = if max_roe_cap <= 0.0 {
+            GLOBAL_HARD_MAX_ROE
+        } else {
+            max_roe_cap.min(GLOBAL_HARD_MAX_ROE)
+        };
+        roe <= effective_cap
+    }
+
     /// Tính toán Size dựa trên Fixed Percentage (Fraction của Ký quỹ) nhưng đảm bảo Min Order Size.
     /// Trả về một giá trị < 1.0 (ví dụ 0.1 = 10%) để `ferro_trade` dùng làm Initial Margin.
     pub fn calculate_size(equity: f64, risk_pct: f64, min_order_usd: f64, leverage: f64, max_cap_fraction: f64) -> f64 {
@@ -36,8 +57,12 @@ impl RiskManager {
         leverage: f64,
     ) -> f64 {
         let lev = if leverage <= 0.0 { 1.0 } else { leverage };
-        // Ngưỡng ROE tối đa (mặc định 20% ROE nếu config <= 0.0)
-        let roe_cap = if max_sl_roe_cap <= 0.0 { 0.20 } else { max_sl_roe_cap };
+        // Ngưỡng ROE tối đa: Kẹp cứng bất biến không vượt quá GLOBAL_HARD_MAX_ROE (15% ROE)
+        let roe_cap = if max_sl_roe_cap <= 0.0 {
+            GLOBAL_HARD_MAX_ROE
+        } else {
+            max_sl_roe_cap.min(GLOBAL_HARD_MAX_ROE)
+        };
         let min_pct = if min_initial_sl_pct <= 0.0 { 0.0015 } else { min_initial_sl_pct };
 
         // 1. Trần khoảng cách giá tối đa theo đòn bẩy thực tế (RÀNG BUỘC CỨNG BẤT KHẢ XÂM PHẠM)
@@ -508,15 +533,15 @@ mod tests {
     fn test_clamp_sl_price_and_initial_sl_bounds() {
         let price = 2500.0;
         let is_long = true;
-        let max_sl_roe_cap = 0.20; // 20% ROE
+        let max_sl_roe_cap = 0.15; // 15% ROE
         let min_initial_sl_pct = 0.002; // 0.2% giá
         let leverage = 20.0;
 
-        // 1. SL quá xa (Trần khoảng cách giá = 20% ROE / 20x = 1.0% giá = 25 giá)
+        // 1. SL quá xa (Trần khoảng cách giá = 15% ROE / 20x = 0.75% giá = 18.75 giá)
         let too_far_sl = 2300.0; // cách 200 giá = 8%
         let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
-        let expected_min_sl = price * (1.0 - 0.01); // 2475.0
-        assert_eq!(clamped, expected_min_sl, "SL quá xa phải bị kẹp bởi trần ROE Cap 20% trên 20x (1.0% giá)");
+        let expected_min_sl = price * (1.0 - 0.0075); // 2481.25
+        assert_eq!(clamped, expected_min_sl, "SL quá xa phải bị kẹp bởi trần ROE Cap 15% trên 20x (0.75% giá)");
 
         // 2. SL quá gần (< 0.2% min_pct = 5 giá)
         let too_close_sl = 2499.0; // cách 1 giá = 0.04%
@@ -698,13 +723,13 @@ mod tests {
     fn test_clamp_sl_price_spot_1x() {
         let price = 100.0;
         let is_long = true;
-        let max_sl_roe_cap = 0.20; // 20% ROE / 1x = 20% giá -> SL xa nhất là 80.0
+        let max_sl_roe_cap = 0.15; // 15% ROE / 1x = 15% giá -> SL xa nhất là 85.0
         let min_initial_sl_pct = 0.005; // 0.5% giá -> SL gần nhất là 99.5
         let leverage = 1.0;
 
         let too_far_sl = 50.0;
         let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
-        assert_eq!(clamped, 80.0, "Với đòn bẩy Spot 1x, ROE Cap 20% tương đương 20% khoảng cách giá");
+        assert_eq!(clamped, 85.0, "Với đòn bẩy Spot 1x, ROE Cap 15% tương đương 15% khoảng cách giá");
 
         let normal_sl = 90.0; // cách 10% giá
         let clamped_normal = RiskManager::clamp_sl_price(price, normal_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
@@ -715,13 +740,13 @@ mod tests {
     fn test_clamp_sl_price_short_20x() {
         let price = 2000.0;
         let is_long = false;
-        let max_sl_roe_cap = 0.25; // 25% ROE / 20x = 1.25% giá = 25.0 giá -> SL xa nhất Short là 2025.0
+        let max_sl_roe_cap = 0.15; // 15% ROE / 20x = 0.75% giá = 15.0 giá -> SL xa nhất Short là 2015.0
         let min_initial_sl_pct = 0.002; // 0.2% giá = 4.0 giá -> SL gần nhất Short là 2004.0
         let leverage = 20.0;
 
         let too_far_short_sl = 2100.0; // cách 100 giá
         let clamped = RiskManager::clamp_sl_price(price, too_far_short_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
-        assert_eq!(clamped, 2025.0, "Short SL quá xa phải bị kẹp bởi trần 25% ROE trên 20x (2025.0)");
+        assert!((clamped - 2015.0).abs() < 1e-6, "Short SL quá xa phải bị kẹp bởi trần 15% ROE trên 20x (2015.0)");
 
         let too_close_short_sl = 2001.0; // cách 1 giá < 4 giá sàn
         let clamped_close = RiskManager::clamp_sl_price(price, too_close_short_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
@@ -738,54 +763,83 @@ mod tests {
 
         let too_far_sl = 40000.0;
         let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, small_roe_cap, min_initial_sl_pct, leverage);
-        // Universal Adaptive Floor Guard:
-        // cap_price_pct = 0.0004 (20 giá = 4% ROE)
-        // effective_min_pct = min(0.0015, 0.0004 * 0.5) = 0.0002 (10 giá = 2% ROE)
-        // effective_cap = 0.0004 (20 giá = 4% ROE)
         let expected_sl = price * (1.0 - 0.0004); // 50000 * 0.9996 = 49980.0
         assert_eq!(clamped, expected_sl, "Đòn bẩy 100x cực đoan: Trần ROE 4% phải được bảo toàn tuyệt đối không bị đè bẹp");
     }
 
     #[test]
     fn test_clamp_sl_price_floor_guard_never_exceeds_roe_cap() {
-        // Tái hiện chính xác tình huống Log 34 (Lệnh #003 RANGE_OSC)
         let price = 2447.37;
         let is_long = true;
-        let range_roe_cap = 0.20; // 20% ROE trần cho Range
+        let range_roe_cap = 0.15; // 15% ROE trần cho Range
         let min_initial_sl_pct = 0.0355; // GA Optimizer chọn sàn spread 3.55% giá
         let leverage = 20.0;
 
         let raw_sl = 2360.49; // SL cách tới 3.55% giá (71% ROE)
         let clamped = RiskManager::clamp_sl_price(price, raw_sl, is_long, range_roe_cap, min_initial_sl_pct, leverage);
         
-        // cap_price_pct = 0.20 / 20.0 = 0.010 (1.0% giá)
-        // effective_cap = 0.010 -> SL xa nhất cho phép: 2447.37 * (1 - 0.01) = 2422.8963
-        let expected_sl = price * (1.0 - 0.010);
-        assert!((clamped - expected_sl).abs() < 1e-4, "SL bắt buộc phải bị chặn tại trần 20% ROE (2422.90), không được dạt ra 2360.49 (71% ROE)");
+        let expected_sl = price * (1.0 - 0.0075);
+        assert!((clamped - expected_sl).abs() < 1e-4, "SL bắt buộc phải bị chặn tại trần 15% ROE, không được dạt ra xa");
         
         let roe_loss = ((price - clamped) / price) * leverage;
-        assert!((roe_loss - 0.20).abs() < 1e-4, "Mức lỗ tối đa ROE phải đúng bằng 20%");
+        assert!((roe_loss - 0.15).abs() < 1e-4, "Mức lỗ tối đa ROE phải đúng bằng 15%");
+    }
+
+    #[test]
+    fn test_clamp_sl_price_hard_max_roe_guard() {
+        let price = 2000.0;
+        let is_long = true;
+        let crazy_roe_cap = 0.50; // Cố tình truyền vào 50% ROE
+        let min_initial_sl_pct = 0.002;
+        let leverage = 20.0;
+
+        let too_far_sl = 1800.0;
+        let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, crazy_roe_cap, min_initial_sl_pct, leverage);
+        
+        // 15% ROE / 20x = 0.75% giá = 15.0 giá -> SL xa nhất là 1985.0
+        assert_eq!(clamped, 1985.0, "Dù truyền vào 50% ROE thì GLOBAL_HARD_MAX_ROE vẫn kẹp cứng tại 15% ROE (1985.0)!");
+    }
+
+    #[test]
+    fn test_is_structural_sl_acceptable_math() {
+        let price = 2000.0;
+        let leverage = 20.0;
+        let max_roe = 0.15;
+
+        // 1. SL cách 10.0 giá = 0.5% giá = 10% ROE <= 15% ROE -> Chấp nhận
+        let safe_sl = 1990.0;
+        assert!(RiskManager::is_structural_sl_acceptable(price, safe_sl, max_roe, leverage));
+
+        // 2. SL cách đúng 15.0 giá = 0.75% giá = 15% ROE -> Chấp nhận
+        let exact_sl = 1985.0;
+        assert!(RiskManager::is_structural_sl_acceptable(price, exact_sl, max_roe, leverage));
+
+        // 3. SL cách 20.0 giá = 1.0% giá = 20% ROE > 15% ROE -> Từ chối (VETO)
+        let deep_sl = 1980.0;
+        assert!(!RiskManager::is_structural_sl_acceptable(price, deep_sl, max_roe, leverage));
+
+        // 4. Edge cases NaN / 0
+        assert!(!RiskManager::is_structural_sl_acceptable(0.0, safe_sl, max_roe, leverage));
+        assert!(!RiskManager::is_structural_sl_acceptable(price, f64::NAN, max_roe, leverage));
     }
 
     #[test]
     fn test_fallback_hierarchy_untagged_trade_roe_cap() {
         let mut config = HeliosConfigV3::default();
-        config.risk_management.stop_management.default_sl_roe_cap = 0.15; // 15% ROE
-        config.tactical_sniper.pullback.max_initial_sl_pct = 0.30; // 30% ROE
+        config.risk_management.stop_management.default_sl_roe_cap = 0.10; // 10% ROE
+        config.tactical_sniper.pullback.max_initial_sl_pct = 0.14; // 14% ROE
 
-        // Giả lập trade có tag TREND_PB: Phải lấy 30% ROE của Pullback
         let tagged_roe = match Some("TREND_PB") {
             Some("TREND_PB") => config.tactical_sniper.pullback.max_initial_sl_pct,
             _ => config.risk_management.stop_management.default_sl_roe_cap,
         };
-        assert_eq!(tagged_roe, 0.30, "Lệnh có tag TREND_PB phải nhận đúng ROE Cap của scanner đó");
+        assert_eq!(tagged_roe, 0.14, "Lệnh có tag TREND_PB phải nhận đúng ROE Cap của scanner đó");
 
-        // Giả lập trade không có tag (Adopted / Manual): Phải fallback về default_sl_roe_cap (15%)
         let untagged_trade_tag: Option<&str> = None;
         let fallback_roe = match untagged_trade_tag {
             Some("TREND_PB") => config.tactical_sniper.pullback.max_initial_sl_pct,
             _ => config.risk_management.stop_management.default_sl_roe_cap,
         };
-        assert_eq!(fallback_roe, 0.15, "Lệnh không có tag phải tự động fallback về default_sl_roe_cap");
+        assert_eq!(fallback_roe, 0.10, "Lệnh không có tag phải tự động fallback về default_sl_roe_cap");
     }
 }

@@ -5,6 +5,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::gatekeeper::{RegimeGatekeeper, GateVetoReason};
+use crate::strategy::core_v3::risk::RiskManager;
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +57,7 @@ pub enum AuctionStatus {
     RunnerUp,
     LowConfidence,
     ConflictEliminated,
+    StructuralRiskVeto, // 🛑 Rủi ro cấu trúc SL vượt quá trần ROE cho phép (Sniper Entry Guard)
     NotTriggered,
 }
 
@@ -192,30 +194,70 @@ impl HeliosArbiter {
         // Tính chaos penalty thực tế (0.0 dưới mô hình Pure Confidence)
         let chaos_penalty = 0.0;
 
-        let mut scanned_info: Vec<(ScannerId, Option<Proposal>, f64, bool)> = Vec::with_capacity(self.scanners.len());
+        let current_price = tick.closes()[i];
+        let leverage = config.risk_management.risk_base.leverage.max(1.0);
+
+        let mut scanned_info = Vec::with_capacity(self.scanners.len());
         let mut approved_proposals: Vec<(Proposal, f64)> = Vec::new();
 
         // 1. THU THẬP & CHẤM ĐIỂM TỰ TIN PHI TUYẾN O(1) CHO CÁC PROPOSALS
         for scanner in &self.scanners {
             let id = scanner.id();
             let opt_prop = scanner.scan(tick, sensors, matrix, config);
-            let (conf, passed) = if let Some(ref proposal) = opt_prop {
+            let (conf, passed, rej_status, rej_reason) = if let Some(ref proposal) = opt_prop {
                 let confidence = Self::compute_confidence(proposal.raw_score, chaos_val, max_chaos_penalty);
-                let ok = confidence >= min_threshold;
-                if ok {
+                let playbook_max_sl_roe = match id {
+                    ScannerId::TrendPullback => config.tactical_sniper.pullback.max_initial_sl_pct,
+                    ScannerId::MomentumIgnition => config.tactical_sniper.momentum.max_initial_sl_pct,
+                    ScannerId::RangeOscillator => config.tactical_sniper.range.max_initial_sl_pct,
+                    ScannerId::ClimaxReversal => config.tactical_sniper.reversal.max_initial_sl_pct,
+                    ScannerId::AnomalyFade => config.tactical_sniper.anomaly.max_initial_sl_pct,
+                    ScannerId::AbsorptionScout => config.tactical_sniper.absorption.max_initial_sl_pct,
+                };
+
+                // 🛑 CHỐT CHẶN VETO RỦI RO CẤU TRÚC (SNIPER ENTRY GUARD)
+                let sl_acceptable = if let Some(sl) = proposal.suggested_sl {
+                    RiskManager::is_structural_sl_acceptable(current_price, sl, playbook_max_sl_roe, leverage)
+                } else {
+                    true
+                };
+
+                if !sl_acceptable {
+                    let sl_val = proposal.suggested_sl.unwrap_or(0.0);
+                    let dist_roe = (current_price - sl_val).abs() / current_price * leverage * 100.0;
+                    let cap_roe = playbook_max_sl_roe.min(crate::strategy::core_v3::risk::GLOBAL_HARD_MAX_ROE) * 100.0;
+                    (
+                        confidence,
+                        false,
+                        Some(AuctionStatus::StructuralRiskVeto),
+                        format!("Structural SL exceeds ROE cap: {:.1}% > {:.1}% (entry too risky)", dist_roe, cap_roe),
+                    )
+                } else if confidence >= min_threshold {
                     approved_proposals.push((proposal.clone(), confidence));
+                    (confidence, true, None, String::new())
+                } else {
+                    (
+                        confidence,
+                        false,
+                        Some(AuctionStatus::LowConfidence),
+                        format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
+                    )
                 }
-                (confidence, ok)
             } else {
-                (0.0, false)
+                (
+                    0.0,
+                    false,
+                    Some(AuctionStatus::NotTriggered),
+                    "Pattern conditions not met".to_string(),
+                )
             };
-            scanned_info.push((id, opt_prop, conf, passed));
+            scanned_info.push((id, opt_prop, conf, passed, rej_status, rej_reason));
         }
 
         // TELEMETRY: In biên bản đấu thầu nếu có ít nhất 1 proposal và debug_mode được bật
         if debug_mode {
-            let triggered_proposals: Vec<_> = scanned_info.iter().filter_map(|(_, opt_p, conf, passed)| {
-                opt_p.as_ref().map(|p| (p, *conf, *passed))
+            let triggered_proposals: Vec<_> = scanned_info.iter().filter_map(|(_, opt_p, conf, passed, rej_status, rej_reason)| {
+                opt_p.as_ref().map(|p| (p, *conf, *passed, *rej_status, rej_reason))
             }).collect();
 
             if !triggered_proposals.is_empty() {
@@ -223,10 +265,17 @@ impl HeliosArbiter {
                     "⚖️ [ARBITER AUCTION] Bar: {} | Scanned Proposals: {} | Approved: {} | Chaos: {:.3} | Min Conf Thresh: {:.3} | Margin: {:.3}",
                     i, triggered_proposals.len(), approved_proposals.len(), chaos_val, min_threshold, conflict_margin
                 );
-                for (p, conf, passed) in &triggered_proposals {
+                for (p, conf, passed, rej_status, rej_reason) in &triggered_proposals {
+                    let status_str = if *passed {
+                        "APPROVED".to_string()
+                    } else if let Some(st) = rej_status {
+                        format!("{:?}", st)
+                    } else {
+                        "REJECTED".to_string()
+                    };
                     info!(
-                        "   - [{:<8}] Scanner: {:<12} | Side: {:<5} | Raw: {:.3} | Conf: {:.3} | SL: {:?} | TP: {:?}",
-                        if *passed { "APPROVED" } else { "REJECTED" },
+                        "   - [{:<18}] Scanner: {:<12} | Side: {:<5} | Raw: {:.3} | Conf: {:.3} | SL: {:?} | TP: {:?}",
+                        status_str,
                         p.scanner_id.as_str(),
                         format!("{:?}", p.signal_type),
                         p.raw_score,
@@ -234,39 +283,29 @@ impl HeliosArbiter {
                         p.suggested_sl,
                         p.suggested_tp
                     );
+                    if !*passed && !rej_reason.is_empty() {
+                        info!("     └─ Reason: {}", rej_reason);
+                    }
                 }
             }
         }
 
         if approved_proposals.is_empty() {
-            if debug_mode && scanned_info.iter().any(|(_, opt_p, _, _)| opt_p.is_some()) {
-                info!("   => [ARBITER RESULT] REJECTED: All proposals failed min_confidence_threshold ({:.3})", min_threshold);
+            if debug_mode && scanned_info.iter().any(|(_, opt_p, _, _, _, _)| opt_p.is_some()) {
+                info!("   => [ARBITER RESULT] REJECTED: All proposals failed validation (min_confidence or structural risk)");
             }
             let auction_ledger = scanned_info
                 .into_iter()
-                .map(|(id, opt_p, conf, _)| {
-                    let (sig, raw, status, reason) = if let Some(p) = opt_p {
-                        (
-                            Some(p.signal_type),
-                            p.raw_score,
-                            AuctionStatus::LowConfidence,
-                            format!("Confidence {:.3} < min_threshold {:.3}", conf, min_threshold),
-                        )
-                    } else {
-                        (
-                            None,
-                            0.0,
-                            AuctionStatus::NotTriggered,
-                            "Pattern conditions not met".to_string(),
-                        )
-                    };
+                .map(|(id, opt_p, conf, _, rej_status, rej_reason)| {
+                    let sig = opt_p.as_ref().map(|p| p.signal_type);
+                    let raw = opt_p.as_ref().map(|p| p.raw_score).unwrap_or(0.0);
                     AuctionCandidate {
                         scanner_id: id,
                         signal_type: sig,
                         raw_score: raw,
                         confidence: conf,
-                        status,
-                        reason,
+                        status: rej_status.unwrap_or(AuctionStatus::NotTriggered),
+                        reason: rej_reason,
                     }
                 })
                 .collect();
@@ -300,13 +339,13 @@ impl HeliosArbiter {
             let winner_conf = confidence;
             let runner_up_conf = scanned_info
                 .iter()
-                .filter(|(id, _, _, passed)| *id != winner_id && *passed)
-                .map(|(_, _, conf, _)| *conf)
+                .filter(|(id, _, _, passed, _, _)| *id != winner_id && *passed)
+                .map(|(_, _, conf, _, _, _)| *conf)
                 .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             let auction_ledger = scanned_info
                 .into_iter()
-                .map(|(id, opt_p, conf, passed)| {
+                .map(|(id, opt_p, conf, passed, rej_status, rej_reason)| {
                     let sig = opt_p.as_ref().map(|p| p.signal_type);
                     let raw = opt_p.as_ref().map(|p| p.raw_score).unwrap_or(0.0);
                     let (status, reason) = if id == winner_id {
@@ -323,10 +362,8 @@ impl HeliosArbiter {
                             format!("Defeated in inter-side face-off (Conf: {:.3} vs {:.3})", conf, winner_conf)
                         };
                         (AuctionStatus::RunnerUp, reason_str)
-                    } else if opt_p.is_some() {
-                        (AuctionStatus::LowConfidence, format!("Confidence {:.3} < min_threshold {:.3}", conf, min_threshold))
                     } else {
-                        (AuctionStatus::NotTriggered, "Pattern conditions not met".to_string())
+                        (rej_status.unwrap_or(AuctionStatus::NotTriggered), rej_reason)
                     };
 
                     AuctionCandidate {
@@ -359,15 +396,13 @@ impl HeliosArbiter {
 
             let auction_ledger = scanned_info
                 .into_iter()
-                .map(|(id, opt_p, conf, passed)| {
+                .map(|(id, opt_p, conf, passed, rej_status, rej_reason)| {
                     let sig = opt_p.as_ref().map(|p| p.signal_type);
                     let raw = opt_p.as_ref().map(|p| p.raw_score).unwrap_or(0.0);
                     let (status, reason) = if passed {
                         (AuctionStatus::ConflictEliminated, format!("Opposing signals deadlock (|diff| <= margin {:.3})", conflict_margin))
-                    } else if opt_p.is_some() {
-                        (AuctionStatus::LowConfidence, format!("Confidence {:.3} < min_threshold {:.3}", conf, min_threshold))
                     } else {
-                        (AuctionStatus::NotTriggered, "Pattern conditions not met".to_string())
+                        (rej_status.unwrap_or(AuctionStatus::NotTriggered), rej_reason)
                     };
 
                     AuctionCandidate {
@@ -610,5 +645,157 @@ mod tests {
         assert!(w2.is_some());
         assert_eq!(w1.as_ref().unwrap().0.scanner_id, w2.as_ref().unwrap().0.scanner_id);
         assert_eq!(w1.unwrap().0.scanner_id, ScannerId::TrendPullback);
+    }
+
+    #[derive(Clone)]
+    struct MockScanner {
+        id: ScannerId,
+        proposal: Option<Proposal>,
+    }
+
+    impl TacticalScanner for MockScanner {
+        fn id(&self) -> ScannerId { self.id }
+        fn scan(&self, _tick: &TickContext, _sensors: &HeliosSensors, _matrix: &MarketMatrixV3, _config: &HeliosConfigV3) -> Option<Proposal> {
+            self.proposal.clone()
+        }
+        fn clone_box(&self) -> Box<dyn TacticalScanner> {
+            Box::new(self.clone())
+        }
+    }
+
+    #[test]
+    fn test_arbiter_structural_risk_veto_blocks_deep_sl() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.arbiter.chaos_veto_threshold = 0.65;
+        config.arbiter.min_natr_threshold = 0.0010;
+        config.risk_management.risk_base.leverage = 20.0;
+        config.tactical_sniper.pullback.max_initial_sl_pct = 0.15; // Trần 15% ROE (0.75% giá = 15 giá)
+
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]); // 0.30% NATR > min_natr_threshold (0.0010)
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+
+        // Mock proposal với SL = 1970.0 (cách 30 giá = 1.5% giá ở 20x = 30% ROE > 15% ROE)
+        let deep_sl_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.90, // Tự tin rất cao nhưng SL quá sâu
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(1970.0),
+            suggested_tp: None,
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::TrendPullback,
+            proposal: Some(deep_sl_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+        assert!(!decision.is_approved, "Proposal có SL cấu trúc 30% ROE (> 15% ROE) PHẢI bị VETO!");
+        assert_eq!(decision.auction_ledger.len(), 1);
+        assert_eq!(decision.auction_ledger[0].status, AuctionStatus::StructuralRiskVeto);
+    }
+
+    #[test]
+    fn test_arbiter_structural_sl_approved_when_within_roe_cap() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.arbiter.chaos_veto_threshold = 0.65;
+        config.arbiter.min_natr_threshold = 0.0010;
+        config.risk_management.risk_base.leverage = 20.0;
+        config.tactical_sniper.pullback.max_initial_sl_pct = 0.15;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]); // 0.30% NATR > min_natr_threshold (0.0010)
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+
+        // Mock proposal với SL = 1990.0 (cách 10 giá = 0.5% giá ở 20x = 10% ROE <= 15% ROE)
+        let safe_sl_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.85,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(1990.0),
+            suggested_tp: None,
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::TrendPullback,
+            proposal: Some(safe_sl_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+        assert!(decision.is_approved, "Proposal có SL cấu trúc 10% ROE (<= 15% ROE) PHẢI được APPROVE!");
+        assert_eq!(decision.winning_scanner, Some(ScannerId::TrendPullback));
+        assert_eq!(decision.final_sl, Some(1990.0));
     }
 }
