@@ -4,6 +4,7 @@ use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use crate::strategy::core_v3::gatekeeper::{RegimeGatekeeper, GateVetoReason};
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +79,7 @@ pub struct ArbiterDecision {
     pub final_tp: Option<f64>,
     pub chaos_val: f64,
     pub chaos_penalty: f64,
+    pub gate_veto: Option<GateVetoReason>,
     pub auction_ledger: Vec<AuctionCandidate>,
 }
 
@@ -134,22 +136,19 @@ impl HeliosArbiter {
         self.scanners.push(scanner);
     }
 
-    /// Tính điểm tự tin đấu thầu phi tuyến bậc 2 (Quadratic) với Phạt Mềm Có Chặn Trần (Soft Capped Penalty):
-    /// Confidence = raw_score * (1.0 - penalty)
-    /// Trong đó: penalty = min(cap, cap * chaos_index^2) với cap = max_chaos_penalty
-    /// - Khi thị trường chớm nhiễu (chaos_index = 0.50): mức phạt rất êm ái (chỉ 12.5% với cap 0.50),
-    ///   giúp bảo vệ các setup chất lượng khi thị trường mới chỉ hơi gợn sóng.
-    /// - Khi thị trường bão Whipsaw cực đại (chaos_index = 1.0), điểm tự tin bị trừ tối đa đúng bằng cap (DNA [0.10, 0.90]).
-    /// - An toàn tuyệt đối với NaN: Trả về 0.0 nếu raw_score, chaos_index hoặc max_chaos_penalty là NaN.
+    /// [LEVEL 4: PURE CONFIDENCE (FLAW-RISK.11 Refactor)]
+    /// Sau khi Cầu Dao Gatekeeper (Tầng 1) đã thẩm định thị trường an toàn (Tradable Regime),
+    /// điểm tự tin phản ánh 100% độ hoàn hảo của mẫu hình (Pattern Quality) từ chính Scanner.
+    /// Loại bỏ hình phạt mềm (quadratic chaos penalty) cũ để tránh tình trạng "phạt 2 lần"
+    /// và ngăn chặn các setup kém chất lượng lọt qua cửa khi bão bùng phát.
+    /// 
+    /// - An toàn tuyệt đối với NaN: Trả về 0.0 nếu raw_score là NaN hoặc <= 0.0.
     #[inline]
-    pub fn compute_confidence(raw_score: f64, chaos_index: f64, max_chaos_penalty: f64) -> f64 {
-        if raw_score.is_nan() || chaos_index.is_nan() || max_chaos_penalty.is_nan() || raw_score <= 0.0 {
+    pub fn compute_confidence(raw_score: f64, _chaos_index: f64, _max_chaos_penalty: f64) -> f64 {
+        if raw_score.is_nan() || raw_score <= 0.0 {
             0.0
         } else {
-            let cap = max_chaos_penalty.clamp(0.0, 1.0);
-            let c_clamped = chaos_index.clamp(0.0, 1.0);
-            let penalty = (cap * c_clamped * c_clamped).min(cap);
-            (raw_score * (1.0 - penalty)).clamp(0.0, 1.0)
+            raw_score.clamp(0.0, 1.0)
         }
     }
 
@@ -161,10 +160,37 @@ impl HeliosArbiter {
         let conflict_margin = config.arbiter.conflict_confidence_margin;
         let max_chaos_penalty = config.arbiter.max_chaos_penalty;
 
-        // Tính chaos penalty thực tế
-        let cap = max_chaos_penalty.clamp(0.0, 1.0);
-        let c_clamped = chaos_val.clamp(0.0, 1.0);
-        let chaos_penalty = (cap * c_clamped * c_clamped).min(cap);
+        // 🛡️ TẦNG 1: CẦU DAO ĐIỀU HƯỚNG CHẾ ĐỘ THỊ TRƯỜNG (REGIME GATEKEEPER)
+        // Thoát sớm O(1) nếu thị trường rơi vào tử địa (Bão Whipsaw hoặc Sàn biến động chết Flatline).
+        // Triệt tiêu 100% lãng phí CPU chạy Scanners khi thị trường không thể giao dịch (EV < 0).
+        let gate_eval = RegimeGatekeeper::evaluate(tick, sensors, matrix, config);
+        if !gate_eval.passed {
+            if debug_mode {
+                info!(
+                    "🛡️ [GATEKEEPER VETO] Bar: {} | Veto: {:?} | Chaos: {:.3} (Hysteresis: {}) | NATR: {:.2}%",
+                    i,
+                    gate_eval.veto_reason,
+                    gate_eval.current_chaos,
+                    gate_eval.is_hysteresis_active,
+                    gate_eval.current_natr
+                );
+            }
+            return ArbiterDecision {
+                is_approved: false,
+                final_signal: None,
+                winning_scanner: None,
+                final_confidence: 0.0,
+                final_sl: None,
+                final_tp: None,
+                chaos_val: gate_eval.current_chaos,
+                chaos_penalty: 0.0,
+                gate_veto: gate_eval.veto_reason,
+                auction_ledger: Vec::new(),
+            };
+        }
+
+        // Tính chaos penalty thực tế (0.0 dưới mô hình Pure Confidence)
+        let chaos_penalty = 0.0;
 
         let mut scanned_info: Vec<(ScannerId, Option<Proposal>, f64, bool)> = Vec::with_capacity(self.scanners.len());
         let mut approved_proposals: Vec<(Proposal, f64)> = Vec::new();
@@ -254,6 +280,7 @@ impl HeliosArbiter {
                 final_tp: None,
                 chaos_val,
                 chaos_penalty,
+                gate_veto: None,
                 auction_ledger,
             };
         }
@@ -322,6 +349,7 @@ impl HeliosArbiter {
                 final_tp: proposal.suggested_tp,
                 chaos_val,
                 chaos_penalty,
+                gate_veto: None,
                 auction_ledger,
             }
         } else {
@@ -362,6 +390,7 @@ impl HeliosArbiter {
                 final_tp: None,
                 chaos_val,
                 chaos_penalty,
+                gate_veto: None,
                 auction_ledger,
             }
         }
@@ -432,35 +461,24 @@ mod tests {
     #[test]
     fn test_nan_safety_in_confidence() {
         assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, 0.2, 0.50), 0.0);
-        assert_eq!(HeliosArbiter::compute_confidence(0.8, f64::NAN, 0.50), 0.0);
-        assert_eq!(HeliosArbiter::compute_confidence(0.8, 0.2, f64::NAN), 0.0);
         assert_eq!(HeliosArbiter::compute_confidence(f64::NAN, f64::NAN, f64::NAN), 0.0);
     }
 
     #[test]
-    fn test_soft_chaos_penalty_preserves_strong_signals() {
-        // Thị trường êm ả (chaos = 0.0): confidence = raw_score
+    fn test_pure_confidence_score() {
+        // Dưới mô hình Pure Confidence (FLAW-RISK.11), điểm tự tin phản ánh 100% Pattern Quality
         let conf_calm = HeliosArbiter::compute_confidence(0.80, 0.0, 0.50);
         assert_eq!(conf_calm, 0.80);
 
-        // Bắt đầu nhiễu (chaos = 0.50): penalty = 0.50 * (0.50)^2 = 0.125 (giảm 12.5% tự tin)
-        // conf = 0.80 * (1.0 - 0.125) = 0.80 * 0.875 = 0.70
         let conf_choppy = HeliosArbiter::compute_confidence(0.80, 0.50, 0.50);
-        assert!((conf_choppy - 0.70).abs() < 1e-6);
+        assert_eq!(conf_choppy, 0.80);
 
-        // Bão Whipsaw cực đại (chaos = 1.0): penalty chặn trần ở 50%, confidence vẫn còn 0.40 >= 0.20
         let conf_storm = HeliosArbiter::compute_confidence(0.80, 1.0, 0.50);
-        assert!((conf_storm - 0.40).abs() < 1e-6);
-        assert!(conf_storm >= 0.20, "Setup đẹp (0.80) khi bão cực đại vẫn phải sống sót!");
+        assert_eq!(conf_storm, 0.80);
 
-        // Setup cực hạn (chaos = 1.5): penalty vẫn bị kẹp ở 50%
-        let conf_extreme = HeliosArbiter::compute_confidence(0.90, 1.5, 0.50);
-        assert!((conf_extreme - 0.45).abs() < 1e-6);
-
-        // Kiểm tra với trần phạt 90% (max_chaos_penalty = 0.90):
-        // Khi chaos = 1.0 -> penalty = 0.90 -> conf = 0.80 * (1.0 - 0.90) = 0.08
-        let conf_severe = HeliosArbiter::compute_confidence(0.80, 1.0, 0.90);
-        assert!((conf_severe - 0.08).abs() < 1e-6);
+        // Kẹp trần 1.0
+        let conf_over = HeliosArbiter::compute_confidence(1.20, 0.20, 0.50);
+        assert_eq!(conf_over, 1.0);
     }
 
     #[test]

@@ -299,15 +299,28 @@ fn default_vol_z_sensitivity() -> f64 { 1.50 }
 /// ============================================================================
 /// Đã được De-overengineer sang mô hình chấm điểm tuyến tính O(1).
 /// Loại bỏ 5 gen ma và 7 Multipliers phi tuyến.
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct ArbiterConfig {
     /// 🎯 NGƯỠNG PHÊ DUYỆT TỰ TIN TUYẾN TÍNH DUY NHẤT (0.05 -> 0.50, Step 0.01 -> 46 nấc)
     #[dna(min = 0.05, max = 0.50, step = 0.01)]
     #[serde(default = "default_min_confidence_threshold")]
     pub min_confidence_threshold: f64,
 
-    /// 🌪️ TRẦN PHẠT BÃO HỖN LOẠN PHI TUYẾN (0.10 -> 0.90, Step 0.05 -> 17 nấc)
-    #[dna(min = 0.10, max = 0.90, step = 0.05)]
+    /// 🌪️ NGƯỠNG CẮT CẦU DAO BÃO HỖN LOẠN (0.50 -> 0.85, Step 0.05 -> 8 nấc)
+    #[dna(min = 0.50, max = 0.85, step = 0.05)]
+    #[serde(default = "default_chaos_veto_threshold")]
+    pub chaos_veto_threshold: f64,
+
+    /// 📉 SÀN BIẾN ĐỘNG TỐI THIỂU BÙ PHÍ SÀN NATR (0.0008 -> 0.0030, Step 0.0002 -> 12 nấc)
+    #[dna(min = 0.0008, max = 0.0030, step = 0.0002)]
+    #[serde(default = "default_min_natr_threshold")]
+    pub min_natr_threshold: f64,
+
+    /// 🛡️ BIÊN ĐỘ HỒI PHỤC AN TOÀN HYSTERESIS (Mặc định 0.10)
+    #[serde(default = "default_chaos_hysteresis_delta")]
+    pub chaos_hysteresis_delta: f64,
+
+    /// 🌪️ TRẦN PHẠT BÃO HỖN LOẠN CŨ (ĐÃ BỎ GEN DNA ĐỂ DE-OVERENGINEER SANG HARD GATE)
     #[serde(default = "default_max_chaos_penalty")]
     pub max_chaos_penalty: f64,
 
@@ -338,7 +351,29 @@ pub struct ArbiterConfig {
     pub min_confidence_chaos: f64,
 }
 
+impl Default for ArbiterConfig {
+    fn default() -> Self {
+        Self {
+            min_confidence_threshold: default_min_confidence_threshold(),
+            chaos_veto_threshold: default_chaos_veto_threshold(),
+            min_natr_threshold: default_min_natr_threshold(),
+            chaos_hysteresis_delta: default_chaos_hysteresis_delta(),
+            max_chaos_penalty: default_max_chaos_penalty(),
+            conflict_confidence_margin: default_conflict_confidence_margin(),
+            min_multiplier_veto: default_min_multiplier_veto(),
+            scanner_weight: default_scanner_weight(),
+            min_confidence_trending: default_min_confidence_trending(),
+            min_confidence_ranging: default_min_confidence_ranging(),
+            min_confidence_compression: default_min_confidence_compression(),
+            min_confidence_chaos: default_min_confidence_chaos(),
+        }
+    }
+}
+
 fn default_min_confidence_threshold() -> f64 { 0.20 }
+fn default_chaos_veto_threshold() -> f64 { 0.65 }
+fn default_min_natr_threshold() -> f64 { 0.0012 }
+fn default_chaos_hysteresis_delta() -> f64 { 0.10 }
 fn default_max_chaos_penalty() -> f64 { 0.50 }
 fn default_conflict_confidence_margin() -> f64 { 0.15 }
 fn default_min_multiplier_veto() -> f64 { 0.01 }

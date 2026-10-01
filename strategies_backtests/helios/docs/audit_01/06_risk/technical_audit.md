@@ -442,27 +442,65 @@ Bảng đối chiếu 3 môi trường thực thi: Backtest (`ferro_trade::Broke
 
 ---
 
-## 4. BẢNG TỔNG KẾT KIỂM TOÁN LỖ HỔNG (RISK MATRIX)
+## 4. BẢNG TỔNG HỢP TOÀN DIỆN CÁC LỖ HỔNG RISK LIÊN PHÂN HỆ (CROSS-MODULE RISK MATRIX)
 
-| Mã Lỗ Hổng | Phân Loại | Vị Trí Code | Mức Độ | Mô Tả Tóm Tắt & Hệ Quả Thực Tế |
+Dưới đây là ma trận tổng hợp toàn bộ các tử huyệt rủi ro được phát hiện và truy vết từ các phân hệ liên đới (`01_absorption`, `02_momentum_ignition`, `03_reversal`, `04_arbiter`, `05_matrix` và `06_risk`):
+
+| Mã Lỗ Hổng | Phân Hệ Nguồn | Vị Trí File & Dòng | Mức Độ | Bản Chất Vấn Đề Kỹ Thuật & Tác Động Rủi Ro Tài Khoản |
 | :--- | :--- | :--- | :--- | :--- |
-| **FLAW-RISK.1** | Logic Toán IEEE 754 | [`risk.rs:12, 25`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L12) | 🟠 **HIGH** | `equity.is_nan()` không bị chặn bởi `<= 0.0`. `NaN.min(0.25)` trả về `0.25`, cấp 25% margin cho tài khoản lỗi số dư. |
-| **FLAW-RISK.2** | Ma Sát Thị Trường | [`risk.rs:327`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L327) | 🟡 **MEDIUM** | `fee_buffer_pct = 0.0008` (0.08%) thấp hơn phí Taker 2 chiều của Binance Futures (0.10%), chưa tính trượt giá slippage. |
-| **FLAW-RISK.3** | Thực Thi Live Sàn | [`order_executor.rs:241-248`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/order_executor.rs#L241-L248) | 🔴 **CRITICAL** | `OrderExecutor` không gửi lệnh Algo Take Profit lên Binance Futures, khiến toàn bộ chiến lược chốt lời cố định bị vô hiệu hóa trên Live. |
-| **FLAW-RISK.4** | Ràng Buộc Sàn | [`risk.rs:18-25`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L18-L25) | 🟡 **MEDIUM** | Khi vốn quá nhỏ ($2-$4), `min_order_usd` bị ép bởi `max_cap_fraction`, sinh ra lệnh < $21 chắc chắn bị sàn từ chối. |
-| **FLAW-RISK.5** | Chốt Lời Đỉnh | [`risk.rs:234, 246`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L234) | 🟢 **LOW** | TTP yêu cầu `current_close >= min_exit_price`. Nếu xuất hiện gap sập mạnh dưới giá vào, TTP không kích hoạt mà chuyển giao cho Trailing SL. |
+| **FLAW-RISK.1** | `06_risk` | [`risk.rs:12, 25`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L12) | 🔴 **CRITICAL** | **IEEE 754 NaN Bypass trong `calculate_size`**: `equity.is_nan()` không bị chặn bởi `<= 0.0`. `NaN.min(0.25)` trả về `0.25`, cấp margin 25% cho tài khoản có vốn bị lỗi dữ liệu. |
+| **FLAW-RISK.2** | `06_risk` / `Bot Engine` | [`order_executor.rs:241-248`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/order_executor.rs#L241-L248) | 🔴 **CRITICAL** | **Thiếu Lệnh Algo Take Profit trên Sàn Binance Live**: `OrderExecutor` chỉ gửi lệnh Algo SL, bỏ qua Algo TP khiến các chiến lược có Fixed TP (`RANGE_OSC`, `REVERSAL`) không thể chốt lời trên Live. |
+| **FLAW-RISK.3** | `01_absorption` | [`absorption.rs:98-108`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L98-L108) & [`config.rs:554`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L554) | 🔴 **CRITICAL** | **Buffer SL Quá Rộng Gây Vỡ Trận Vốn (-26.6% Drawdown)**: Dải gen `struct_sl_buffer_atr` lên tới 10.0 ATR. SL đặt dưới `bb_lower - 10*ATR` tạo khoảng cách SL 12-13 ATR (~7.5% giá). Đòn bẩy 20x gây sụt giảm -30% tài khoản. |
+| **FLAW-RISK.4** | `02_momentum_ignition` | [`momentum_ignition.rs:65-74`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs#L65-L74) | 🔴 **CRITICAL** | **Flash Stop-Out Trong 2-3 Bars Do SL Quá Sát**: SL đặt tại `Low/High +/- 0.10*ATR` (~0.4% giá). Không đủ dung sai cho vi nhiễu nến 1m Crypto ($0.3\% - 0.8\%$), bị quét Hard SL ngay nhịp retest đầu tiên. |
+| **FLAW-RISK.5** | `03_reversal` | [`reversal.rs:66, 75, 85`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs#L66) | 🟠 **HIGH** | **Nghịch Lý Tỷ Lệ R:R Khi Sinh Tín Hiệu (Risk/Reward Inversion)**: `suggested_tp = Some(kama_mid)`, `suggested_sl = low - wick_buffer`. Khi nến có râu dài và giá đã sát KAMA Mid, R:R < 1:0.3 cực xấu nhưng Proposal vẫn được phát ra. |
+| **FLAW-RISK.6** | `04_arbiter` | [`00_arbiter_rr_fallacy.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/00_arbiter_rr_fallacy.md) | 🟠 **HIGH** | **Ảo Tưởng "SL Gần = R:R Tốt" (Tight SL Fallacy)**: So sánh `dist_new < dist_curr` khi TP chưa xác định dẫn đến việc chọn các lệnh có SL hẹp nhất (dễ dính SL nhất). *(Đã được vá bằng Two-Stage Auction Confidence-First)*. |
+| **FLAW-RISK.7** | `06_risk` | [`risk.rs:327`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L327) | 🟡 **MEDIUM** | **Bộ Đệm Phí Sàn Break-Even Quá Mỏng (`fee_buffer_pct = 0.0008`)**: Mức đệm 0.08% không đủ bù phí Taker 2 chiều Binance Futures (0.10%) và trượt giá slippage (0.03-0.05%), biến lệnh hòa vốn thành lỗ thực tế. |
+| **FLAW-RISK.8** | `06_risk` | [`risk.rs:18-25`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L18-L25) | 🟡 **MEDIUM** | **Xung Đột `min_order_usd` ($21) vs `max_cap_fraction` (0.25) khi Vốn Nhỏ**: Tài khoản $2-$4 bị kẹp trần 25% vốn tạo ra lệnh Notional < $21 chắc chắn bị sàn Binance từ chối (`MIN_NOTIONAL`). |
+| **FLAW-RISK.9** | `05_matrix` | [`matrix.rs:80, 95`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/matrix.rs#L80) | 🟡 **MEDIUM** | **Lệch Pha Đo Đạc Rủi Ro Biến Động Do Ma Trận Bị Nhiễu**: Phép tính đảo `1.0 / vol_z_sens` và `squeeze` kẹt 0.50 làm sai lệch việc điều chỉnh khoảng cách Trailing SL và ngưỡng kích hoạt Break-Even theo trạng thái thị trường. |
+| **FLAW-RISK.10** | `06_risk` | [`risk.rs:234, 246`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L234) | 🟢 **LOW** | **Gap Down Trong Trailing Take Profit (TTP)**: Khi có gap sập mạnh dưới `min_exit_price`, TTP không kích hoạt mà chuyển giao cho Trailing SL. Cần log telemetry để theo dõi slippage. |
+| **FLAW-RISK.11** | `04_arbiter` / `06_risk` | [`arbiter.rs:145-154`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L145-L154) | 🔴 **CRITICAL** | **Chaos Penalty Mang Tính "Hình Thức" Không Ngắt Mạch Thị Trường Bão Loạn**: Phạt mềm bậc hai `(1.0 - penalty)` khiến các lệnh có Raw Score cao (0.95 - 0.97) vẫn vượt ngưỡng duyệt (Conf > 0.80) dù `Chaos_Idx` lên tới 0.716 - 0.803. Dẫn đến việc mở lệnh giữa bão Whipsaw không thể phân tích và dính Hard SL tức thì. |
+| **FLAW-RISK.12** | `06_risk` / `01_absorption` | [`config.rs:554`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L554), [`risk.rs:30`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L30) | 🔴 **CRITICAL** | **Asymmetric Risk: SL Của Absorption Quá Sâu (-37.1% ROE) Xóa Sạch Thành Quả 5 Lệnh Thắng**: Dải gen `struct_sl_buffer_atr` cho phép GA đẩy SL ra xa 1.77% giá. Trade #015 mất -$4.44 (-37.1% ROE), tạo ra tỷ lệ R:R thực tế âm (0.73:1) và EV âm (-$0.55/trade). Cần kẹp cứng trần SL $\le 15\%$ ROE. |
+| **FLAW-RISK.13** | `TrendPB` / `06_risk` | [`trend_pb.rs:120-150`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs#L120-L150) | 🔴 **CRITICAL** | **Bẫy KAMA Slope Trễ Pha: TrendPB Đu Đỉnh Phân Phối Thay Vì Bắt Sóng Hồi**: Khi KAMA Slope đạt +1.00 thì sóng tăng đã ở giai đoạn phân phối. Thiếu Boundary Guard Z-score khiến TrendPB mở Long khi $Z_{\text{price}} = +1.22$ đến $+2.15$ (vượt ngoài BB, MFI 73.3). Chiếm 64.3% tổng lỗ toàn bộ đợt chạy (11/18 lệnh cắn Hard SL). |
+| **FLAW-RISK.14** | `Optimizer` / `06_risk` | [`prospector_runner.rs:320-360`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/prospector_runner.rs#L320-L360) | 🔴 **CRITICAL** | **Bẫy Hội Tụ Cục Bộ Của Smart Seeding Gây Tê Liệt WFE Gate (74.5% Reject)**: Smart Seeding 0.5% khiến GA overfit cực nặng trên 98.6% dữ liệu cũ (In-Sample lên 232.8% nhưng OOS âm -21.6%). Bot bị giam cầm trong DNA cũ lỗi thời khi thị trường đảo pha (Regime Shift). |
+
+---
+
+## 4.1. BẢNG TOÀN DIỆN 100% CÁC TRẠNG THÁI THỊ TRƯỜNG TUYỆT ĐỐI NÊN TRÁNH GIAO DỊCH (NON-TRADABLE REGIMES)
+
+Dưới lăng kính kinh tế lượng tài chính (Financial Econometrics) và vi cấu trúc sổ lệnh (Market Microstructure), thị trường chỉ tồn tại đúng **4 trạng thái tử địa** có kỳ vọng toán học âm ($EV < 0$) và độ bất định (Entropy) cực đại:
+
+| STT | Trạng Thái Thị Trường | Bản Chất Toán Học & Vật Lý | Biểu Hiện Thực Tế Ngoài Thị Trường | Hành Xử Bắt Buộc Của Hệ Thống |
+| :---: | :--- | :--- | :--- | :--- |
+| **1** | **Bão Nhiễu Hỗn Loạn Vô Hướng (Pure Brownian Whipsaw)** | $Chaos\_Index \ge Threshold$ ($NATR$ vọt đỉnh kết hợp $ER \to 0$, Entropy $\to 1.0$). | Nến 1m giật mạnh 2 đầu quét râu nến thanh lý liên tục khi ra tin tức vĩ mô (CPI, FED, Black Swan). | **Arbiter Hard Veto:** Ngắt mạch 100% toàn bộ hệ thống, không quét bất kỳ Scanner nào. |
+| **2** | **Đóng Băng Thanh Khoản & Biến Động Chết (Volatility Flatline)** | $NATR < \text{Taker Fee} \times 2$ (Biến động nến nhỏ hơn phí hoa hồng 2 chiều của sàn). | Thị trường nửa đêm hoặc cuối tuần: Nến 1m đứng im hoặc dạng vạch ngang, spread chiếm trọn thân nến. | **Min NATR Floor Gate:** Từ chối mở lệnh vì không đủ biên độ bù phí sàn (Commission Drag). |
+| **3** | **Thác Thanh Lý Đơn Hướng Cực Đoan (Liquidation Cascades)** | Sàn kích hoạt thanh lý tự động dây chuyền, giá di chuyển theo hàm số mũ ($Z_{\text{price}} > 3.0$). | Nến 1m dài ngoằng rơi hoặc dựng đứng không có sóng hồi, sổ lệnh một bên hoàn toàn trống rỗng. | **Boundary Guard & Anti-Knife:** Cấm bắt đáy/đỉnh khi chưa có tín hiệu cạn kiệt thanh lý rõ nét. |
+| **4** | **Vùng Giằng Co Bẫy Động Lượng (Chop Zone / Random Walk Compression)** | Biên độ Bollinger Band Width thu hẹp, các chỉ báo dao động cắt qua cắt lại quanh trục 0. | Giá dập dềnh liên tục, các cú bứt phá (Breakout) đều là bẫy giả (Bull/Bear Trap). | **TrendPB Filter:** Chặn các lệnh bắt sóng hồi khi xu hướng KAMA bị bẹp dí ($KAMA\_Slope \approx 0$). |
+
+---
+
+## 4.2. PHÂN ĐỊNH RANH GIỚI TRÁCH NHIỆM CHỐT CHẶN RỦI RO (STRICT SEPARATION OF CONCERNS)
+
+Để tránh rơi vào bẫy **Over-Engineered** và **Filter Paralysis (Bệnh sợ chết không dám vào lệnh)**, hệ thống phân định ranh giới chức năng rõ ràng:
+1. **Tầng Arbiter (Cửa khẩu giao thông tối cao - Gatekeeper):**
+   - Độc quyền xử lý các trạng thái tử địa toàn cục: **Bão Chaos** và **Biến Động Chết Flatline**.
+   - Cung cấp gen DNA động `chaos_veto_threshold` (`[0.50, 0.85]`) để GA Optimizer tự cân chỉnh theo từng loại tài sản.
+   - Thoát nhanh $O(1)$ bảo vệ CPU khi thị trường không thể giao dịch.
+2. **Tầng Scanner Playbook (Đặc nhiệm săn cơ hội):**
+   - Tập trung phát hiện đúng hiện tượng của từng chiến thuật (Pullback, Absorption, Breakout, Reversal).
+   - Tự quản lý các bộ lọc biên độ chuyên biệt ($Z$-score boundary, nến xả breakdown) mà không ôm đồm việc gác cổng toàn hệ thống.
+3. **Tầng Risk Manager (Bảo toàn sinh tồn tối thượng):**
+   - Áp đặt 3 chốt chặn sinh tử bất biến: **ROE Cap $\le 15\%$**, **Monotonic Ratchet Guard (không lùi SL)**, và **Circuit Breaker Cooldown (chống cào lệnh trả thù)**.
+
 
 ---
 
 ## 5. KẾT LUẬN & ĐÁNH GIÁ CHUNG
 
-Mô-đun `RiskManager` trong Helios V3.3 là một cấu trúc quản trị rủi ro **cực kỳ tiên tiến, được thiết kế chặt chẽ và phòng thủ nhiều lớp**:
+Mô-đun `RiskManager` và hệ thống quản trị rủi ro đa tầng trong Helios V3.3 là một cấu trúc phòng thủ nhiều lớp tiên tiến:
 1. **Điểm sáng vượt trội:**
    - Cơ chế Monotonic Ratchet Guard bảo toàn Stop Loss 1 chiều đơn điệu hoàn hảo, được chứng minh toán học và phòng thủ tới 3 lớp độc lập.
    - High Watermark tính toán không Lookahead bias, bắt đầu chuẩn xác từ `entry_price` và `entry_bar + 1`.
    - Phân tầng 3 cấp ATR trực giao, kết hợp bảo vệ siêu sóng Mega Trend Floor và chốt lời cấu trúc Dynamic Take Profit có Min Profit Guard & Spread Guard.
    - Cơ chế `LOCK DNA ON ACTIVE TRADE` trong `AssetActor` bảo vệ an toàn cho vị thế trước các chu kỳ Re-Optimizer hoán đổi tham số.
-2. **Các việc cần xử lý ngay lập tức:**
-   - Triệt tiêu lỗi toán học `NaN` trong `calculate_size`.
-   - Nâng mức đệm phí sàn `fee_buffer_pct` lên tối thiểu $0.15\%$ để bảo toàn vốn thực chất sau trượt giá.
-   - Triển khai gửi lệnh Algo Take Profit lên Binance Futures trong `OrderExecutor` để giải quyết dứt điểm khoảng trống lệch pha giữa Paper và Live.
+2. **Kế hoạch hành động theo thứ tự ưu tiên:**
+   - Xem chi tiết tại [`TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/06_risk/TODO.md).

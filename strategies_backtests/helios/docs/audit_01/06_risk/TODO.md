@@ -11,38 +11,61 @@
 - [ ] **TODO-RISK-01: Triển khai gửi lệnh Algo Take Profit lên Binance Futures (`OrderExecutor`)**
   - **Tệp liên đới:** [`trading_bot/bot_engine/src/execution/order_executor.rs:241-260`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/order_executor.rs#L241-L260), [`live_engine.rs:92-95`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/live_engine.rs#L92-L95)
   - **Vấn đề:** Hiện tại `OrderExecutor` chỉ gửi lệnh Algo `STOP_MARKET` cho SL, hoàn toàn bỏ qua TP (`warn!` rồi bỏ qua). Điều này khiến các lệnh có TP cố định (`RANGE_OSC`, `REVERSAL`) không bao giờ được chốt lời trên sàn Live!
-  - **Giải pháp:**
-    - Khởi tạo thêm lệnh Algo `TAKE_PROFIT_MARKET` hoặc Limit Order Reduce-Only với mức giá TP chỉ định.
-    - Trong trường hợp Binance OCO Futures yêu cầu, sử dụng Dual Algo Orders (1 Stop Market + 1 Take Profit Market) và đồng bộ hủy lệnh đối ứng qua WebSocket `OrderTradeUpdate` khi một trong hai lệnh khớp.
+  - **Giải pháp:** Khởi tạo thêm lệnh Algo `TAKE_PROFIT_MARKET` hoặc Limit Order Reduce-Only với mức giá TP chỉ định.
+
+- [ ] **TODO-RISK-02: Khống chế dải Stop Loss của Absorption để chặn đứng Drawdown -26.6%**
+  - **Tệp liên đới:** [`config.rs:554`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L554), [`absorption.rs:98-108`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L98-L108)
+  - **Vấn đề:** `struct_sl_buffer_atr` có dải `[0.25, 10.00]`. Khi GA chọn 10 ATR cộng thêm khoảng cách 2-3 ATR tới `bb_lower`, SL cách tới 12-13 ATR (~7.5% giá), đòn bẩy 20x làm bay 30% tài khoản khi cắn Hard SL!
+  - **Giải pháp:** Hạ trần `struct_sl_buffer_atr` từ 10.0 về tối đa `2.0 - 2.5 ATR`, kẹp cứng `clamp_sl_price` theo `max_initial_sl_pct` ngay tại thời điểm tạo proposal.
+
+- [ ] **TODO-RISK-03: Sửa lỗi Flash Stop-Out của Momentum Ignition (Nới rộng SL tối thiểu)**
+  - **Tệp liên đới:** [`momentum_ignition.rs:65-74`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs#L65-L74)
+  - **Vấn đề:** SL đặt tại `Low/High +/- 0.10*ATR` quá sát (~0.4% giá), bị râu nến vi mô 1m quét dính Hard SL trong 2-3 nến.
+  - **Giải pháp:** Tăng SL buffer tối thiểu lên `0.50 - 1.00 ATR` và tích hợp `Wick Rejection Filter` (chống mua đỉnh râu nến Shooting Star).
+
+- [ ] **TODO-RISK-04: Vá lỗ hổng IEEE 754 NaN Bypass trong `calculate_size`**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:11-26`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L11-L26)
+  - **Vấn đề:** Phép so sánh `<= 0.0` trả về `false` khi `equity.is_nan()`. Hàm tiếp tục tính toán và trả về `NaN.min(0.25) = 0.25`, cấp margin 25% cho tài khoản có vốn bị lỗi!
+  - **Giải pháp:** Bổ sung kiểm tra `.is_nan()` tường minh ngay đầu hàm cho tất cả tham số float.
+
+- [x] **TODO-RISK-09: Thiết kế Cầu Dao Arbiter Gatekeeper Đa Tầng Đối Phó Chaos Whipsaw & Volatility Flatline (`gatekeeper.rs`, `arbiter.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs), [`arbiter.rs:160-205`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L160-L205), [`config.rs:303-360`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L303-L360)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (TẦNG 1)**.
+  - **Chi tiết đã triển khai:**
+    1. Tạo module `gatekeeper.rs` độc lập chuẩn SOLID, thực thi $O(1)$ Early Exit trước khi quét Scanners.
+    2. Chốt chặn Chaos Whipsaw với Stateless Window Lookback ($K = 5$ bars) và cơ chế Hysteresis Schmitt Trigger delta 0.10.
+    3. Chốt chặn Volatility Flatline bù phí sàn với $NATR < \text{min\_natr\_threshold}$ (DNA `[0.0008, 0.0030]`).
+    4. Tinh giản chấm điểm tự tin sang Pure Confidence ($Raw = Conf$), loại bỏ hoàn toàn phạt mềm hình thức cũ.
+    5. Đã verify 100% với 6 unit tests riêng cho Gatekeeper, 8 tests cho Arbiter, và toàn bộ 77 tests của Helios PASS.
+
+- [ ] **TODO-RISK-10: Kẹp Cứng Trần Stop Loss $\le 15\%$ ROE Toàn Cục (`risk.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:30-61`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L30-L61), [`config.rs:554`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L554)
+  - **Vấn đề:** SL của Absorption bị GA nới rộng ra 1.77% giá, Trade #015 dính SL mất -$4.44 (-37.1% ROE), xóa sạch lợi nhuận 5 lệnh thắng và làm $EV$ âm (-$0.55/trade).
+  - **Giải pháp:** Trong `clamp_sl_price` và `calculate_initial_sl`, kẹp cứng trần ROE $\le 15\%$ (tương đương 0.75% biên độ giá ở đòn bẩy 20x).
+
+- [ ] **TODO-RISK-11: Thêm Boundary Guard Z-Score Chống Đu Đỉnh Cho TrendPB (`trend_pb.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:120-160`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs#L120-L160)
+  - **Vấn đề:** KAMA Slope là chỉ báo trễ pha (+1.00 khi sóng tăng đã ở giai đoạn phân phối). TrendPB mua đỉnh khi $Z_{\text{price}} = +1.22$ đến $+2.15$ (giá vượt ngoài BB, MFI 73.3), gây ra 11 lệnh thua Hard SL (chiếm 64.3% tổng lỗ).
+  - **Giải pháp:** Bổ sung Boundary Guard: Chỉ cho phép Long khi $Z_{\text{price}} \in [-1.5, +0.50]$ (đúng bản chất sóng hồi Pullback), cấm tuyệt đối Long khi $Z > +0.50$.
+
+- [ ] **TODO-RISK-12: Bơm Đa Dạng Di Truyền Phá Vỡ Bẫy Hội Tụ Smart Seeding (`prospector_runner.rs`)**
+  - **Tệp liên đới:** [`trading_bot/bot_engine/src/optimizer/prospector_runner.rs:320-370`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/prospector_runner.rs#L320-L370)
+  - **Vấn đề:** Smart Seeding 0.5% khiến quần thể GA bị giam giữ quanh cực trị địa phương của dữ liệu cũ, In-Sample đạt 232% nhưng OOS âm -21%, dẫn đến 74.5% chu kỳ bị WFE Gate REJECT, bot bị kẹt dùng DNA lỗi thời khi thị trường đổi pha.
+  - **Giải pháp:** Khi bị REJECT liên tiếp $\ge 2$ lần, tự động nâng tỷ lệ khám phá (Exploration Mutation Rate) hoặc tạm ngừng nạp hạt giống cũ để giải phóng quần thể tìm kiếm vùng cực trị mới thích nghi với pha thị trường hiện tại.
 
 ---
 
-## 2. 🟠 MỨC ĐỘ HIGH (NGUY CƠ TOÁN HỌC & LỖI BẢO MẬT DỮ LIỆU)
+## 2. 🟠 MỨC ĐỘ HIGH (NGUY CƠ TOÁN HỌC & TỶ LỆ R:R THẤP)
 
-- [ ] **TODO-RISK-02: Vá lỗ hổng IEEE 754 NaN Bypass trong `calculate_size`**
-  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:11-26`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L11-L26)
-  - **Vấn đề:** Phép so sánh `<= 0.0` trả về `false` khi `equity.is_nan()`. Hàm tiếp tục tính toán và trả về `NaN.min(0.25) = 0.25`, cấp margin 25% cho tài khoản có vốn bị lỗi!
-  - **Giải pháp:** Bổ sung kiểm tra `.is_nan()` tường minh ngay đầu hàm:
-    ```rust
-    if equity.is_nan() || equity <= 0.0 
-        || risk_pct.is_nan() || risk_pct <= 0.0 
-        || leverage.is_nan() || leverage <= 0.0 
-        || min_order_usd.is_nan() || max_cap_fraction.is_nan() {
-        return 0.0;
-    }
-    ```
+- [ ] **TODO-RISK-05: Chốt chặn tỷ lệ R:R tối thiểu cho Reversal Scanner**
+  - **Tệp liên đới:** [`reversal.rs:66, 75, 85`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs#L66)
+  - **Vấn đề:** Khi râu nến dài và giá đã hồi phục sát `kama_mid`, $\Delta_{SL}$ rất lớn trong khi $\Delta_{TP}$ rất nhỏ, sinh ra proposal có R:R < 1:0.3.
+  - **Giải pháp:** Thêm điều kiện cứng: $\frac{\Delta_{TP}}{\Delta_{SL}} \ge \text{min\_rr\_ratio}$ (ví dụ $\ge 1.0$ hoặc $1.2$). Nếu không thỏa mãn, hủy proposal.
 
-- [ ] **TODO-RISK-03: Xử lý mâu thuẫn giữa `min_order_usd` ($21) và `max_cap_fraction` (0.25)**
+- [ ] **TODO-RISK-06: Xử lý mâu thuẫn giữa `min_order_usd` ($21) và `max_cap_fraction` (0.25)**
   - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:18-26`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L18-L26)
   - **Vấn đề:** Khi vốn quá nhỏ ($2 - $4), lệnh sau khi nâng lên $21 sẽ bị kẹp bởi trần 25% vốn, làm quy mô thực tế tụt xuống $10 < $21, dẫn đến việc sàn Binance từ chối lệnh (`REJECTED: MIN_NOTIONAL`).
-  - **Giải pháp:** Nếu sau khi kẹp trần `cap` mà `final_margin * leverage < min_order_usd`, hàm phải từ chối mở lệnh (trả về `0.0`):
-    ```rust
-    let final_fraction = size_fraction.min(cap);
-    if final_fraction * equity * leverage < min_order_usd {
-        return 0.0; // Vốn không đủ an toàn để đáp ứng Min Notional của sàn
-    }
-    final_fraction
-    ```
+  - **Giải pháp:** Nếu sau khi kẹp trần `cap` mà `final_margin * leverage < min_order_usd`, hàm phải từ chối mở lệnh (trả về `0.0`).
 
 ---
 

@@ -6,6 +6,7 @@ pub mod scanners;
 pub mod risk;
 pub mod config;
 pub mod normalization;
+pub mod gatekeeper;
 
 use std::collections::HashMap;
 
@@ -510,7 +511,6 @@ impl HeliosStrategyV3 {
         let raw_score = winner_candidate
             .map(|c| c.raw_score)
             .unwrap_or(decision.final_confidence);
-        let penalty_pct = decision.chaos_penalty * 100.0;
 
         let sl_dist_pct = if is_long {
             (initial_sl - price) / price * 100.0
@@ -564,10 +564,11 @@ impl HeliosStrategyV3 {
             "║ Winner: {:<14} | Side: {:<5}                                                                ║",
             winner_str, format!("{:?}", signal)
         ));
-        lines.push(format!(
-            "║ Decision Confidence: {:.3} (Raw: {:.3} | Chaos: {:.3} -> Penalty: -{:.1}%)                             ║",
-            decision.final_confidence, raw_score, decision.chaos_val, penalty_pct
-        ));
+        let conf_line = format!(
+            "Decision Confidence: {:.3} (Raw: {:.3} | Gatekeeper: PASS | Chaos: {:.3})",
+            decision.final_confidence, raw_score, decision.chaos_val
+        );
+        lines.push(format!("║ {:<99} ║", conf_line));
         lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
         lines.push("║ ⚖️ ARBITER AUCTION LEDGER:                                                                            ║".to_string());
 
@@ -1366,16 +1367,21 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 99, "DNA_WIDTH phải là chính xác 99 chiều sau khi loại bỏ 3 gen ma (volume_lookback, momentum_lookback, adx_trend_threshold) theo TASK-MAT-07!");
+        assert_eq!(width, 100, "DNA_WIDTH phải là chính xác 100 chiều sau khi nâng cấp Cầu Dao Gatekeeper (thêm chaos_veto_threshold, min_natr_threshold và loại bỏ gen max_chaos_penalty theo FLAW-RISK.11)!");
         let has_kc_tf = defs.iter().any(|(name, _)| name.contains("keltner.timeframe"));
         assert!(!has_kc_tf, "defs KHÔNG được chứa indicators.keltner.timeframe (đã khóa cứng theo bbands ở TASK-MAT-05)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
         let has_vol_ma = defs.iter().any(|(name, _)| name.contains("vol_ma"));
         let has_breakout = defs.iter().any(|(name, _)| name.contains("cooldown_breakout_atr_mult"));
         let has_min_conf = defs.iter().any(|(name, _)| name.contains("min_confidence_threshold"));
+        let has_chaos_veto = defs.iter().any(|(name, _)| name.contains("chaos_veto_threshold"));
+        let has_min_natr = defs.iter().any(|(name, _)| name.contains("min_natr_threshold"));
         let has_max_chaos = defs.iter().any(|(name, _)| name.contains("max_chaos_penalty"));
         let has_act_score = defs.iter().any(|(name, _)| name.contains("min_activation_score"));
-        assert!(has_max_chaos, "defs phải chứa max_chaos_penalty trong ArbiterConfig!");
+        assert!(has_min_conf, "defs phải chứa min_confidence_threshold trong ArbiterConfig!");
+        assert!(has_chaos_veto, "defs phải chứa chaos_veto_threshold trong ArbiterConfig!");
+        assert!(has_min_natr, "defs phải chứa min_natr_threshold trong ArbiterConfig!");
+        assert!(!has_max_chaos, "defs KHÔNG được chứa max_chaos_penalty (đã loại bỏ gen theo Pure Confidence FLAW-RISK.11)!");
         assert!(!has_act_score, "defs KHÔNG được chứa min_activation_score ở các Tactical Scanners!");
         let has_matrix_adx = defs.iter().any(|(name, _)| name.contains("adx_trend_threshold"));
         let has_matrix_vol_lb = defs.iter().any(|(name, _)| name.contains("volume_lookback"));
