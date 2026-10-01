@@ -61,6 +61,20 @@
     4. Triển khai Chop Zone Defense: Cấm khi $Squeeze > max\_squeeze\_intensity$ để nhường sân cho `range_osc`.
     5. Đã verify: Cập nhật `test_dna_width_and_parameter_defs_integrity` (102 chiều) và viết 3 unit tests mới độc lập kiểm chứng cả 3 chốt chặn.
 
+- [x] **TODO-RISK-13: Kiến Trúc Telemetry Module & Ma Trận 3 Tầng Phòng Thủ Vốn (`telemetry/`, `cards.rs`, `defense_ledger.rs`, `asset_actor.rs`)**
+  - **Tệp liên đới:** [`core_v3/telemetry/`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/telemetry/), [`cards.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/telemetry/cards.rs), [`defense_ledger.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/telemetry/defense_ledger.rs), [`core_v3/mod.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs), [`risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs), [`asset_actor.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100%**.
+  - **Chi tiết đã triển khai:**
+    1. Tách biệt 100% Tầng Trình Diễn (Presentation Layer) khỏi Tầng Nghiệp Vụ (Domain Core): Tạo thư mục mới `core_v3/telemetry/` gồm `cards.rs`, `defense_ledger.rs`, `mod.rs`. Di dời 150 dòng vẽ thẻ ASCII ra khỏi `core_v3/mod.rs`.
+    2. Sổ Cái Phòng Thủ Vốn `DefenseLedger`: Theo dõi và ghi nhận toàn diện 3 Tầng:
+       - Tầng 1: Đếm số nến né bão Chaos / Flatline, phát hiện cạnh State Transition (Vào bão / Ra bão) kèm thời lượng né bão.
+       - Tầng 2: Đếm số lần chặn mua đu đỉnh, bán đuổi đáy, và vùng co thắt Chop Zone của TrendPB.
+       - Tầng 3: Đếm số lần bắn hạ lệnh có SL > 15% ROE (Sniper Veto) và số lần kẹp SL thô về trần.
+    3. Thẻ Đỏ VETO thời gian thực `format_veto_card`: In trực quan biên bản từ chối lệnh khi vi phạm Gatekeeper hoặc Sniper Guard.
+    4. Bảng Sổ Cái Tổng Kết `format_summary_table`: Xuất tự động bảng tổng kết `FINAL DEFENSE LEDGER` cuối phiên chạy qua `AssetActor::log_final_summary`.
+    5. Vá dứt điểm lỗ hổng rò rỉ log TTP trong `risk.rs:260, 271` bằng `if _debug_mode`, triệt tiêu nguy cơ nổ log 174 MB trong GA Optimizer.
+    6. Đã verify 100%: Toàn bộ 87 tests của `helios` PASS, 39 tests của `bot_engine` PASS, 0 warning, 0 error.
+
 - [ ] **TODO-RISK-12: Bơm Đa Dạng Di Truyền Phá Vỡ Bẫy Hội Tụ Smart Seeding (`prospector_runner.rs`)**
   - **Tệp liên đới:** [`trading_bot/bot_engine/src/optimizer/prospector_runner.rs:320-370`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/prospector_runner.rs#L320-L370)
   - **Vấn đề:** Smart Seeding 0.5% khiến quần thể GA bị giam giữ quanh cực trị địa phương của dữ liệu cũ, In-Sample đạt 232% nhưng OOS âm -21%, dẫn đến 74.5% chu kỳ bị WFE Gate REJECT, bot bị kẹt dùng DNA lỗi thời khi thị trường đổi pha.

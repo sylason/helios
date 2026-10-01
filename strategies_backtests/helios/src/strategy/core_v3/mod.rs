@@ -20,9 +20,12 @@ use ferro_trade::broker::Trade;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
-use crate::strategy::core_v3::arbiter::{HeliosArbiter, SignalType, ScannerId, AuctionStatus, ArbiterDecision};
+use crate::strategy::core_v3::arbiter::{HeliosArbiter, SignalType, ScannerId, AuctionStatus};
 use crate::strategy::core_v3::risk::RiskManager;
 use tracing::warn;
+
+pub mod telemetry;
+use telemetry::{DecisionCardFormatter, DefenseLedger};
 
 /// Trạng thái Cooldown chống cào lệnh & bẫy trả thù (Losing Streak Memory & Exponential Backoff)
 #[derive(Clone, Debug, Default)]
@@ -108,6 +111,8 @@ pub struct HeliosStrategyV3 {
     pub arbiter: HeliosArbiter,
     pub telemetry_enabled: bool,
     pub last_decision_telemetry: Option<String>,
+    /// Sổ Cái Quản Trị & Kiểm Toán Ma Trận Phòng Thủ Vốn (Zero-cost trong GA, Some trong Live/Paper)
+    pub defense_ledger: Option<DefenseLedger>,
 }
 
 impl Strategy for HeliosStrategyV3 {
@@ -129,6 +134,7 @@ impl Strategy for HeliosStrategyV3 {
             arbiter,
             telemetry_enabled: false,
             last_decision_telemetry: None,
+            defense_ledger: None,
         }
     }
 
@@ -362,6 +368,30 @@ impl Strategy for HeliosStrategyV3 {
             return; 
         }
 
+        // 🛡️ THEO DÕI MA TRẬN PHÒNG THỦ VỐN (Zero-cost trong GA, Some trong Live/Paper)
+        if let Some(ref mut ledger) = self.defense_ledger {
+            // Tầng 1: Chuyển đổi trạng thái Gatekeeper (Vào bão / Ra bão)
+            let gate_eval = crate::strategy::core_v3::gatekeeper::RegimeGatekeeper::evaluate(tick, &self.sensors, &self.matrix, &self.config);
+            if let Some(msg) = ledger.on_gatekeeper_tick(tick.i, &gate_eval) {
+                self.last_decision_telemetry = Some(msg);
+            }
+
+            // Tầng 2: Chốt chặn Boundary Guard & Chop Zone của TrendPB
+            let pb_cfg = &self.config.tactical_sniper.pullback;
+            let squeeze = self.matrix.squeeze_intensity.get(tick.i).copied().unwrap_or(0.0);
+            let kama_slope = self.matrix.kama_slope_atr.get(tick.i).copied()
+                .unwrap_or_else(|| self.sensors.kama_slope_adj.get(tick.i).copied().unwrap_or(0.0));
+            let z_score = self.sensors.z_score.get(tick.i).copied().unwrap_or(0.0);
+            ledger.on_trend_pb_tick(
+                squeeze,
+                pb_cfg.max_squeeze_intensity,
+                kama_slope,
+                pb_cfg.kama_slope_threshold.max(1e-4),
+                z_score,
+                pb_cfg.max_boundary_z,
+            );
+        }
+
         // 🎯 KHỐI 3 (TASK-ARB-05): Tối ưu Zero-Allocation - Sử dụng arbiter đã khởi tạo sẵn
         let decision = self.arbiter.process_tick(tick, &self.sensors, &self.matrix, &self.config, self.debug_mode);
 
@@ -435,6 +465,24 @@ impl Strategy for HeliosStrategyV3 {
                 let price = tick.closes()[tick.i];
                 let initial_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, playbook_max_sl_roe, min_initial_sl_pct, leverage);
                 
+                // Ghi nhận kẹp SL vào Sổ cái nếu có
+                let hard_cap_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, 0.15, min_initial_sl_pct, leverage);
+                let is_hard_clamped = (raw_sl - hard_cap_sl).abs() > 1e-4;
+                let is_playbook_clamped = (raw_sl - initial_sl).abs() > 1e-4;
+                let sl_clamped_note = if is_hard_clamped {
+                    if let Some(ref mut ledger) = self.defense_ledger {
+                        ledger.on_sl_clamped(true);
+                    }
+                    Some("CLAMPED: HARD ROE CAP 15%")
+                } else if is_playbook_clamped {
+                    if let Some(ref mut ledger) = self.defense_ledger {
+                        ledger.on_sl_clamped(false);
+                    }
+                    Some("CLAMPED: PLAYBOOK CAP")
+                } else {
+                    None
+                };
+
                 let tag = decision.winning_scanner.map(|s| s.as_str().to_string());
 
                 let policy = Some(RiskPolicy::FixedPrice {
@@ -448,15 +496,41 @@ impl Strategy for HeliosStrategyV3 {
                     tick.sell(Some(size), None, None, policy, tag);
                 }
 
-                // 🎯 QUANT DECISION TELEMETRY: Dựng biên bản kiểm toán quyết định giao dịch
+                // 🎯 QUANT DECISION TELEMETRY: Dựng biên bản kiểm toán quyết định phê duyệt mở lệnh
                 if self.telemetry_enabled {
-                    self.last_decision_telemetry = Some(self.format_decision_card(
+                    self.last_decision_telemetry = Some(DecisionCardFormatter::format_approved_card(
                         tick,
+                        &self.sensors,
+                        &self.matrix,
                         signal,
                         &decision,
                         price,
                         initial_sl,
                         size,
+                        leverage,
+                        sl_clamped_note,
+                    ));
+                }
+            }
+        } else {
+            // Cập nhật Sổ Cái các cú VETO từ chối mở lệnh
+            if let Some(ref mut ledger) = self.defense_ledger {
+                ledger.on_auction_decision(&decision);
+            }
+
+            // 🛑 QUANT DECISION TELEMETRY: Xuất Thẻ Đỏ VETO nếu có proposal bị Sniper Guard hoặc Gatekeeper VETO
+            if self.telemetry_enabled {
+                let has_structural_veto = decision.auction_ledger.iter().any(|c| c.status == AuctionStatus::StructuralRiskVeto);
+                let has_candidates = decision.auction_ledger.iter().any(|c| c.status != AuctionStatus::NotTriggered);
+                if has_structural_veto || (decision.gate_veto.is_some() && has_candidates) {
+                    let price = tick.closes()[tick.i];
+                    let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
+                    self.last_decision_telemetry = Some(DecisionCardFormatter::format_veto_card(
+                        tick,
+                        &self.sensors,
+                        &self.matrix,
+                        &decision,
+                        price,
                         leverage,
                     ));
                 }
@@ -466,163 +540,18 @@ impl Strategy for HeliosStrategyV3 {
 
     fn set_telemetry_enabled(&mut self, enabled: bool) {
         self.telemetry_enabled = enabled;
+        self.defense_ledger = if enabled { Some(DefenseLedger::new()) } else { None };
     }
 
     fn take_decision_telemetry(&mut self) -> Option<String> {
         self.last_decision_telemetry.take()
     }
-}
 
-impl HeliosStrategyV3 {
-    fn format_decision_card(
-        &self,
-        tick: &TickContext,
-        signal: SignalType,
-        decision: &ArbiterDecision,
-        price: f64,
-        initial_sl: f64,
-        size: f64,
-        leverage: f64,
-    ) -> String {
-        let i = tick.i;
-        let is_long = signal == SignalType::Long;
-        let action_str = if is_long { "BUY (LONG)" } else { "SELL (SHORT)" };
-        let time_str = tick
-            .data_view
-            .raw_cache()
-            .datetime
-            .get(i)
-            .and_then(|ts| {
-                let secs = ts / 1_000_000_000;
-                let nsecs = (ts % 1_000_000_000) as u32;
-                chrono::DateTime::from_timestamp(secs, nsecs)
-            })
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_else(|| format!("Bar #{}", i));
-
-        let winner_str = decision
-            .winning_scanner
-            .map(|s| s.as_str())
-            .unwrap_or("UNKNOWN");
-        let winner_candidate = decision
-            .auction_ledger
-            .iter()
-            .find(|c| c.status == AuctionStatus::Won);
-        let raw_score = winner_candidate
-            .map(|c| c.raw_score)
-            .unwrap_or(decision.final_confidence);
-
-        let sl_dist_pct = if is_long {
-            (initial_sl - price) / price * 100.0
-        } else {
-            (price - initial_sl) / price * 100.0
-        };
-        let sl_roe_pct = sl_dist_pct * leverage;
-
-        let tp_str = decision
-            .final_tp
-            .map(|tp| {
-                let dist = if is_long {
-                    (tp - price) / price * 100.0
-                } else {
-                    (price - tp) / price * 100.0
-                };
-                format!("{:.2} ({:+.2}%)", tp, dist)
-            })
-            .unwrap_or_else(|| "Dynamic / Structural KAMA TP".to_string());
-
-        let notional_usd = size * price;
-
-        // Sensors snapshot
-        let high = tick.highs()[i];
-        let low = tick.lows()[i];
-        let candle_range = (high - low).max(1e-5);
-        let clv = (2.0 * price - high - low) / candle_range;
-
-        let price_z = self.sensors.z_score.get(i).copied().unwrap_or(0.0);
-        let vol_z = self.sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
-        let mfi = self.sensors.mfi.get(i).copied().unwrap_or(0.0);
-        let natr = self.sensors.natr.get(i).copied().unwrap_or(0.0);
-        let atr_sl = self.sensors.atr_sl.get(i).copied().unwrap_or(0.0);
-
-        // Matrix snapshot
-        let kama_slope_atr = self.matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
-        let squeeze_intensity = self.matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0);
-        let trend_strength = self.matrix.trend_strength.get(i).copied().unwrap_or(0.0);
-        let chaos_index = self.matrix.chaos_index.get(i).copied().unwrap_or(0.0);
-        let bb_slope = self.matrix.bb_middle_slope_adj.get(i).copied().unwrap_or(0.0);
-
-        let mut lines = Vec::new();
-        lines.push("╔═══════════════════════════════════════════════════════════════════════════════════════════════════════╗".to_string());
-        lines.push("║ 🎯 QUANT DECISION TELEMETRY: ORDER APPROVED                                                          ║".to_string());
-        lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
-        lines.push(format!(
-            "║ Bar: {:<6} | Time: {:<19} | Action: {:<18}                              ║",
-            i, time_str, action_str
-        ));
-        lines.push(format!(
-            "║ Winner: {:<14} | Side: {:<5}                                                                ║",
-            winner_str, format!("{:?}", signal)
-        ));
-        let conf_line = format!(
-            "Decision Confidence: {:.3} (Raw: {:.3} | Gatekeeper: PASS | Chaos: {:.3})",
-            decision.final_confidence, raw_score, decision.chaos_val
-        );
-        lines.push(format!("║ {:<99} ║", conf_line));
-        lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
-        lines.push("║ ⚖️ ARBITER AUCTION LEDGER:                                                                            ║".to_string());
-
-        for candidate in &decision.auction_ledger {
-            let tag = match candidate.status {
-                AuctionStatus::Won => "🏆 [WON]          ",
-                AuctionStatus::RunnerUp => "🥈 [RUNNER-UP]    ",
-                AuctionStatus::LowConfidence => "❌ [LOW-CONF]     ",
-                AuctionStatus::ConflictEliminated => "⚔️ [CONFLICT-FLAT]",
-                AuctionStatus::StructuralRiskVeto => "🛑 [RISK-VETO]    ",
-                AuctionStatus::NotTriggered => "⚪ [NOT-TRIGGERED]",
-            };
-            let side_str = candidate
-                .signal_type
-                .map(|s| format!("{:?}", s))
-                .unwrap_or_else(|| "None".to_string());
-            lines.push(format!(
-                "║   {} {:<12} | Side: {:<5} | Raw: {:.3} | Conf: {:.3} | {:<28} ║",
-                tag,
-                candidate.scanner_id.as_str(),
-                side_str,
-                candidate.raw_score,
-                candidate.confidence,
-                candidate.reason
-            ));
-        }
-
-        lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
-        lines.push("║ 📊 SENSORS SNAPSHOT:                                                                                  ║".to_string());
-        lines.push(format!(
-            "║   Price: {:.2} | Price_Z: {:+.2} | Vol_Z: {:+.2} | MFI: {:.1} | CLV: {:+.2} | NATR: {:.2}% | ATR: {:.4}     ║",
-            price, price_z, vol_z, mfi, clv, natr, atr_sl
-        ));
-        lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
-        lines.push("║ 🧭 MATRIX STATE:                                                                                      ║".to_string());
-        lines.push(format!(
-            "║   KAMA_Slope_ATR: {:+.2} | Squeeze: {:.2} | Trend_Str: {:.2} | Chaos_Idx: {:.2} | BB_Slope: {:+.2}    ║",
-            kama_slope_atr, squeeze_intensity, trend_strength, chaos_index, bb_slope
-        ));
-        lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
-        lines.push("║ 🛡️ RISK PARAMETERS:                                                                                   ║".to_string());
-        lines.push(format!(
-            "║   Entry: {:.2} | Initial SL: {:.2} ({:+.2}% / ROE: {:+.1}%) | Dynamic TP: {:<27} ║",
-            price, initial_sl, sl_dist_pct, sl_roe_pct, tp_str
-        ));
-        lines.push(format!(
-            "║   Position Size: {:.4} (${:.2}) | Leverage: {:.0}x | Margin Mode: ISOLATED                           ║",
-            size, notional_usd, leverage
-        ));
-        lines.push("╚═══════════════════════════════════════════════════════════════════════════════════════════════════════╝".to_string());
-
-        lines.join("\n")
+    fn get_defense_summary(&self) -> Option<String> {
+        self.defense_ledger.as_ref().map(|l| l.format_summary_table())
     }
 }
+
 
 impl Default for HeliosStrategyV3 {
     fn default() -> Self {

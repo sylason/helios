@@ -257,10 +257,12 @@ impl RiskManager {
                         let ttp_trigger_price = peak_val - (ttp_cb_atr * current_atr);
                         let min_exit_price = trade.entry_price * (1.0 + min_gain_pct);
                         if current_close <= ttp_trigger_price && current_close >= min_exit_price {
-                            tracing::info!(
-                                "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Long | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
-                                i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
-                            );
+                            if _debug_mode {
+                                tracing::info!(
+                                    "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Long | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
+                                    i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
+                                );
+                            }
                             tick.close(None);
                             continue;
                         }
@@ -268,10 +270,12 @@ impl RiskManager {
                         let ttp_trigger_price = peak_val + (ttp_cb_atr * current_atr);
                         let max_exit_price = trade.entry_price * (1.0 - min_gain_pct);
                         if current_close >= ttp_trigger_price && current_close <= max_exit_price {
-                            tracing::info!(
-                                "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Short | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
-                                i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
-                            );
+                            if _debug_mode {
+                                tracing::info!(
+                                    "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Short | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
+                                    i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
+                                );
+                            }
                             tick.close(None);
                             continue;
                         }
