@@ -48,8 +48,16 @@ impl TacticalScanner for TrendPBScanner {
             .unwrap_or_else(|| sensors.kama_slope_adj.get(i).copied().unwrap_or(0.0));
         let stoch_k = sensors.stoch_trend_k.get(i).copied().unwrap_or(f64::NAN);
         let rsi = sensors.rsi_trend.get(i).copied().unwrap_or(f64::NAN);
+        let z_score = sensors.z_score.get(i).copied().unwrap_or(0.0);
+        let squeeze = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0);
 
-        if kama_slope.is_nan() || stoch_k.is_nan() || rsi.is_nan() {
+        if kama_slope.is_nan() || stoch_k.is_nan() || rsi.is_nan() || z_score.is_nan() || squeeze.is_nan() {
+            return None;
+        }
+
+        // 🧱 PHÒNG THỦ CHOP ZONE: Chặn đứng khi thị trường đang co thắt nén chặt BB/KC
+        // Chop Zone là đất diễn của range_osc; TrendPB chỉ săn sóng khi thị trường đã bung nén.
+        if squeeze > pb_cfg.max_squeeze_intensity {
             return None;
         }
 
@@ -82,6 +90,13 @@ impl TacticalScanner for TrendPBScanner {
         // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên Rõ Rệt + Hồi Quy An Toàn + Gradient Dương)
         // -------------------------------------------------------------------------
         if kama_slope > slope_thresh {
+            // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống mua đu đỉnh phân phối
+            // Pullback lành mạnh bắt buộc giá phải nằm trong vùng giá trị lân cận trung bình.
+            // Cấm tuyệt đối Long khi Z > +max_boundary_z (vùng bùng nổ của momentum_ignition hoặc đỉnh phân phối).
+            if z_score > pb_cfg.max_boundary_z {
+                return None;
+            }
+
             // Chốt chặn 1: Hộp không gian hồi quy (-inval <= delta_kama <= max_dist)
             if delta_kama < -inval_floor || delta_kama > max_dist {
                 return None; // Thủng KAMA gãy trend hoặc bay quá xa KAMA mua đu đỉnh
@@ -123,6 +138,12 @@ impl TacticalScanner for TrendPBScanner {
         // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống Rõ Rệt + Hồi Quy An Toàn + Gradient Âm)
         // -------------------------------------------------------------------------
         else if kama_slope < -slope_thresh {
+            // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống bán đuổi đáy hoảng loạn
+            // Cấm tuyệt đối Short khi Z < -max_boundary_z (vùng quá bán cực đại, dễ bị rút chân quét SL).
+            if z_score < -pb_cfg.max_boundary_z {
+                return None;
+            }
+
             // Chốt chặn 1: Hộp không gian hồi quy (-max_dist <= delta_kama <= inval)
             if delta_kama > inval_floor || delta_kama < -max_dist {
                 return None; // Vượt thủng KAMA gãy trend hoặc rơi quá xa KAMA bán đuổi đáy

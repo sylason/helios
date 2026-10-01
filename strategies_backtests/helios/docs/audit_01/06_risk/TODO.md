@@ -43,10 +43,19 @@
   - **Vấn đề:** SL của Absorption bị GA nới rộng ra 1.77% giá, Trade #015 dính SL mất -$4.44 (-37.1% ROE), xóa sạch lợi nhuận 5 lệnh thắng và làm $EV$ âm (-$0.55/trade).
   - **Giải pháp:** Trong `clamp_sl_price` và `calculate_initial_sl`, kẹp cứng trần ROE $\le 15\%$ (tương đương 0.75% biên độ giá ở đòn bẩy 20x).
 
-- [ ] **TODO-RISK-11: Thêm Boundary Guard Z-Score Chống Đu Đỉnh Cho TrendPB (`trend_pb.rs`)**
-  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:120-160`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs#L120-L160)
-  - **Vấn đề:** KAMA Slope là chỉ báo trễ pha (+1.00 khi sóng tăng đã ở giai đoạn phân phối). TrendPB mua đỉnh khi $Z_{\text{price}} = +1.22$ đến $+2.15$ (giá vượt ngoài BB, MFI 73.3), gây ra 11 lệnh thua Hard SL (chiếm 64.3% tổng lỗ).
-  - **Giải pháp:** Bổ sung Boundary Guard: Chỉ cho phép Long khi $Z_{\text{price}} \in [-1.5, +0.50]$ (đúng bản chất sóng hồi Pullback), cấm tuyệt đối Long khi $Z > +0.50$.
+- [x] **TODO-RISK-11: Thêm Boundary Guard Z-Score Chống Đu Đỉnh & Chop Zone Cho TrendPB (`trend_pb.rs`, `config.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs), [`config.rs:449-460`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L449-L460)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (TẦNG 2)**.
+  - **Chi tiết đã triển khai:**
+    1. Bổ sung 2 gen DNA mới vào `TacticalPullbackParams`:
+       - `max_boundary_z`: `#[dna(min = 0.20, max = 0.80, step = 0.05)]`, default `0.50` (13 nấc).
+       - `max_squeeze_intensity`: `#[dna(min = 0.50, max = 0.90, step = 0.05)]`, default `0.75` (9 nấc).
+    2. Chiều dài DNA của Helios mở rộng từ 100 lên **102 chiều**, 100% dynamic qua GA Optimizer, 0% hardcode cảm tính.
+    3. Triển khai Boundary Guard trong `trend_pb.rs`:
+       - Chiều Long: Cấm khi $Z_{\text{score}} > +max\_boundary\_z$ (chặn đứng mua đu đỉnh phân phối).
+       - Chiều Short: Cấm khi $Z_{\text{score}} < -max\_boundary\_z$ (chặn đứng bán đuổi đáy hoảng loạn).
+    4. Triển khai Chop Zone Defense: Cấm khi $Squeeze > max\_squeeze\_intensity$ để nhường sân cho `range_osc`.
+    5. Đã verify: Cập nhật `test_dna_width_and_parameter_defs_integrity` (102 chiều) và viết 3 unit tests mới độc lập kiểm chứng cả 3 chốt chặn.
 
 - [ ] **TODO-RISK-12: Bơm Đa Dạng Di Truyền Phá Vỡ Bẫy Hội Tụ Smart Seeding (`prospector_runner.rs`)**
   - **Tệp liên đới:** [`trading_bot/bot_engine/src/optimizer/prospector_runner.rs:320-370`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/prospector_runner.rs#L320-L370)

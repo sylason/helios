@@ -1367,7 +1367,7 @@ mod tests {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
         assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 100, "DNA_WIDTH phải là chính xác 100 chiều sau khi nâng cấp Cầu Dao Gatekeeper (thêm chaos_veto_threshold, min_natr_threshold và loại bỏ gen max_chaos_penalty theo FLAW-RISK.11)!");
+        assert_eq!(width, 102, "DNA_WIDTH phải là chính xác 102 chiều sau khi bổ sung max_boundary_z và max_squeeze_intensity cho TrendPB theo Kế hoạch Tầng 2!");
         let has_kc_tf = defs.iter().any(|(name, _)| name.contains("keltner.timeframe"));
         assert!(!has_kc_tf, "defs KHÔNG được chứa indicators.keltner.timeframe (đã khóa cứng theo bbands ở TASK-MAT-05)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
@@ -1378,9 +1378,13 @@ mod tests {
         let has_min_natr = defs.iter().any(|(name, _)| name.contains("min_natr_threshold"));
         let has_max_chaos = defs.iter().any(|(name, _)| name.contains("max_chaos_penalty"));
         let has_act_score = defs.iter().any(|(name, _)| name.contains("min_activation_score"));
+        let has_pb_boundary_z = defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.max_boundary_z"));
+        let has_pb_squeeze = defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.max_squeeze_intensity"));
         assert!(has_min_conf, "defs phải chứa min_confidence_threshold trong ArbiterConfig!");
         assert!(has_chaos_veto, "defs phải chứa chaos_veto_threshold trong ArbiterConfig!");
         assert!(has_min_natr, "defs phải chứa min_natr_threshold trong ArbiterConfig!");
+        assert!(has_pb_boundary_z, "defs phải chứa tactical_sniper.pullback.max_boundary_z!");
+        assert!(has_pb_squeeze, "defs phải chứa tactical_sniper.pullback.max_squeeze_intensity!");
         assert!(!has_max_chaos, "defs KHÔNG được chứa max_chaos_penalty (đã loại bỏ gen theo Pure Confidence FLAW-RISK.11)!");
         assert!(!has_act_score, "defs KHÔNG được chứa min_activation_score ở các Tactical Scanners!");
         let has_matrix_adx = defs.iter().any(|(name, _)| name.contains("adx_trend_threshold"));
@@ -2423,6 +2427,189 @@ mod tests {
         assert!(p.suggested_sl.is_some());
         let sl = p.suggested_sl.unwrap();
         assert!(sl > 1994.0, "SL Short {} phải cao hơn giá vào lệnh 1994.0", sl);
+    }
+
+    #[test]
+    fn test_trend_pb_boundary_guard_long_overbought_blocked() {
+        use crate::strategy::core_v3::scanners::trend_pb::TrendPBScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2010.0; len];
+        let mut lows = vec![1998.0; len];
+        let mut closes = vec![2005.0; len];
+        opens[i] = 2000.0;
+        highs[i] = 2010.0;
+        lows[i] = 1998.0;
+        closes[i] = 2008.0; // CLV = (2*2008 - 2010 - 1998)/(2010-1998) = 8/12 = 0.67 > 0.15
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.max_boundary_z = 0.50; // Ngưỡng chặn Z Long
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]);
+        sensors.z_score = std::sync::Arc::new(vec![1.20; len]); // 🛡️ Z-Score vượt trần +0.50 (đu đỉnh phân phối)
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.30; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "TrendPB Long PHẢI bị Boundary Guard chặn đứng khi Z_score (+1.20) > max_boundary_z (0.50)!");
+    }
+
+    #[test]
+    fn test_trend_pb_boundary_guard_short_oversold_blocked() {
+        use crate::strategy::core_v3::scanners::trend_pb::TrendPBScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2002.0; len];
+        let mut lows = vec![1990.0; len];
+        let mut closes = vec![1992.0; len];
+        opens[i] = 1998.0;
+        highs[i] = 2002.0;
+        lows[i] = 1990.0;
+        closes[i] = 1992.0; // CLV = (2*1992 - 2002 - 1990)/(2002-1990) = -8/12 = -0.67 < -0.15
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.max_boundary_z = 0.50; // Ngưỡng chặn Z Short (-0.50)
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![75.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]);
+        sensors.z_score = std::sync::Arc::new(vec![-1.20; len]); // 🛡️ Z-Score sập sâu dưới -0.50 (bán đuổi đáy)
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.15; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.30; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "TrendPB Short PHẢI bị Boundary Guard chặn đứng khi Z_score (-1.20) < -max_boundary_z (-0.50)!");
+    }
+
+    #[test]
+    fn test_trend_pb_chop_zone_squeeze_blocked() {
+        use crate::strategy::core_v3::scanners::trend_pb::TrendPBScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2010.0; len]),
+            low: std::sync::Arc::new(vec![1998.0; len]),
+            close: std::sync::Arc::new(vec![2005.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.max_squeeze_intensity = 0.75; // Ngưỡng chặn Chop Zone
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]);
+        sensors.z_score = std::sync::Arc::new(vec![0.20; len]); // Z nằm trong biên an toàn
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.88; len]); // 🧱 Thị trường bị bóp nghẽn trong Chop Zone
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "TrendPB PHẢI bị chặn đứng khi thị trường đang co thắt nén chặt trong Chop Zone (squeeze 0.88 > 0.75)!");
     }
 
     #[test]

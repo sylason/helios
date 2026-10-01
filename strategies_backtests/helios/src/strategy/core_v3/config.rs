@@ -408,7 +408,7 @@ pub struct TacticalSniperConfig {
 }
 
 /// 🏹 1. CHIẾN ĐỘI TREND PULLBACK (Săn nhịp hồi trong xu hướng mạnh)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct TacticalPullbackParams {
     /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 40.0% ROE, Step 1.5% -> 25 nấc)
     #[dna(min = 0.04, max = 0.40, step = 0.015)]
@@ -445,6 +445,35 @@ pub struct TacticalPullbackParams {
     #[dna(min = 0.10, max = 3.00, step = 0.15)]
     #[serde(default = "default_pullback_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
+
+    /// 🛡️ CHỐT CHẶN BIÊN ĐỘ Z-SCORE (0.20 -> 0.80, Step 0.05 -> 13 nấc)
+    /// Long cấm khi Z > +max_z (đu đỉnh), Short cấm khi Z < -max_z (đu đáy).
+    #[dna(min = 0.20, max = 0.80, step = 0.05)]
+    #[serde(default = "default_pullback_max_boundary_z")]
+    pub max_boundary_z: f64,
+
+    /// 🧱 CHỐT CHẶN VÙNG CO THẮT CHOP ZONE (0.50 -> 0.90, Step 0.05 -> 9 nấc)
+    /// Cấm mở vị thế khi BB/KC Squeeze vượt ngưỡng (nhường sân cho range_osc).
+    #[dna(min = 0.50, max = 0.90, step = 0.05)]
+    #[serde(default = "default_pullback_max_squeeze_intensity")]
+    pub max_squeeze_intensity: f64,
+}
+
+impl Default for TacticalPullbackParams {
+    fn default() -> Self {
+        Self {
+            max_initial_sl_pct: 0.15,
+            rsi_max_cap: default_pullback_rsi_max_cap(),
+            stoch_pullback_thresh: 30.0,
+            kama_slope_threshold: 0.05,
+            max_pullback_dist_atr: default_pullback_max_dist_atr(),
+            invalidation_buffer_atr: default_pullback_invalidation_buffer_atr(),
+            min_activation_score: default_min_activation_score(),
+            struct_sl_buffer_atr: default_pullback_sl_buffer_atr(),
+            max_boundary_z: default_pullback_max_boundary_z(),
+            max_squeeze_intensity: default_pullback_max_squeeze_intensity(),
+        }
+    }
 }
 
 /// ⚡ 2. CHIẾN ĐỘI MOMENTUM IGNITION (Săn các cú bùng nổ xung lực Volume & Momentum)
@@ -983,6 +1012,14 @@ fn default_pullback_max_dist_atr() -> f64 {
 
 fn default_pullback_invalidation_buffer_atr() -> f64 {
     0.50
+}
+
+fn default_pullback_max_boundary_z() -> f64 {
+    0.50
+}
+
+fn default_pullback_max_squeeze_intensity() -> f64 {
+    0.75
 }
 
 fn default_reversal_min_clv() -> f64 {
