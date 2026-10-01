@@ -23,6 +23,8 @@ config.local.json
 data/
 logs/
 *.log
+helios_champions_results.json
+
 
 # Hệ điều hành & Editor
 .DS_Store

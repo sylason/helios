@@ -501,6 +501,9 @@ impl AssetActor {
     /// Xuất báo cáo tổng kết toàn diện 100% lịch sử giao dịch khi kết thúc phiên
     pub fn log_final_summary(&self, current_price: f64) {
         self.execution_engine.log_final_summary(current_price);
+        if let Some(summary) = self.strategy.as_ref().and_then(|s| s.get_defense_summary()) {
+            info!(target: "quant_telemetry", "\n{}", summary);
+        }
     }
 
     /// Xử lý đồng bộ dữ liệu nến lịch sử vào bộ nhớ (Rolling Buffer)
@@ -635,6 +638,10 @@ impl AssetActor {
                         }
                     }
                 } else {
+                    // 🛡️ QUANT DECISION TELEMETRY: Xuất Thẻ Đỏ VETO hoặc cảnh báo Chuyển đổi trạng thái bão nếu có
+                    if let Some(card) = self.strategy.as_mut().and_then(|s| s.take_decision_telemetry()) {
+                        info!(target: "quant_telemetry", "\n{}", card);
+                    }
                     debug!("🧠 [{}] Strategy evaluated. No actions executed on close {}.", self.symbol, current_close);
                 }
             }
