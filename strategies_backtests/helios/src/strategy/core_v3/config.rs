@@ -842,16 +842,16 @@ pub struct RiskStopParams {
     // =========================================================================
     // 5. BỘ 3 PHÂN TẦNG ATR TRAILING STOP PHỔ QUÁT (0.5 -> 15.0 ATR KHÔNG CHỒNG CHÉO)
     // =========================================================================
-    /// - Phân Tầng Siết Chặt: Dành cho thị trường Range / Reversal / Đỉnh sóng (0.5 -> 3.0 ATR, Step 0.10 -> 26 nấc)
-    #[dna(min = 0.5, max = 3.0, step = 0.10)]
+    /// - Phân Tầng Siết Chặt: Dành cho thị trường Range / Reversal / Đỉnh sóng (0.5 -> 4.5 ATR, Step 0.10 -> 41 nấc)
+    #[dna(min = 0.5, max = 4.5, step = 0.10)]
     pub tsl_atr_tight: f64,
 
-    /// - Phân Tầng Chuẩn: Dành cho xu hướng bậc thang Trend Pullback & Absorption (3.0 -> 7.5 ATR, Step 0.10 -> 46 nấc)
-    #[dna(min = 3.0, max = 7.5, step = 0.10)]
+    /// - Phân Tầng Chuẩn: Dành cho xu hướng bậc thang Trend Pullback & Absorption (0.5 -> 4.5 ATR, Step 0.10 -> 41 nấc)
+    #[dna(min = 0.5, max = 4.5, step = 0.10)]
     pub tsl_atr_normal: f64,
 
-    /// - Phân Tầng Nới Lỏng: Dành cho siêu sóng bùng nổ Momentum & Anomaly (7.5 -> 15.0 ATR, Step 0.15 -> 51 nấc)
-    #[dna(min = 7.5, max = 15.0, step = 0.15)]
+    /// - Phân Tầng Nới Lỏng: Dành cho siêu sóng bùng nổ Momentum & Anomaly (0.5 -> 4.5 ATR, Step 0.10 -> 41 nấc)
+    #[dna(min = 0.5, max = 4.5, step = 0.10)]
     pub tsl_atr_loose: f64,
 
     // =========================================================================
@@ -906,13 +906,13 @@ pub struct RiskStopParams {
     // =========================================================================
     // 8. CƠ CHẾ CHỐT LỜI ĐỘNG LAI (HYBRID TRAILING TAKE PROFIT - FLAW-TSL.1)
     // =========================================================================
-    /// Ngưỡng ROE Kích Hoạt Radar Thả Diều Bám Đỉnh Cho Trend Scanners (10% -> 50% ROE, Step 5% -> 9 nấc)
-    #[dna(min = 0.10, max = 0.50, step = 0.05)]
+    /// Ngưỡng ROE Kích Hoạt Radar Thả Diều Bám Đỉnh Cho Trend Scanners (5% -> 50% ROE, Step 1% -> 46 nấc)
+    #[dna(min = 0.05, max = 0.50, step = 0.01)]
     #[serde(default = "default_ttp_activation_roe")]
     pub ttp_activation_roe: f64,
 
-    /// Khoảng Cách Quay Đầu Từ Đỉnh Theo ATR Để Chốt Lời Khóa Lãi (0.4 -> 2.0 ATR, Step 0.10 -> 17 nấc)
-    #[dna(min = 0.4, max = 2.0, step = 0.10)]
+    /// Khoảng Cách Quay Đầu Từ Đỉnh Theo ATR Để Chốt Lời Khóa Lãi (0.3 -> 2.5 ATR, Step 0.05 -> 45 nấc)
+    #[dna(min = 0.30, max = 2.50, step = 0.05)]
     #[serde(default = "default_ttp_callback_atr")]
     pub ttp_callback_atr: f64,
 

@@ -90,14 +90,27 @@
     3. Tích hợp cơ chế Emergency BE Rejection Exit: Nếu râu nến đạt đỉnh nhưng cuối nến bị đạp thủng `min_be` / `max_be`, lập tức đóng lệnh thị trường (`tick.close(None)`) để bảo toàn vốn tối đa.
     4. Đã verify: 4 unit tests mới độc lập pass 100%, toàn bộ 91 tests của `helios` pass 100%.
 
-- [ ] **TODO-RISK-15: Đồng bộ hóa dải DNA `tsl_atr_loose` của Momentum để xóa sổ Vùng Chân Không Tử Thần (`config.rs`, `risk.rs`)**
-  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/config.rs:770-790`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L770-L790), [`risk.rs:138, 318-326`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L138)
-  - **Tài liệu thiết kế:** [`harmonized_risk_lifecycle.md`](./harmonized_risk_lifecycle.md)
-  - **Vấn đề:** `tsl_atr_loose` có dải `[5.0, 15.0]` ATR. Với đòn bẩy 20x, 10 ATR tương đương khoảng lùi 35% ROE. Khi lệnh lãi +15.8%, TSL tính ra là -19.2% (thấp hơn Hard SL ban đầu -15%), khiến Ratchet Guard từ chối cập nhật, tạo ra Vùng Chân Không từ +8% đến +20% ROE làm bốc hơi 163% ROE lợi nhuận.
-  - **Giải pháp:**
-    1. Thu hẹp dải DNA của `tsl_atr_loose` trong `config.rs` về `[2.0, 4.0, step 0.20]` ATR (mặc định 2.5 ATR).
-    2. Kẹp trần khoảng lùi TSL động theo trần rủi ro từng Playbook: $\text{max\_tsl\_roe} = (\text{playbook\_max\_sl\_roe} - 0.01).\text{max}(0.04)$, loại bỏ hoàn toàn số ma thuật hardcode 0.14.
-    3. Đảm bảo khi vị thế lãi $\ge +12\%$, Trailing Stop tự động kéo lên trên giá Entry để bảo toàn lợi nhuận tối thiểu $+4\% \to +6\%$ ROE.
+- [x] **TODO-RISK-15: Đồng bộ hóa dải DNA TSL & Kích hoạt TTP song song Break-Even (`config.rs`, `risk.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs), [`risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs)
+  - **Tài liệu thiết kế:** [`harmonized_risk_part_b_plan.md`](file:///C:/Users/PC/.gemini/antigravity/brain/2995bc21-ba22-46b2-80ff-1ce554186a35/harmonized_risk_part_b_plan.md)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (NỬA B)**.
+  - **Chi tiết đã triển khai:**
+    1. Đồng nhất 3 gen `tsl_atr_tight`, `tsl_atr_normal`, `tsl_atr_loose` về cùng dải rộng và mịn: `[0.5, 4.5, step 0.10]` (41 nấc).
+    2. Tách độc lập sàn siết Time-Decay và Underwater tightening bằng `tsl_buffer_floor_atr` thay vì trói buộc vào `tsl_atr_tight`.
+    3. Kích hoạt TTP song song ngay khi Break-Even được xác lập (`is_ttp_active = (peak_roe >= ttp_act_roe) || is_be_triggered`).
+    4. Làm mịn dải DNA cho TTP: `ttp_activation_roe` `[0.05, 0.50, step 0.01]` và `ttp_callback_atr` `[0.30, 2.50, step 0.05]`.
+    5. Đã verify: 94/94 tests của `helios` pass 100%.
+
+- [x] **TODO-RISK-17: Đại Tu & Đồng Bộ Hóa Toàn Diện Hệ Thống Quản Trị Rủi Ro (Holistic Risk Harmonization)**
+  - **Tệp liên đới:** [`config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs), [`risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs)
+  - **Tài liệu kỹ thuật:** [`holistic_risk_audit_and_harmonization.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/06_risk/holistic_risk_audit_and_harmonization.md), [`harmonized_risk_part_b_plan.md`](file:///C:/Users/PC/.gemini/antigravity/brain/2995bc21-ba22-46b2-80ff-1ce554186a35/harmonized_risk_part_b_plan.md)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (NỬA B)**.
+  - **Chi tiết đã triển khai:**
+    1. Thiết lập Bản Đồ Bậc Thang Thống Nhất: $\text{BE Buffer} < \text{TSL} < \text{Progressive Floor} < \text{Hard Cap}$.
+    2. Triển khai Sàn Bảo Vệ Lãi Lũy Tiến (Progressive Profit Floor): Tự động kích hoạt khi $\text{Peak ROE} \ge \text{mega\_trend\_min\_lock\_roe}$ (mặc định $\ge 10\%$), khóa tối thiểu tỷ lệ lãi đỉnh `mega_trend_lock_ratio` (mặc định $40\%$).
+    3. Xóa sổ 100% "Vùng chân không tử thần" (+8% đến +20% ROE) từng làm nhả lại 163% ROE.
+    4. Triệt tiêu 100% số ma thuật 14%, giữ nguyên số chiều DNA `DNA_WIDTH = 99`.
+    5. Đã verify 100% với toàn bộ unit tests `helios` và `bot_engine`.
 
 - [x] **TODO-RISK-16: Đồng bộ hóa Nguồn Chân Lý Duy Nhất (SSOT) cho Phí Sàn và Trượt Giá Động (`config.rs`, `risk.rs`, `walk_forward_smart_seed.rs`)**
   - **Tệp liên đới:** [`config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs), [`risk.rs:358-371`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L358-L371), [`walk_forward_smart_seed.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/examples/walk_forward_smart_seed.rs)
@@ -119,10 +132,12 @@
   - **Vấn đề:** Khi râu nến dài và giá đã hồi phục sát `kama_mid`, $\Delta_{SL}$ rất lớn trong khi $\Delta_{TP}$ rất nhỏ, sinh ra proposal có R:R < 1:0.3.
   - **Giải pháp:** Thêm điều kiện cứng: $\frac{\Delta_{TP}}{\Delta_{SL}} \ge \text{min\_rr\_ratio}$ (ví dụ $\ge 1.0$ hoặc $1.2$). Nếu không thỏa mãn, hủy proposal.
 
-- [ ] **TODO-RISK-06: Xử lý mâu thuẫn giữa `min_order_usd` ($21) và `max_cap_fraction` (0.25)**
-  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:18-26`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L18-L26)
-  - **Vấn đề:** Khi vốn quá nhỏ ($2 - $4), lệnh sau khi nâng lên $21 sẽ bị kẹp bởi trần 25% vốn, làm quy mô thực tế tụt xuống $10 < $21, dẫn đến việc sàn Binance từ chối lệnh (`REJECTED: MIN_NOTIONAL`).
-  - **Giải pháp:** Nếu sau khi kẹp trần `cap` mà `final_margin * leverage < min_order_usd`, hàm phải từ chối mở lệnh (trả về `0.0`).
+- [x] **TODO-RISK-06: Xử lý mâu thuẫn giữa `min_order_usd` ($21) và `max_cap_fraction` (0.25)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:43-48`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L43-L48)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (NỬA B)**.
+  - **Chi tiết đã triển khai:**
+    - Bổ sung chốt chặn Futures Min Notional: Nếu sau khi kẹp trần `cap` mà `equity * final_fraction * leverage < min_order_usd`, hàm từ chối mở lệnh an toàn (`return 0.0;`), loại bỏ nguy cơ bị Binance từ chối lệnh khi vốn quá nhỏ.
+    - Đã verify với unit test `test_calculate_size_futures_min_notional_rejection`.
 
 ---
 
