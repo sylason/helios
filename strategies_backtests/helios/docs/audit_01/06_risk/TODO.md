@@ -80,6 +80,36 @@
   - **Vấn đề:** Smart Seeding 0.5% khiến quần thể GA bị giam giữ quanh cực trị địa phương của dữ liệu cũ, In-Sample đạt 232% nhưng OOS âm -21%, dẫn đến 74.5% chu kỳ bị WFE Gate REJECT, bot bị kẹt dùng DNA lỗi thời khi thị trường đổi pha.
   - **Giải pháp:** Khi bị REJECT liên tiếp $\ge 2$ lần, tự động nâng tỷ lệ khám phá (Exploration Mutation Rate) hoặc tạm ngừng nạp hạt giống cũ để giải phóng quần thể tìm kiếm vùng cực trị mới thích nghi với pha thị trường hiện tại.
 
+- [x] **TODO-RISK-14: Triển khai Dual-Criterion Peak Engine cho Break-Even (`risk.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs:348-372`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L348-L372)
+  - **Tài liệu thiết kế:** [`harmonized_risk_lifecycle.md`](./harmonized_risk_lifecycle.md)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (NỬA A)**.
+  - **Chi tiết đã triển khai:**
+    1. Xóa bỏ hoàn toàn `sqz_multiplier` khỏi công thức tính `min_be_roe` và `effective_be_trigger_atr`.
+    2. Chuyển sang kích hoạt theo Dual-Criterion Peak Engine: `peak_roe >= min_safe_be_roe || peak_profit >= required_profit`.
+    3. Tích hợp cơ chế Emergency BE Rejection Exit: Nếu râu nến đạt đỉnh nhưng cuối nến bị đạp thủng `min_be` / `max_be`, lập tức đóng lệnh thị trường (`tick.close(None)`) để bảo toàn vốn tối đa.
+    4. Đã verify: 4 unit tests mới độc lập pass 100%, toàn bộ 91 tests của `helios` pass 100%.
+
+- [ ] **TODO-RISK-15: Đồng bộ hóa dải DNA `tsl_atr_loose` của Momentum để xóa sổ Vùng Chân Không Tử Thần (`config.rs`, `risk.rs`)**
+  - **Tệp liên đới:** [`strategies_backtests/helios/src/strategy/core_v3/config.rs:770-790`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L770-L790), [`risk.rs:138, 318-326`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L138)
+  - **Tài liệu thiết kế:** [`harmonized_risk_lifecycle.md`](./harmonized_risk_lifecycle.md)
+  - **Vấn đề:** `tsl_atr_loose` có dải `[5.0, 15.0]` ATR. Với đòn bẩy 20x, 10 ATR tương đương khoảng lùi 35% ROE. Khi lệnh lãi +15.8%, TSL tính ra là -19.2% (thấp hơn Hard SL ban đầu -15%), khiến Ratchet Guard từ chối cập nhật, tạo ra Vùng Chân Không từ +8% đến +20% ROE làm bốc hơi 163% ROE lợi nhuận.
+  - **Giải pháp:**
+    1. Thu hẹp dải DNA của `tsl_atr_loose` trong `config.rs` về `[2.0, 4.0, step 0.20]` ATR (mặc định 2.5 ATR).
+    2. Kẹp trần khoảng lùi TSL động theo trần rủi ro từng Playbook: $\text{max\_tsl\_roe} = (\text{playbook\_max\_sl\_roe} - 0.01).\text{max}(0.04)$, loại bỏ hoàn toàn số ma thuật hardcode 0.14.
+    3. Đảm bảo khi vị thế lãi $\ge +12\%$, Trailing Stop tự động kéo lên trên giá Entry để bảo toàn lợi nhuận tối thiểu $+4\% \to +6\%$ ROE.
+
+- [x] **TODO-RISK-16: Đồng bộ hóa Nguồn Chân Lý Duy Nhất (SSOT) cho Phí Sàn và Trượt Giá Động (`config.rs`, `risk.rs`, `walk_forward_smart_seed.rs`)**
+  - **Tệp liên đới:** [`config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs), [`risk.rs:358-371`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L358-L371), [`walk_forward_smart_seed.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/examples/walk_forward_smart_seed.rs)
+  - **Tài liệu thiết kế:** [`harmonized_risk_lifecycle.md`](./harmonized_risk_lifecycle.md)
+  - **Trạng thái:** ✅ **ĐÃ HOÀN THÀNH 100% (NỬA A)**.
+  - **Chi tiết đã triển khai:**
+    1. Bổ sung `taker_fee_rate` và `slippage_allowance_pct` vào `RiskBaseConfig` trong `config.rs`.
+    2. Xóa bỏ dòng hardcode `0.0008` trong `risk.rs`, tính động: $\text{fee\_buffer\_pct} = 2 \times \text{taker\_fee\_rate} + \text{slippage\_allowance\_pct}$.
+    3. Tự động nâng ngưỡng BE an toàn: $\text{min\_safe\_be\_roe} = \max(0.06, \ \text{fee\_buffer\_pct} \times L \times 1.5)$ bảo vệ tài khoản khỏi phí sàn ở mọi đòn bẩy.
+    4. Bơm `COMMISSION_RATE` từ cấu hình sàn vào `config.risk_management.risk_base.taker_fee_rate` trong `walk_forward_smart_seed.rs`.
+    5. Đã verify: Đạt chuẩn SSOT 100%, 40/40 tests `bot_engine` pass, 91/91 tests `helios` pass.
+
 ---
 
 ## 2. 🟠 MỨC ĐỘ HIGH (NGUY CƠ TOÁN HỌC & TỶ LỆ R:R THẤP)

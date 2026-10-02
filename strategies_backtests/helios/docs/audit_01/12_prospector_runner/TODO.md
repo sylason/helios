@@ -18,6 +18,8 @@
 | **5** | `TASK-PROS-05` | Làm mượt hàm phạt Early Termination trong GA để bảo vệ phương sai cho Pruning Strategy | **MEDIUM** | 🔴 Chưa xử lý | `prospector_runner.rs:260–273` |
 | **6** | `TASK-PROS-06` | Cấu hình hóa các hằng số WFE Gate vào `FullOptimizerConfig` (Loại bỏ Hardcoded Constants) | **LOW** | 🔴 Chưa xử lý | `prospector_runner.rs:194–196, 339`, `helios_optimizer_config.json` |
 | **7** | `TASK-PROS-07` | Bổ sung kiểm tra tính toàn vẹn và tương thích số chiều DNA trước khi tiêm hạt giống mồi (Seed Guard) | **LOW** | 🔴 Chưa xử lý | `prospector_runner.rs:283–292` |
+| **8** | `TASK-PROS-08` | Bộ đệm ứng viên Top-K Champions qua WFE Gate chống bẫy Overfitting Rank 1 | **CRITICAL** | 🔴 Chưa xử lý | `prospector_runner.rs:320–360`, `prospector.rs` |
+| **9** | `TASK-PROS-09` | Cơ chế Tẩy Não Hạt Giống (Seed Retirement) khi thất bại liên tiếp $\ge 3$ chu kỳ | **HIGH** | 🔴 Chưa xử lý | `prospector_runner.rs`, `storage.rs` |
 
 ---
 
@@ -155,3 +157,37 @@
      ```
 - **Tiêu chuẩn nghiệm thu:**
   - Khi truyền một vector DNA sai số chiều vào `run_optimization_cycle_range_smart_seed`, hệ thống phát cảnh báo và tự động fallback về khởi tạo ngẫu nhiên, không gây crash luồng.
+
+---
+
+### 🔴 TASK-PROS-08: Bộ đệm ứng viên Top-K Champions qua WFE Gate chống bẫy Overfitting Rank 1
+- **Mã lỗi liên đới:** `VULN-PROS-08` (Critical).
+- **Tài liệu thiết kế chi tiết:** [`top_k_champions_and_seed_retirement.md`](./top_k_champions_and_seed_retirement.md)
+- **Hiện trạng:**
+  - GA chỉ trả về duy nhất 1 cá thể Rank 1 Champion. Nếu Rank 1 trượt OOS ($R_{\text{OOS}} \le 0$), toàn bộ chu kỳ bị REJECT.
+  - Rank 1 In-Sample thường là cá thể học vẹt quá khớp râu nến (Overfitted). Trong khi Rank 2, 3 có tính tổng quát hóa cao hơn lại bị bỏ rơi.
+- **Hành động cần làm:**
+  1. Trích xuất nhóm tinh hoa `Top-K Champions` ($K = 3 \sim 5$) từ `Prospector`.
+  2. Khử trùng lặp Euclidean Genetic Distance giữa các cá thể.
+  3. Duyệt tuần tự qua Cổng WFE Gate: Nếu Champ 1 PASS $\implies$ Deploy; nếu REJECT $\implies$ tiếp tục thẩm định Champ 2, Champ 3.
+  4. Duy trì tiêu chuẩn OOS: $R_{\text{OOS}} > 0\%$, $\text{MaxDD} \le 12\%$, $N_{\text{trades}} \ge 1$. Không ép chỉ tiêu Win Rate trên mẫu 3 ngày.
+- **Tiêu chuẩn nghiệm thu:**
+  - Khi Rank 1 bị REJECT nhưng Rank 2 đạt OOS dương, hệ thống tự động chọn Rank 2 làm Champion mới, tránh việc hủy chu kỳ oan uổng.
+
+---
+
+### 🟠 TASK-PROS-09: Cơ chế Tẩy Não Hạt Giống (Seed Retirement) khi thất bại liên tiếp $\ge 3$ chu kỳ
+- **Mã lỗi liên đới:** `VULN-PROS-09` (High).
+- **Tài liệu thiết kế chi tiết:** [`top_k_champions_and_seed_retirement.md`](./top_k_champions_and_seed_retirement.md)
+- **Hiện trạng:**
+  - Khi thị trường đổi pha, hạt giống cũ tiếp tục thống trị In-Sample nhưng thua lỗ liên tục ngoài OOS, dẫn đến kẹt 11 chu kỳ liên tiếp (44 tiếng) như trong log `20261001_180444`.
+- **Hành động cần làm:**
+  1. Thêm bộ đếm `consecutive_rejections: usize` trong `ProspectorRunner`.
+  2. Nếu chu kỳ có cá thể PASS $\implies$ đặt lại `consecutive_rejections = 0`.
+  3. Nếu toàn bộ Top-K đều REJECT $\implies$ tăng `consecutive_rejections += 1`.
+  4. Khi `consecutive_rejections >= 3`:
+     - Xóa sạch hạt giống cũ khỏi SQLite DB.
+     - Kích hoạt chu kỳ kế tiếp chạy 100% Latin Hypercube Sampling (LHS) thuần khiết không hạt giống để giải phóng quần thể tìm miền đất mới.
+- **Tiêu chuẩn nghiệm thu:**
+  - Hệ thống không bao giờ bị kẹt hạt giống cũ quá 3 chu kỳ liên tiếp. Sau 3 chu kỳ thất bại, tự động reset về 100% LHS ngẫu nhiên.
+

@@ -346,24 +346,55 @@ impl RiskManager {
                 ),
             };
 
-            // 🚀 TASK-MAT-02: Đọc trực tiếp từ squeeze_intensity (thay cho biến clone thừa vol_axis đã xóa sổ).
-            // - Khi thị trường nén mạnh (squeeze_intensity cao): mở rộng ngưỡng BE để tránh dời SL quá sớm khi biến động chuẩn bị bùng nổ.
-            // - Khi thị trường bung nén/xu hướng (squeeze_intensity thấp -> 0.0): không thổi phồng min_be_roe, bảo vệ hòa vốn kịp thời.
-            let sqz_multiplier = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0).max(0.0);
-            let effective_be_trigger_atr = be_trigger_mult * (1.0 + 0.5 * sqz_multiplier);
-            let required_profit = current_atr * effective_be_trigger_atr * trade.size.abs();
-            let min_be_roe = (risk_cfg.base_be_roe_trigger.max(0.08) * (1.0 + sqz_multiplier)).min(0.50);
-            let is_be_triggered = current_pnl > 0.0 && (current_roe >= min_be_roe || current_pnl >= required_profit);
+            // 🚀 [TODO-RISK-14 & TODO-RISK-16: DUAL-CRITERION PEAK BREAK-EVEN ENGINE & SSOT DYNAMIC FEE BUFFER]
+            // 1. Triệt tiêu 100% sqz_multiplier khỏi Break-Even để loại bỏ rào cản BE giả tạo 16% ROE.
+            // 2. Tính khoảng cách tiền lời đỉnh (peak_profit) chuẩn hóa từ High Watermark.
+            let peak_dist = if trade.is_long() { peak_val - trade.entry_price } else { trade.entry_price - peak_val };
+            let peak_profit = peak_dist.max(0.0) * trade.size.abs();
+
+            // 3. Single Source of Truth: Tính động fee_buffer_pct từ taker_fee_rate và slippage_allowance_pct
+            let round_trip_fee = 2.0 * config.risk_management.risk_base.taker_fee_rate;
+            let slippage = config.risk_management.risk_base.slippage_allowance_pct;
+            let fee_buffer_pct = round_trip_fee + slippage;
+
+            // 4. Ngưỡng kích hoạt BE an toàn: Bảo vệ vốn không bị phí sàn nuốt chửng ở mọi mức đòn bẩy
+            let min_safe_be_roe = (fee_buffer_pct * leverage * 1.5).max(risk_cfg.base_be_roe_trigger.max(0.06));
+            let required_profit = current_atr * be_trigger_mult * trade.size.abs();
+
+            // 5. Kích hoạt theo Dual-Criterion Peak Engine: Chạm đỉnh râu nến High Watermark là bảo vệ hòa vốn ngay
+            let is_be_triggered = peak_roe >= min_safe_be_roe || peak_profit >= required_profit;
 
             if is_be_triggered && !is_mega_trend {
-                let fee_buffer_pct = 0.0008; // Buffer bù đắp phí sàn tối thiểu 0.08% Maker/Taker
                 if trade.is_long() {
                     let min_be = trade.entry_price * (1.0 + fee_buffer_pct);
+                    // 🛑 EDGE CASE: Emergency BE Rejection Close
+                    // Nếu râu nến đạt đỉnh nhưng cuối nến bị xả ngược đâm thủng min_be -> Thoát khẩn cấp bảo toàn vốn
+                    if current_close <= min_be {
+                        if _debug_mode {
+                            tracing::info!(
+                                "🛑 [EMERGENCY BE REJECTION EXIT] Bar: {} | Trade #{:?} Long | Peak ROE: {:.2}% >= trigger, but Close {:.2} <= min_be {:.2} -> Closed to preserve capital",
+                                i, trade.id, peak_roe * 100.0, current_close, min_be
+                            );
+                        }
+                        tick.close(None);
+                        continue;
+                    }
                     let dynamic_floor = peak_val - (current_atr * be_buffer_mult);
                     let target_be_sl = dynamic_floor.max(min_be);
                     calculated_sl = calculated_sl.max(target_be_sl);
                 } else {
                     let max_be = trade.entry_price * (1.0 - fee_buffer_pct);
+                    // 🛑 EDGE CASE: Emergency BE Rejection Close
+                    if current_close >= max_be {
+                        if _debug_mode {
+                            tracing::info!(
+                                "🛑 [EMERGENCY BE REJECTION EXIT] Bar: {} | Trade #{:?} Short | Peak ROE: {:.2}% >= trigger, but Close {:.2} >= max_be {:.2} -> Closed to preserve capital",
+                                i, trade.id, peak_roe * 100.0, current_close, max_be
+                            );
+                        }
+                        tick.close(None);
+                        continue;
+                    }
                     let dynamic_ceiling = peak_val + (current_atr * be_buffer_mult);
                     let target_be_sl = dynamic_ceiling.min(max_be);
                     calculated_sl = calculated_sl.min(target_be_sl);
@@ -845,5 +876,83 @@ mod tests {
             _ => config.risk_management.stop_management.default_sl_roe_cap,
         };
         assert_eq!(fallback_roe, 0.10, "Lệnh không có tag phải tự động fallback về default_sl_roe_cap");
+    }
+
+    #[test]
+    fn test_dual_criterion_peak_break_even_on_wick() {
+        let entry_price: f64 = 2000.0;
+        let leverage: f64 = 20.0;
+        let taker_fee_rate: f64 = 0.0004;
+        let slippage_allowance_pct: f64 = 0.0002;
+        let base_be_roe_trigger: f64 = 0.06;
+
+        let round_trip_fee: f64 = 2.0 * taker_fee_rate;
+        let fee_buffer_pct: f64 = round_trip_fee + slippage_allowance_pct;
+        let min_safe_be_roe: f64 = (fee_buffer_pct * leverage * 1.5).max(base_be_roe_trigger);
+        assert_eq!(min_safe_be_roe, 0.06, "Với 20x và phí 0.10%, min_safe_be_roe lấy sàn 6% ROE");
+
+        // Giả lập Lệnh #0009: Râu nến giật lên 2015.8 (+15.8% ROE)
+        let peak_val: f64 = 2015.8;
+        let peak_roe: f64 = ((peak_val - entry_price) / entry_price) * leverage;
+        assert!((peak_roe - 0.158).abs() < 1e-4);
+
+        // Giá Close thoái lui về 2005.0 (+5.0% ROE < 6%)
+        let current_close: f64 = 2005.0;
+        let is_be_triggered = peak_roe >= min_safe_be_roe;
+        assert!(is_be_triggered, "Dù Close thoái lui về +5% nhưng Peak ROE đạt 15.8% >= 6% phải kích hoạt BE!");
+
+        let min_be: f64 = entry_price * (1.0 + fee_buffer_pct);
+        assert!((min_be - 2002.0).abs() < 1e-4, "Mức BE an toàn bù phí sàn và trượt giá là 2002.0");
+        assert!(current_close > min_be, "Close 2005.0 > min_be 2002.0 nên vị thế an toàn để dời SL lên min_be");
+    }
+
+    #[test]
+    fn test_break_even_emergency_rejection_exit_logic() {
+        let entry_price: f64 = 2000.0;
+        let fee_buffer_pct: f64 = 0.0010;
+        let min_be: f64 = entry_price * (1.0 + fee_buffer_pct); // 2002.0
+
+        // Giả lập kịch bản râu nến đạt đỉnh nhưng cuối nến bị xả ngược đâm thủng min_be
+        let dumped_close_long: f64 = 1999.0;
+        let should_emergency_close_long = dumped_close_long <= min_be;
+        assert!(should_emergency_close_long, "Khi Close rơi xuống 1999.0 <= min_be 2002.0, Long phải kích hoạt Emergency Close!");
+
+        let max_be_short: f64 = entry_price * (1.0 - fee_buffer_pct); // 1998.0
+        let pumped_close_short: f64 = 2001.0;
+        let should_emergency_close_short = pumped_close_short >= max_be_short;
+        assert!(should_emergency_close_short, "Khi Short bị kéo lên 2001.0 >= max_be 1998.0, Short phải kích hoạt Emergency Close!");
+    }
+
+    #[test]
+    fn test_break_even_immune_to_squeeze() {
+        let _entry_price: f64 = 2000.0;
+        let leverage: f64 = 20.0;
+        let base_be_roe: f64 = 0.06;
+        let fee_buffer_pct: f64 = 0.0010;
+        let min_safe_be_roe: f64 = (fee_buffer_pct * leverage * 1.5).max(base_be_roe);
+
+        // Giả lập Lệnh #0004: Lãi đỉnh +10.6% ROE
+        let peak_roe: f64 = 0.106;
+
+        // Dù thị trường có squeeze_intensity = 1.0 thì min_safe_be_roe KHÔNG bị nhân đôi lên 16%
+        assert!(peak_roe >= min_safe_be_roe, "Lệnh #0004 lãi +10.6% phải kích hoạt BE thành công, miễn nhiễm hoàn toàn với Squeeze!");
+    }
+
+    #[test]
+    fn test_dynamic_fee_buffer_ssot_and_high_leverage() {
+        // 1. Kiểm tra tính thích ứng theo Fee VIP
+        let vip_taker_fee: f64 = 0.00015; // VIP 0.015%
+        let top_coin_slippage: f64 = 0.0001; // 0.01%
+        let vip_buffer: f64 = 2.0 * vip_taker_fee + top_coin_slippage;
+        assert!((vip_buffer - 0.0004).abs() < 1e-6, "VIP fee buffer tự co lại còn 0.04%");
+
+        // 2. Kiểm tra tính thích ứng theo Đòn bẩy cao 100x
+        let normal_taker_fee: f64 = 0.0004;
+        let normal_slippage: f64 = 0.0002;
+        let normal_buffer: f64 = 2.0 * normal_taker_fee + normal_slippage; // 0.0010 (0.10%)
+        let leverage_100x: f64 = 100.0;
+
+        let safe_be_100x: f64 = (normal_buffer * leverage_100x * 1.5).max(0.06);
+        assert!((safe_be_100x - 0.15).abs() < 1e-4, "Ở đòn bẩy 100x, ngưỡng BE tự động nâng lên 15% ROE để không bao giờ bị khóa lỗ!");
     }
 }

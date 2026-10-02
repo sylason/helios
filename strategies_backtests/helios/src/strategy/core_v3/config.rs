@@ -746,6 +746,14 @@ pub struct RiskBaseParams {
     /// 7. Tỷ Lệ Ký Quỹ Tối Đa Trên Mỗi Vị Thế (Trần bảo vệ rủi ro: Mặc định 25% vốn)
     #[serde(default = "default_max_cap_fraction")]
     pub max_cap_fraction: f64,
+
+    /// 8. Tỷ Lệ Phí Taker 1 Chiều Của Sàn/Asset (Mặc định: 0.0004 = 0.04% Binance Futures)
+    #[serde(default = "default_taker_fee_rate")]
+    pub taker_fee_rate: f64,
+
+    /// 9. Biên Độ Trượt Giá An Toàn Của Asset (Mặc định: 0.0002 = 0.02% cho Top Coins)
+    #[serde(default = "default_slippage_allowance_pct")]
+    pub slippage_allowance_pct: f64,
 }
 
 fn default_percent_per_trade() -> f64 { 0.20 }
@@ -755,6 +763,8 @@ fn default_leverage() -> f64 { 20.0 }
 fn default_nuke_leverage() -> f64 { 50.0 }
 fn default_min_order_usd() -> f64 { 21.0 }
 fn default_max_cap_fraction() -> f64 { 0.25 }
+fn default_taker_fee_rate() -> f64 { 0.0004 }
+fn default_slippage_allowance_pct() -> f64 { 0.0002 }
 
 impl Default for RiskBaseParams {
     fn default() -> Self {
@@ -766,6 +776,8 @@ impl Default for RiskBaseParams {
             nuke_leverage: default_nuke_leverage(),
             min_order_usd: default_min_order_usd(),
             max_cap_fraction: default_max_cap_fraction(),
+            taker_fee_rate: default_taker_fee_rate(),
+            slippage_allowance_pct: default_slippage_allowance_pct(),
         }
     }
 }
