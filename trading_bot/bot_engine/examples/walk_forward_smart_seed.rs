@@ -185,6 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         strategy_inst.config.risk_management.risk_base.percent_per_trade = PERCENT_PER_TRADE;
         strategy_inst.config.risk_management.risk_base.min_order_usd = MIN_ORDER_USD;
         strategy_inst.config.risk_management.risk_base.max_cap_fraction = MAX_CAPITAL_FRACTION;
+        strategy_inst.config.risk_management.risk_base.taker_fee_rate = COMMISSION_RATE;
         let strategy = Box::new(strategy_inst);
 
         let engine_config = EngineConfig {
