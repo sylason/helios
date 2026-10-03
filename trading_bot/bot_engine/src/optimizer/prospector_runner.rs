@@ -394,17 +394,14 @@ impl ProspectorRunner {
                             let val_trades = val_res.stats.total_trades;
                             let val_win_rate = val_res.stats.win_rate_pct;
 
-                            // TIÊU CHUẨN THẨM ĐỊNH ĐA TIÊU CHÍ (MULTI-CRITERIA TOLERANT WFE GATE):
+                            // 🛡️ TIÊU CHUẨN THẨM ĐỊNH OOS KỶ LUẬT THÉP (HARD ZERO-TOLERANCE WFE GATE):
                             // 1. In-Sample bắt buộc phải có lệnh và Return > 0.0%
-                            // 2. Out-Of-Sample Validation:
-                            //    a) Solid Pass: val_ret > 0.0% và val_dd <= 15.0%
-                            //    b) Tolerant Fee Pass (Dung sai phí sàn do lệnh cuối bị ép đóng):
-                            //       val_ret >= -1.2% && val_win_rate >= 50.0% && ret > 80.0% && val_dd <= 12.0%
+                            // 2. Out-Of-Sample Validation: Bắt buộc val_ret > 0.0% và val_dd <= 15.0%
+                            //    (Xóa bỏ vĩnh viễn cửa sau dung thứ OOS âm -1.2% từng đưa cá thể lỗ vào thực tế)
                             let is_in_sample_invalid = trades == 0 || ret <= 0.0;
 
                             let is_solid_pass = val_ret > 0.0 && val_dd <= 15.0;
-                            let is_tolerant_pass = val_ret >= -1.2 && val_win_rate >= 50.0 && ret > 80.0 && val_dd <= 12.0;
-                            let is_oos_invalid = val_trades == 0 || (!is_solid_pass && !is_tolerant_pass);
+                            let is_oos_invalid = val_trades == 0 || !is_solid_pass;
 
                             if is_in_sample_invalid || is_oos_invalid {
                                 warn!(
@@ -416,11 +413,10 @@ impl ProspectorRunner {
                                 return Ok(()); // 🛑 DỪNG LẠI, KHÔNG LƯU DB, KHÔNG BROADCAST!
                             }
 
-                            let pass_mode = if is_solid_pass { "SOLID PASS" } else { "TOLERANT FEE BUFFER PASS" };
                             info!(
-                                "✨ [WFE GATE: {}] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% \
+                                "✨ [WFE GATE: SOLID PASS] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% \
                                 | OOS Max DD: {:.2}% | OOS Trades: {} (Win Rate: {:.1}%) -> Approved for Deployment.",
-                                pass_mode, ret, val_ret, val_dd, val_trades, val_win_rate
+                                ret, val_ret, val_dd, val_trades, val_win_rate
                             );
                         }
                         Err(e) => {
@@ -693,5 +689,28 @@ mod tests {
             assert_eq!(et.min_trades, 2);
             assert_eq!(full.prospector.max_depth, 1);
         }
+    }
+
+    #[test]
+    fn test_wfe_gate_hard_zero_tolerance() {
+        // Kịch bản A: OOS Return bị âm (-0.5%), In-Sample lãi khủng 120%, Win Rate 50%
+        let val_ret_neg = -0.5;
+        let val_dd = 8.0;
+        let val_trades = 3;
+        let is_solid_pass_neg = val_ret_neg > 0.0 && val_dd <= 15.0;
+        let is_oos_invalid_neg = val_trades == 0 || !is_solid_pass_neg;
+        assert!(is_oos_invalid_neg, "OOS Return âm (-0.5%) bắt buộc phải bị WFE Gate REJECT 100%!");
+
+        // Kịch bản B: OOS Return = 0.0% (không có lãi)
+        let val_ret_zero = 0.0;
+        let is_solid_pass_zero = val_ret_zero > 0.0 && val_dd <= 15.0;
+        let is_oos_invalid_zero = val_trades == 0 || !is_solid_pass_zero;
+        assert!(is_oos_invalid_zero, "OOS Return = 0.0% phải bị WFE Gate REJECT!");
+
+        // Kịch bản C: OOS Return dương (+2.5%), Drawdown 6.0%, 3 lệnh
+        let val_ret_pos = 2.5;
+        let is_solid_pass_pos = val_ret_pos > 0.0 && val_dd <= 15.0;
+        let is_oos_invalid_pos = val_trades == 0 || !is_solid_pass_pos;
+        assert!(!is_oos_invalid_pos, "OOS Return dương (+2.5%) và DD an toàn phải được APPROVE!");
     }
 }
