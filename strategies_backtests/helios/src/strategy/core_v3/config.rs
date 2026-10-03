@@ -889,17 +889,32 @@ pub struct RiskStopParams {
     #[dna(min = 0.5, max = 6.0, step = 0.10)]
     pub base_sl_atr: f64,
 
-    /// Cờ Bật/Tắt Cơ Chế Giãn Cách Cooldown Sau Khi Hòa Vốn / Cắt Lỗ (true: BẬT, false: TẮT)
+    /// 🛡️ CƠ CHẾ CẦU DAO BẢO VỆ TÀI KHOẢN TẠI BOT ENGINE (ENGINE COOLDOWN SENTINEL - PURE TTL)
+    /// Cờ Bật/Tắt Cơ Chế Giãn Cách Cooldown Tại Bot Engine (true: BẬT, false: TẮT)
     #[serde(default = "default_true")]
     pub enable_re_entry_cooldown: bool,
 
-    /// Thời Gian Giãn Cách Sau Khi Hòa Vốn Chống Cào Lệnh (0 -> 60 nến, Step 5 nến -> 13 nấc)
-    #[dna(min = 0.0, max = 60.0, step = 5.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    /// Thời Gian Giãn Cách Cơ Sở Sau Lệnh Dính Hard SL (Cố định: 15 nến 1m = 15 phút)
+    #[serde(default = "default_base_cooldown_bars")]
     pub re_entry_cooldown_bars: usize,
 
-    /// Hệ Số ATR Bứt Phá Định Hướng Để Giải Phóng Sớm Khỏi Cooldown (0.5 -> 4.0 ATR, Step 0.25 -> 15 nấc)
-    #[dna(min = 0.5, max = 4.0, step = 0.25)]
+    /// Trần Thời Gian Giãn Cách Tối Đa Khi Dính Chuỗi Thua Liên Tiếp (Cố định: 45 nến = 45 phút)
+    #[serde(default = "default_max_cooldown_cap_bars")]
+    pub max_cooldown_cap_bars: usize,
+
+    /// Thời Gian Giãn Cách Ngắn Sau Lệnh Hòa Vốn True BE Để Ổn Định Nến (Cố định: 3 nến = 3 phút)
+    #[serde(default = "default_be_tolerance_cooldown_bars")]
+    pub be_tolerance_cooldown_bars: usize,
+
+    /// Khoảng Đệm Bù Phí Sàn 2 Chiều + Trượt Giá Khi Dời SL Hòa Vốn (Mặc định: 0.13% = 0.0013)
+    #[serde(default = "default_true_be_roundtrip_fee_pct")]
+    pub true_be_roundtrip_fee_pct: f64,
+
+    /// Ngưỡng ROE Phân Định Lệnh Thua Nặng Cần Kích Hoạt Cầu Dao Đầy Đủ (Mặc định: -5.0% ROE)
+    #[serde(default = "default_hard_loss_roe_threshold")]
+    pub hard_loss_roe_threshold: f64,
+
+    /// Hệ Số ATR Bứt Phá Định Hướng (Dự phòng cho phân tích ngoại vi)
     #[serde(default = "default_cooldown_breakout_atr_mult")]
     pub cooldown_breakout_atr_mult: f64,
 
@@ -1054,5 +1069,25 @@ fn default_reversal_w_displacement() -> f64 {
 pub struct WarmupConfig {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub num: usize,
+}
+
+fn default_base_cooldown_bars() -> usize {
+    15
+}
+
+fn default_max_cooldown_cap_bars() -> usize {
+    45
+}
+
+fn default_be_tolerance_cooldown_bars() -> usize {
+    3
+}
+
+fn default_true_be_roundtrip_fee_pct() -> f64 {
+    0.0013
+}
+
+fn default_hard_loss_roe_threshold() -> f64 {
+    -0.05
 }
 
