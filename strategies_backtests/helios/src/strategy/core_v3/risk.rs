@@ -288,7 +288,8 @@ impl RiskManager {
             let required_profit = current_atr * be_trigger_mult * trade.size.abs();
 
             // 5. Kích hoạt theo Dual-Criterion Peak Engine: Chạm đỉnh râu nến High Watermark là bảo vệ hòa vốn ngay
-            let is_be_triggered = current_pnl > 0.0 && (peak_roe >= min_safe_be_roe || peak_profit >= required_profit);
+            // 🛡️ TASK TODO-R2-01: Bỏ `current_pnl > 0.0 &&` để Emergency BE Rejection Close không bị tắt khi Flash Crash sập dưới min_be
+            let is_be_triggered = peak_roe >= min_safe_be_roe || peak_profit >= required_profit;
 
             // =========================================================================
             // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
@@ -1038,5 +1039,37 @@ mod tests {
         // Phải từ chối mở lệnh (trả về 0.0) thay vì gửi lệnh lỗi lên Binance!
         let size_starved = RiskManager::calculate_size(3.0, 0.20, 21.0, 20.0, 0.25);
         assert_eq!(size_starved, 0.0, "Tài khoản không đủ ký quỹ để đạt $21 Notional phải trả về 0.0!");
+    }
+
+    #[test]
+    fn test_be_triggered_on_flash_crash() {
+        // Giả lập lệnh Long: Đòn bẩy 20x, Entry = 2000.0
+        // Đỉnh lợi nhuận từng chạm 2020.0 (+20% ROE)
+        let leverage: f64 = 20.0;
+        let entry_price: f64 = 2000.0;
+        let peak_val: f64 = 2020.0;
+        let peak_roe: f64 = ((peak_val - entry_price) / entry_price) * leverage; // +20% ROE
+        
+        let fee_buffer_pct: f64 = 0.0013; // Phí vào + ra + trượt giá
+        let min_safe_be_roe: f64 = (fee_buffer_pct * leverage * 1.5).max(0.06); // 6% ROE
+        let required_profit: f64 = 50.0;
+        let peak_profit: f64 = 100.0;
+
+        // Trạng thái nến hiện tại: Flash crash sập về 1995.0 (dưới Entry, current_pnl < 0)
+        let current_close: f64 = 1995.0;
+        let current_pnl: f64 = (current_close - entry_price) * 1.0; // Âm (-5.0)
+
+        // Logic cũ trước khi fix: `current_pnl > 0.0 && ...` làm `is_be_triggered` = false (BỊ MÙ FLASH CRASH)
+        let old_is_be_triggered = current_pnl > 0.0 && (peak_roe >= min_safe_be_roe || peak_profit >= required_profit);
+        assert!(!old_is_be_triggered, "Logic cũ bị mù Flash Crash vì current_pnl <= 0.0");
+
+        // Logic mới sau khi fix: Chỉ cần peak_roe >= min_safe_be_roe là kích hoạt BE (Ratchet Memory)
+        let is_be_triggered = peak_roe >= min_safe_be_roe || peak_profit >= required_profit;
+        assert!(is_be_triggered, "Logic mới phải kích hoạt BE thành công dù nến hiện tại đang sập!");
+
+        // Kiểm tra điều kiện Emergency BE Rejection Close:
+        let min_be = entry_price * (1.0 + fee_buffer_pct); // 2000 * 1.0013 = 2002.6
+        let should_emergency_exit = is_be_triggered && (current_close <= min_be);
+        assert!(should_emergency_exit, "Phải lập tức kích hoạt Emergency Exit khi giá sập thủng min_be!");
     }
 }

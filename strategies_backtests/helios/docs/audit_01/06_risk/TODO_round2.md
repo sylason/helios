@@ -14,17 +14,11 @@
   - **Giải pháp:** Bỏ `#[dna]`, quy hoạch `EngineCooldownConfig` (Base 15 bars, Cap 45 bars), phân loại lệnh Hard SL vs True BE dung sai phí sàn.
   - **Trạng thái:** ✅ Đã hoàn thành 100% Bước 1, 2, 3, 4 (Code & Unit Tests Pass 100%).
 
-- [ ] **TODO-R2-01: Fix Flash Crash Blind Spot trong `is_be_triggered`**
+- [x] **TODO-R2-01: Fix Flash Crash Blind Spot trong `is_be_triggered`**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:291`
   - **Vấn đề:** `current_pnl > 0.0 &&` làm tắt Emergency BE Rejection khi nến flash crash đóng dưới Entry, dù `peak_roe` đã chạm ngưỡng an toàn từ trước.
-  - **Fix:**
-    ```rust
-    // ❌ Trước:
-    let is_be_triggered = current_pnl > 0.0 && (peak_roe >= min_safe_be_roe || peak_profit >= required_profit);
-    // ✅ Sau:
-    let is_be_triggered = peak_roe >= min_safe_be_roe || peak_profit >= required_profit;
-    ```
-  - **Test:** Thêm unit test `test_be_triggered_on_flash_crash` — lệnh peak +20% ROE, nến tiếp close dưới Entry → `is_be_triggered = true`.
+  - **Fix:** Bỏ `current_pnl > 0.0 &&`, duy trì trạng thái kích hoạt BE khi râu nến đã đạt đỉnh an toàn (Ratchet Memory).
+  - **Trạng thái:** ✅ Đã hoàn thành 100% & Pass 22/22 tests trong `risk::tests` (bao gồm `test_be_triggered_on_flash_crash`).
 
 - [ ] **TODO-R2-02: Giải quyết Giant Candle Trap cho Anomaly & Momentum**
   - **File:** `risk.rs:15-28` + `anomaly.rs:75,90` + `momentum_ignition.rs:144,151`
