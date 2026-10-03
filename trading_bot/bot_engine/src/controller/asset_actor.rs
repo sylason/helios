@@ -12,6 +12,7 @@ use helios::strategy::core_v3::config::HeliosConfigV3;
 use crate::models::account_state::AccountEvent;
 use crate::models::config::EngineConfig;
 use crate::execution::engine::ExecutionEngine;
+use crate::execution::paper_trader::ExitReason;
 use crate::error::BotError;
 
 /// Trạng thái Vị thế Đang Mở (Live Position Snapshot)
@@ -28,10 +29,7 @@ pub struct LivePositionState {
     pub opening_playbook_tag: Option<String>,
 }
 
-/// 🛡️ CHỐT CHẶN COOLDOWN TẠI ENGINE (DUAL SENTINELS - FLAW-TSL.7)
-/// Bảo vệ tài khoản chống bẫy cào lệnh (Revenge Trading) và bẫy vả 2 đầu (Alternating Whipsaw)
-/// khi lệnh thật (Paper/Live) bị cắt lỗ hoặc hòa vốn danh nghĩa.
-/// 🛡️ CẦU DAO BẢO VỆ TÀI KHOẢN (ACCOUNT CIRCUIT BREAKER - PURE TTL)
+/// 🛡️ CẦU DAO BẢO VỆ TÀI KHOẢN (ACCOUNT CIRCUIT BREAKER - UNIVERSAL PURE TTL)
 /// Bảo vệ tài khoản chống bẫy cào lệnh trả thù (Revenge Trading) và bẫy vả 2 đầu (Whipsaw)
 /// sau chuỗi lệnh thua liên tiếp. Tự động mở khóa 100% khi hết hạn nến phạt (Pure TTL).
 #[derive(Debug, Clone, Default)]
@@ -41,20 +39,20 @@ pub struct EngineCooldownGuard {
 }
 
 impl EngineCooldownGuard {
-    /// Tính toán số nến cooldown phạt lũy tiến (Exponential Backoff) với trần động = base_bars * 4
+    /// Tính toán số nến cooldown phạt lũy tiến (Exponential Backoff) với trần tối đa max_cap
     #[inline]
-    pub fn calculate_exponential_cooldown(base_bars: usize, consecutive_losses: usize) -> usize {
+    pub fn calculate_exponential_cooldown(base_bars: usize, consecutive_losses: usize, max_cap: usize) -> usize {
         if base_bars == 0 || consecutive_losses == 0 {
             return 0;
         }
         let streak_power = (consecutive_losses.saturating_sub(1)).min(2) as u32;
         let multiplier = 1usize << streak_power; // 1, 2, hoặc 4
         let penalty = base_bars.saturating_mul(multiplier);
-        let dynamic_cap = base_bars.saturating_mul(4); // Dynamic Cap = base * 4
-        penalty.min(dynamic_cap)
+        let cap = if max_cap == 0 { 45 } else { max_cap };
+        penalty.min(cap)
     }
 
-    /// Kiểm tra xem một Action (Buy/Sell) có bị chặn bởi Cầu Dao hay không
+    /// Kiểm tra xem một Action (Buy/Sell) có bị chặn bởi Cầu Dao hay không (Universal Pure TTL)
     /// Trả về `true` nếu bị VETO (đang trong thời gian phạt), `false` nếu HỢP LỆ (hết hạn hoặc tắt cooldown)
     #[inline]
     pub fn should_veto(&self, current_bar_idx: usize, enable_cooldown: bool) -> bool {
@@ -184,11 +182,15 @@ impl AssetActor {
             let stop_cfg = &self.helios_config.risk_management.stop_management;
             
             // Phân định thắng/thua bằng Dual-Feed (tự động trừ phí sàn, không bẫy mệnh giá):
-            let (is_net_win, pnl_display, side_str) = if let Some(ref trade) = engine_closed_trade {
+            let (is_net_win, is_true_be, pnl_display, side_str) = if let Some(ref trade) = engine_closed_trade {
                 let is_win = trade.net_pnl > 0.0;
-                let display = format!("{:+.2} USD", trade.net_pnl);
+                let display = format!("{:+.2} USD ({:+.2}%)", trade.net_pnl, trade.pnl_pct);
                 let side = format!("{:?}", trade.pos_type);
-                (is_win, display, side)
+                // True Break-Even: không phải Hard SL và mức lỗ chỉ là phí nhỏ (> hard_loss_roe_threshold * 100)
+                let is_be = !is_win 
+                    && trade.exit_reason != ExitReason::HardStopLoss 
+                    && trade.pnl_pct > (stop_cfg.hard_loss_roe_threshold * 100.0);
+                (is_win, is_be, display, side)
             } else if let Some(ref prev) = self.previous_position {
                 let side = if prev.position_amt > 0.0 { "LONG" } else { "SHORT" };
                 let raw_ret = if prev.position_amt > 0.0 {
@@ -198,26 +200,39 @@ impl AssetActor {
                 };
                 let roundtrip_fee = 2.0 * self.config.commission_rate; // ~0.08%
                 let net_ret = raw_ret - roundtrip_fee;
-                (net_ret > 0.0, format!("{:+.2}% Net", net_ret * 100.0), side.to_string())
+                let is_win = net_ret > 0.0;
+                let leverage = self.helios_config.risk_management.risk_base.leverage.max(1.0);
+                let hard_loss_thresh = stop_cfg.hard_loss_roe_threshold / leverage;
+                let is_be = !is_win && net_ret > hard_loss_thresh;
+                (is_win, is_be, format!("{:+.2}% Net", net_ret * 100.0), side.to_string())
             } else {
-                (false, "0.00 (Unknown)".to_string(), "UNKNOWN".to_string())
+                (false, false, "0.00 (Unknown)".to_string(), "UNKNOWN".to_string())
             };
 
-            if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 {
+            if stop_cfg.enable_re_entry_cooldown {
                 if is_net_win {
-                    // THẮNG THỰC TẾ: Reset streak & cooldown
+                    // KỊCH BẢN 1: THẮNG THỰC TẾ -> Reset toàn bộ streak & cooldown
                     self.cooldown_guard.consecutive_losses = 0;
                     self.cooldown_guard.locked_until_bar = 0;
                     info!(
                         "🎉 [COOLDOWN FULL RESET] Symbol: {} | Side: {} | PnL: {} > 0 -> Reset streak & Cooldown to 0!",
                         self.symbol, side_str, pnl_display
                     );
+                } else if is_true_be {
+                    // KỊCH BẢN 2: HÒA VỐN TRUE BREAK-EVEN / TRƯỢT GIÁ NHẸ -> Giữ nguyên streak, phạt nhẹ để nến ổn định
+                    let be_penalty = stop_cfg.be_tolerance_cooldown_bars.max(1);
+                    self.cooldown_guard.locked_until_bar = current_bar_idx + be_penalty;
+                    info!(
+                        "🛡️ [TRUE BE TOLERANCE] Symbol: {} | Side: {} | PnL: {} | Streak maintained: {} | Cooldown: {} bars | Locked until bar_idx: {}",
+                        self.symbol, side_str, pnl_display, self.cooldown_guard.consecutive_losses, be_penalty, self.cooldown_guard.locked_until_bar
+                    );
                 } else {
-                    // THUA HOẶC HÒA VỐN DANH NGHĨA (MẤT PHÍ): Tăng streak & phạt cooldown
+                    // KỊCH BẢN 3: THUA NẶNG CẤU TRÚC / HARD SL -> Tăng streak & phạt lũy tiến đầy đủ với trần max_cap
                     self.cooldown_guard.consecutive_losses = self.cooldown_guard.consecutive_losses.saturating_add(1);
                     let effective_cooldown = EngineCooldownGuard::calculate_exponential_cooldown(
                         stop_cfg.re_entry_cooldown_bars,
                         self.cooldown_guard.consecutive_losses,
+                        stop_cfg.max_cooldown_cap_bars,
                     );
                     self.cooldown_guard.locked_until_bar = current_bar_idx + effective_cooldown;
                     warn!(
@@ -674,25 +689,25 @@ impl AssetActor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::paper_trader::{PaperTradeRecord, PositionType, ExitReason};
 
     #[test]
-    fn test_calculate_exponential_cooldown_dynamic_cap() {
-        // Base bars = 15
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 0), 0);
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 1), 15);
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 2), 30);
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 3), 60);
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 4), 60); // Cap at 15 * 4 = 60
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 10), 60);
+    fn test_calculate_exponential_cooldown_with_hard_cap_45() {
+        // Base bars = 15, Max Cap = 45
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 0, 45), 0);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 1, 45), 15);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 2, 45), 30);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 3, 45), 45); // Chặn cứng tại Cap 45
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 4, 45), 45); // Vẫn ở Cap 45
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(15, 10, 45), 45); // Không bao giờ vượt quá 45 bars
 
-        // Base bars = 25
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 1), 25);
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 2), 50);
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 3), 100);
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(25, 5), 100); // Cap at 25 * 4 = 100
+        // Base bars = 20, Max Cap = 60
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(20, 1, 60), 20);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(20, 2, 60), 40);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(20, 3, 60), 60);
 
         // Edge case: base_bars = 0
-        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(0, 5), 0);
+        assert_eq!(EngineCooldownGuard::calculate_exponential_cooldown(0, 5, 45), 0);
     }
 
     #[test]
@@ -738,5 +753,62 @@ mod tests {
         // Qua 50 bars, bảo đảm 100% được mở khóa bất kể giá thị trường
         assert!(!guard.should_veto(50, true));
         assert!(!guard.should_veto(51, true));
+    }
+
+    #[test]
+    fn test_true_be_classification_logic() {
+        let hard_loss_thresh_roe = -0.05; // -5.0%
+
+        // Kịch bản A: Lệnh dính TrailingStopLoss ở sát Entry, lỗ nhẹ phí sàn -0.08%
+        let be_trade = PaperTradeRecord {
+            id: 1,
+            pos_type: PositionType::Long,
+            entry_price: 100.0,
+            exit_price: 100.05,
+            entry_timestamp: 1000,
+            exit_timestamp: 2000,
+            bars_held: 10,
+            exit_reason: ExitReason::TrailingStopLoss,
+            opening_playbook_tag: Some("TREND_PB".to_string()),
+            net_pnl: -0.05,
+            pnl_pct: -0.08,
+            equity_after: 59.95,
+            mfe_pct: 1.5,
+            mae_pct: -0.2,
+        };
+
+        let is_win = be_trade.net_pnl > 0.0;
+        let is_be = !is_win 
+            && be_trade.exit_reason != ExitReason::HardStopLoss 
+            && be_trade.pnl_pct > (hard_loss_thresh_roe * 100.0);
+
+        assert!(!is_win, "Không phải lệnh win thực tế");
+        assert!(is_be, "Phải được nhận diện là True Break-Even dung sai phí sàn!");
+
+        // Kịch bản B: Lệnh dính HardStopLoss (-12.0% ROE)
+        let hard_sl_trade = PaperTradeRecord {
+            id: 2,
+            pos_type: PositionType::Long,
+            entry_price: 100.0,
+            exit_price: 99.4,
+            entry_timestamp: 1000,
+            exit_timestamp: 1500,
+            bars_held: 3,
+            exit_reason: ExitReason::HardStopLoss,
+            opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
+            net_pnl: -1.5,
+            pnl_pct: -12.0,
+            equity_after: 58.5,
+            mfe_pct: 0.1,
+            mae_pct: -12.0,
+        };
+
+        let is_hard_win = hard_sl_trade.net_pnl > 0.0;
+        let is_hard_be = !is_hard_win 
+            && hard_sl_trade.exit_reason != ExitReason::HardStopLoss 
+            && hard_sl_trade.pnl_pct > (hard_loss_thresh_roe * 100.0);
+
+        assert!(!is_hard_win);
+        assert!(!is_hard_be, "Lệnh HardStopLoss tuyệt đối không được coi là True BE!");
     }
 }
