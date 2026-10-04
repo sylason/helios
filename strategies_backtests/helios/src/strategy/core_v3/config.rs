@@ -776,6 +776,14 @@ pub struct RiskBaseParams {
     /// 9. Biên Độ Trượt Giá An Toàn Của Asset (Mặc định: 0.0002 = 0.02% cho Top Coins)
     #[serde(default = "default_slippage_allowance_pct")]
     pub slippage_allowance_pct: f64,
+
+    /// 10. Tỷ Lệ Ký Quỹ Duy Trì Của Sàn/Asset (MMR: Mặc định 0.01 = 1.0% cho Tier 1 Binance Futures)
+    #[serde(default = "default_maintenance_margin_rate")]
+    pub maintenance_margin_rate: f64,
+
+    /// 11. Hệ Số Vùng Đệm An Toàn Thanh Lý Co Giãn (Mặc định 0.15 = 15% khoảng cách thanh lý)
+    #[serde(default = "default_liquidation_buffer_ratio")]
+    pub liquidation_buffer_ratio: f64,
 }
 
 fn default_percent_per_trade() -> f64 { 0.20 }
@@ -787,6 +795,8 @@ fn default_min_order_usd() -> f64 { 21.0 }
 fn default_max_cap_fraction() -> f64 { 0.25 }
 fn default_taker_fee_rate() -> f64 { 0.0004 }
 fn default_slippage_allowance_pct() -> f64 { 0.0002 }
+fn default_maintenance_margin_rate() -> f64 { 0.01 }
+fn default_liquidation_buffer_ratio() -> f64 { 0.15 }
 
 impl Default for RiskBaseParams {
     fn default() -> Self {
@@ -800,6 +810,8 @@ impl Default for RiskBaseParams {
             max_cap_fraction: default_max_cap_fraction(),
             taker_fee_rate: default_taker_fee_rate(),
             slippage_allowance_pct: default_slippage_allowance_pct(),
+            maintenance_margin_rate: default_maintenance_margin_rate(),
+            liquidation_buffer_ratio: default_liquidation_buffer_ratio(),
         }
     }
 }

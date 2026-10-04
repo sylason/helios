@@ -62,6 +62,8 @@
     "enable_multi_fidelity": true,
     "multi_fidelity_top_ratio": 0.30,
     "available_timeframes": [
+      "1m",
+      "3m",
       "5m",
       "15m",
       "1h",

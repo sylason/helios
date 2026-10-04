@@ -5,7 +5,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::gatekeeper::{RegimeGatekeeper, GateVetoReason};
-use crate::strategy::core_v3::risk::RiskManager;
+use crate::strategy::core_v3::risk::{RiskManager, SlValidationResult};
 use tracing::info;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +57,8 @@ pub enum AuctionStatus {
     RunnerUp,
     LowConfidence,
     ConflictEliminated,
-    StructuralRiskVeto, // 🛑 Rủi ro cấu trúc SL vượt quá trần ROE cho phép (Sniper Entry Guard)
+    StructuralRiskVeto,  // 🛑 Rủi ro cấu trúc SL vượt quá trần ROE cho phép (Sniper Entry Guard)
+    LiquidationRiskVeto, // 🛑 Rủi ro thanh lý sàn (SL nằm ngoài hoặc quá sát P_liq theo MMR)
     NotTriggered,
 }
 
@@ -215,33 +216,89 @@ impl HeliosArbiter {
                     ScannerId::AbsorptionScout => config.tactical_sniper.absorption.max_initial_sl_pct,
                 };
 
-                // 🛑 CHỐT CHẶN VETO RỦI RO CẤU TRÚC (SNIPER ENTRY GUARD)
-                let sl_acceptable = if let Some(sl) = proposal.suggested_sl {
-                    RiskManager::is_structural_sl_acceptable(current_price, sl, playbook_max_sl_roe, leverage)
+                // 🛑 CHỐT CHẶN VETO RỦI RO CẤU TRÚC & THANH LÝ SÀN (SNIPER & LIQUIDATION GUARD)
+                let risk_base = &config.risk_management.risk_base;
+                let stop_mgmt = &config.risk_management.stop_management;
+                let validation_res = if let Some(sl) = proposal.suggested_sl {
+                    RiskManager::validate_structural_sl(
+                        current_price,
+                        sl,
+                        playbook_max_sl_roe,
+                        leverage,
+                        risk_base.maintenance_margin_rate,
+                        risk_base.taker_fee_rate,
+                        risk_base.liquidation_buffer_ratio,
+                        stop_mgmt.min_initial_sl_pct,
+                    )
                 } else {
-                    true
+                    // Nếu Scanner không đề xuất SL cụ thể, kiểm tra xem tại đòn bẩy leverage hiện tại
+                    // có đủ không gian thanh lý an toàn không
+                    if RiskManager::calculate_safe_sl_distance(
+                        leverage,
+                        playbook_max_sl_roe,
+                        risk_base.maintenance_margin_rate,
+                        risk_base.taker_fee_rate,
+                        risk_base.liquidation_buffer_ratio,
+                        stop_mgmt.min_initial_sl_pct,
+                    ).is_some() {
+                        SlValidationResult::Acceptable
+                    } else {
+                        SlValidationResult::LiquidationRiskVeto {
+                            suggested_dist_pct: 0.0,
+                            safe_liq_dist_pct: 0.0,
+                            mmr: risk_base.maintenance_margin_rate,
+                        }
+                    }
                 };
 
-                if !sl_acceptable {
-                    let sl_val = proposal.suggested_sl.unwrap_or(0.0);
-                    let dist_roe = (current_price - sl_val).abs() / current_price * leverage * 100.0;
-                    let cap_roe = playbook_max_sl_roe.min(crate::strategy::core_v3::risk::GLOBAL_HARD_MAX_ROE) * 100.0;
-                    (
-                        confidence,
-                        false,
-                        Some(AuctionStatus::StructuralRiskVeto),
-                        format!("Structural SL exceeds ROE cap: {:.1}% > {:.1}% (entry too risky)", dist_roe, cap_roe),
-                    )
-                } else if confidence >= min_threshold {
-                    approved_proposals.push((proposal.clone(), confidence));
-                    (confidence, true, None, String::new())
-                } else {
-                    (
-                        confidence,
-                        false,
-                        Some(AuctionStatus::LowConfidence),
-                        format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
-                    )
+                match validation_res {
+                    SlValidationResult::LiquidationRiskVeto { suggested_dist_pct, safe_liq_dist_pct, mmr } => {
+                        (
+                            confidence,
+                            false,
+                            Some(AuctionStatus::LiquidationRiskVeto),
+                            format!(
+                                "SL dist {:.2}% exceeds safe liquidation dist {:.2}% (MMR: {:.2}%, Lev: {:.0}x) - Kamikaze rejection",
+                                suggested_dist_pct * 100.0,
+                                safe_liq_dist_pct * 100.0,
+                                mmr * 100.0,
+                                leverage
+                            ),
+                        )
+                    }
+                    SlValidationResult::StructuralRiskVeto { suggested_roe, max_roe } => {
+                        (
+                            confidence,
+                            false,
+                            Some(AuctionStatus::StructuralRiskVeto),
+                            format!(
+                                "Structural SL exceeds ROE cap: {:.1}% > {:.1}% (entry too risky)",
+                                suggested_roe * 100.0,
+                                max_roe * 100.0
+                            ),
+                        )
+                    }
+                    SlValidationResult::InvalidPrice => {
+                        (
+                            confidence,
+                            false,
+                            Some(AuctionStatus::StructuralRiskVeto),
+                            "Invalid price or suggested SL (NaN or non-positive)".to_string(),
+                        )
+                    }
+                    SlValidationResult::Acceptable => {
+                        if confidence >= min_threshold {
+                            approved_proposals.push((proposal.clone(), confidence));
+                            (confidence, true, None, String::new())
+                        } else {
+                            (
+                                confidence,
+                                false,
+                                Some(AuctionStatus::LowConfidence),
+                                format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
+                            )
+                        }
+                    }
                 }
             } else {
                 (

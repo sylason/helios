@@ -7,17 +7,15 @@ Tài liệu này quản lý các hạng mục công việc, kiểm tra logic và
 
 ## 📋 DANH SÁCH HẠNG MỤC CÔNG VIỆC (ACTION ITEMS)
 
-- [ ] **`TODO-RSK-01`**: **Bổ Sung Chốt Chặn Khoảng Cách Thanh Lý Sàn (Liquidation & MMR Guard)**
+- [x] **`TODO-RSK-01`**: **Bổ Sung Chốt Chặn Khoảng Cách Thanh Lý Sàn (Liquidation & MMR Guard)** - *(ĐÃ HOÀN THÀNH)*
   - *Mục tiêu:* Ngăn chặn tuyệt đối việc mở lệnh có Stop Loss nằm ngoài hoặc quá sát Giá Thanh lý ($P_{\text{liq}}$) khi giao dịch ở đòn bẩy cao ($\ge 50\text{x}$) hoặc trên Altcoins có tỷ lệ ký quỹ duy trì (MMR) lớn.
-  - *Tham chiếu:* [Kẽ hở 1: MMR Blindness](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/05_risk/01_risk_deep_dive.md#kẽ-hở-1-rủi-ro-thanh-lý-ngầm-do-thiếu-nhận-thức-về-maintenance-margin-mmr-blindness)
-  - *Nhiệm vụ:*
-    - Nạp bảng thông số MMR từ sàn vào cấu hình rủi ro của cặp tiền.
-    - Trong `clamp_sl_price` và `is_structural_sl_acceptable`, thêm điều kiện:
-      $$\text{Dist}(\text{Entry}, \text{SL}) \le \text{Dist}(\text{Entry}, P_{\text{liq}}) - \Delta_{\text{MMR\_buffer}}$$
-    - Nếu đòn bẩy làm khoảng cách thanh lý nhỏ hơn SL đề xuất $\to$ Tự động de-leverage hoặc từ chối vào lệnh an toàn.
-  - *Test cases cần có:*
-    - `test_liquidation_distance_rejection_at_100x`: Kiểm tra từ chối lệnh khi SL 15% ROE vượt qua giá thanh lý của Altcoin có MMR 1.5%.
-    - `test_auto_de_leverage_to_fit_liquidation_safe_zone`: Kiểm tra tự động hạ đòn bẩy từ 50x xuống 30x để đảm bảo vùng đệm thanh lý $\ge 1.0\%$.
+  - *Tham chiếu:* [Kẽ hở 1: MMR Blindness](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/05_risk/01_risk_deep_dive.md#kẽ-hở-1-rủi-ro-thanh-lý-ngầm-do-thiếu-nhận-thức-về-maintenance-margin-mmr-blindness) | [📄 Kế hoạch Cải tiến Nâng cao Tương lai (Simulated Liq trong Engine & Dynamic Auto-Deleverage)](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/02_liquidation_and_auto_deleverage/01_liquidation_simulation_and_auto_deleverage_blueprint.md)
+  - *Kết quả Triển khai:*
+    - ✅ Bổ sung `maintenance_margin_rate` ($1.0\%$) & `liquidation_buffer_ratio` ($15\%$) vào `RiskBaseParams`.
+    - ✅ Triển khai chốt chặn toán học an toàn tại `calculate_safe_sl_distance`, `validate_structural_sl` và `clamp_sl_price` trong `risk.rs`.
+    - ✅ Bổ sung trạng thái `AuctionStatus::LiquidationRiskVeto` vào Signal Arbiter và hiển thị Thẻ Đỏ Telemetry `💀 [LIQ-VETO]`.
+    - ✅ Vượt qua 100% 26/26 unit tests trong `risk.rs`: `test_clamp_sl_price_with_liquidation_guard`, `test_liquidation_guard_kamikaze_rejection_at_100x`, `test_liquidation_guard_safe_execution_at_20x`, `test_liquidation_guard_veto_high_mmr_altcoin`.
+  - *Ghi chú Mở rộng Tương lai:* Đã lưu trữ tài liệu thiết kế và danh mục công việc cho các tính năng nâng cao (Simulated Liquidation trong Broker `ferro_trade` và Dynamic Auto-Deleverage khi vào lệnh) tại [`docs/unfinished_tasks/02_liquidation_and_auto_deleverage/`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/02_liquidation_and_auto_deleverage/TODO.md), sẽ quay lại triển khai khi tối ưu hóa sâu nền tảng.
 
 ---
 

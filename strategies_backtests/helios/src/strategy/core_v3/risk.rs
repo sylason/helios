@@ -9,22 +9,148 @@ pub struct RiskManager;
 /// Không một lệnh nào trên toàn hệ sinh thái được phép có mức cắt lỗ ban đầu vượt quá ngưỡng này.
 pub const GLOBAL_HARD_MAX_ROE: f64 = 0.15;
 
+/// 🛡️ Kết quả thẩm định Stop Loss của Risk Manager
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SlValidationResult {
+    /// Hợp lệ: Thỏa mãn cả trần ROE chiến thuật lẫn vùng an toàn thanh lý sàn
+    Acceptable,
+    /// Bị VETO do vượt trần ROE chiến thuật (playbook_max_sl_roe hoặc GLOBAL_HARD_MAX_ROE)
+    StructuralRiskVeto {
+        suggested_roe: f64,
+        max_roe: f64,
+    },
+    /// Bị VETO do vi phạm khoảng cách thanh lý sàn (quá sát hoặc vượt qua P_liq)
+    LiquidationRiskVeto {
+        suggested_dist_pct: f64,
+        safe_liq_dist_pct: f64,
+        mmr: f64,
+    },
+    /// Giá hoặc Stop Loss không hợp lệ (NaN hoặc <= 0)
+    InvalidPrice,
+}
+
 impl RiskManager {
-    /// Kiểm tra xem mức Stop Loss cấu trúc đề xuất (suggested_sl) có nằm trong giới hạn rủi ro an toàn không.
-    /// Nếu khoảng cách từ Entry đến SL vượt quá trần ROE cho phép, trả về false để Arbiter VETO proposal (Sniper Entry Guard).
-    pub fn is_structural_sl_acceptable(price: f64, sl: f64, max_roe_cap: f64, leverage: f64) -> bool {
-        if price <= 0.0 || sl <= 0.0 || price.is_nan() || sl.is_nan() {
-            return false;
-        }
+    /// 🛡️ Tính toán khoảng cách Stop Loss tối đa cho phép (% giá) đảm bảo đồng thời 2 lớp phòng vệ:
+    /// 1. Trần ROE chiến thuật (playbook_max_sl_roe.min(GLOBAL_HARD_MAX_ROE)).
+    /// 2. Chốt chặn khoảng cách thanh lý sàn Binance (Isolated Margin MMR & Fee Guard).
+    ///
+    /// Trả về Some(effective_cap_pct) nếu thỏa mãn vùng an toàn,
+    /// hoặc None nếu đòn bẩy quá cao dẫn đến khoảng cách thanh lý âm hoặc hẹp hơn min_initial_sl_pct.
+    pub fn calculate_safe_sl_distance(
+        leverage: f64,
+        max_roe_cap: f64,
+        mmr: f64,
+        taker_fee_rate: f64,
+        buffer_ratio: f64,
+        min_initial_sl_pct: f64,
+    ) -> Option<f64> {
         let lev = if leverage <= 0.0 { 1.0 } else { leverage };
-        let dist_pct = (price - sl).abs() / price;
-        let roe = dist_pct * lev;
-        let effective_cap = if max_roe_cap <= 0.0 {
+        let roe_cap = if max_roe_cap <= 0.0 {
             GLOBAL_HARD_MAX_ROE
         } else {
             max_roe_cap.min(GLOBAL_HARD_MAX_ROE)
         };
-        roe <= effective_cap
+        let cap_price_pct = roe_cap / lev;
+
+        let effective_mmr = if mmr <= 0.0 { 0.01 } else { mmr };
+        let fee = if taker_fee_rate < 0.0 { 0.0004 } else { taker_fee_rate };
+        let buf_ratio = if buffer_ratio <= 0.0 { 0.15 } else { buffer_ratio.min(0.50) };
+        let min_pct = if min_initial_sl_pct <= 0.0 { 0.0015 } else { min_initial_sl_pct };
+
+        // Khoảng cách thanh lý thô sau khi khấu trừ 2 chiều phí Taker
+        let raw_liq_dist = (1.0 / lev) - effective_mmr - (2.0 * fee);
+        if raw_liq_dist <= 0.0 {
+            // Đòn bẩy quá cao so với MMR: Vừa mở lệnh là chạm hoặc vượt giá thanh lý ngay!
+            return None;
+        }
+
+        // Khoảng cách an toàn sau khi giữ lại vùng đệm sinh tử buffer_ratio (15%)
+        let safe_liq_dist = raw_liq_dist * (1.0 - buf_ratio);
+        if safe_liq_dist < min_pct {
+            // Không gian thanh lý còn lại quá hẹp, không đủ chỗ cho mức SL tối thiểu chống spread
+            return None;
+        }
+
+        // Trần hiệu dụng là giá trị nhỏ nhất giữa Trần ROE và Vùng an toàn thanh lý
+        let effective_cap = cap_price_pct.min(safe_liq_dist);
+        if effective_cap < min_pct {
+            return None;
+        }
+
+        Some(effective_cap)
+    }
+
+    /// Thẩm định Stop Loss đề xuất từ Scanner với nhận thức đầy đủ về MMR và Giá Thanh Lý.
+    pub fn validate_structural_sl(
+        price: f64,
+        sl: f64,
+        max_roe_cap: f64,
+        leverage: f64,
+        mmr: f64,
+        taker_fee_rate: f64,
+        buffer_ratio: f64,
+        min_initial_sl_pct: f64,
+    ) -> SlValidationResult {
+        if price <= 0.0 || sl <= 0.0 || price.is_nan() || sl.is_nan() {
+            return SlValidationResult::InvalidPrice;
+        }
+        let lev = if leverage <= 0.0 { 1.0 } else { leverage };
+        let dist_pct = (price - sl).abs() / price;
+
+        let effective_mmr = if mmr <= 0.0 { 0.01 } else { mmr };
+        let fee = if taker_fee_rate < 0.0 { 0.0004 } else { taker_fee_rate };
+        let buf_ratio = if buffer_ratio <= 0.0 { 0.15 } else { buffer_ratio.min(0.50) };
+        let min_pct = if min_initial_sl_pct <= 0.0 { 0.0015 } else { min_initial_sl_pct };
+
+        let raw_liq_dist = (1.0 / lev) - effective_mmr - (2.0 * fee);
+        if raw_liq_dist <= 0.0 {
+            return SlValidationResult::LiquidationRiskVeto {
+                suggested_dist_pct: dist_pct,
+                safe_liq_dist_pct: 0.0,
+                mmr: effective_mmr,
+            };
+        }
+
+        let safe_liq_dist = raw_liq_dist * (1.0 - buf_ratio);
+        if safe_liq_dist < min_pct || dist_pct > safe_liq_dist {
+            return SlValidationResult::LiquidationRiskVeto {
+                suggested_dist_pct: dist_pct,
+                safe_liq_dist_pct: safe_liq_dist.max(0.0),
+                mmr: effective_mmr,
+            };
+        }
+
+        let roe = dist_pct * lev;
+        let effective_cap_roe = if max_roe_cap <= 0.0 {
+            GLOBAL_HARD_MAX_ROE
+        } else {
+            max_roe_cap.min(GLOBAL_HARD_MAX_ROE)
+        };
+
+        if roe > effective_cap_roe {
+            return SlValidationResult::StructuralRiskVeto {
+                suggested_roe: roe,
+                max_roe: effective_cap_roe,
+            };
+        }
+
+        SlValidationResult::Acceptable
+    }
+
+    /// Kiểm tra xem mức Stop Loss cấu trúc đề xuất (suggested_sl) có nằm trong giới hạn an toàn không.
+    pub fn is_structural_sl_acceptable(
+        price: f64,
+        sl: f64,
+        max_roe_cap: f64,
+        leverage: f64,
+        mmr: f64,
+        taker_fee_rate: f64,
+        buffer_ratio: f64,
+        min_initial_sl_pct: f64,
+    ) -> bool {
+        Self::validate_structural_sl(
+            price, sl, max_roe_cap, leverage, mmr, taker_fee_rate, buffer_ratio, min_initial_sl_pct,
+        ) == SlValidationResult::Acceptable
     }
 
     /// Tính toán Size dựa trên Fixed Percentage (Fraction của Ký quỹ) nhưng đảm bảo Min Order Size.
@@ -52,7 +178,7 @@ impl RiskManager {
         final_fraction
     }
 
-    /// Hàm khống chế trần SL ban đầu theo % ROE tối đa cho phép và đòn bẩy động (FLAW-TSL.8)
+    /// Hàm khống chế trần SL ban đầu theo % ROE tối đa cho phép và khoảng cách thanh lý an toàn (FLAW-TSL.8 & TODO-RSK-01)
     /// Min Distance Floor Guard bảo vệ chống kẹp ngược khi đòn bẩy cao.
     pub fn clamp_sl_price(
         price: f64,
@@ -61,28 +187,36 @@ impl RiskManager {
         max_sl_roe_cap: f64,
         min_initial_sl_pct: f64,
         leverage: f64,
+        mmr: f64,
+        taker_fee_rate: f64,
+        buffer_ratio: f64,
     ) -> f64 {
         let lev = if leverage <= 0.0 { 1.0 } else { leverage };
-        // Ngưỡng ROE tối đa: Kẹp cứng bất biến không vượt quá GLOBAL_HARD_MAX_ROE (15% ROE)
-        let roe_cap = if max_sl_roe_cap <= 0.0 {
-            GLOBAL_HARD_MAX_ROE
-        } else {
-            max_sl_roe_cap.min(GLOBAL_HARD_MAX_ROE)
-        };
         let min_pct = if min_initial_sl_pct <= 0.0 { 0.0015 } else { min_initial_sl_pct };
 
-        // 1. Trần khoảng cách giá tối đa theo đòn bẩy thực tế (RÀNG BUỘC CỨNG BẤT KHẢ XÂM PHẠM)
-        let cap_price_pct = roe_cap / lev;
+        // 1. Trần khoảng cách giá tối đa kết hợp giữa ROE cap và Liquidation Guard
+        let effective_cap = match Self::calculate_safe_sl_distance(
+            lev,
+            max_sl_roe_cap,
+            mmr,
+            taker_fee_rate,
+            buffer_ratio,
+            min_pct,
+        ) {
+            Some(cap) => cap,
+            None => {
+                // Fallback an toàn nếu đòn bẩy quá cao không đủ khoảng trống
+                (max_sl_roe_cap.min(GLOBAL_HARD_MAX_ROE) / lev).min(min_pct)
+            }
+        };
 
         // 2. Sàn khoảng cách tối thiểu chống quét spread/noise (PHẢI LUÔN NẰM DƯỚI TRẦN)
-        // Áp dụng tỷ lệ an toàn 50% trần: Sàn tối đa chỉ được chiếm 50% khoảng cách của Trần ROE.
-        // Đảm bảo không bao giờ có nghịch lý Sàn >= Trần, mở ra khoảng [effective_min_pct, cap_price_pct] linh hoạt.
-        let effective_min_pct = min_pct.min(cap_price_pct * 0.50);
-        let effective_cap = cap_price_pct;
+        // Áp dụng tỷ lệ an toàn 50% trần: Sàn tối đa chỉ được chiếm 50% khoảng cách của Trần.
+        let effective_min_pct = min_pct.min(effective_cap * 0.50);
 
         if is_long {
             let max_allowed_sl = price * (1.0 - effective_min_pct); // SL gần nhất (chống cắn spread)
-            let min_allowed_sl = price * (1.0 - effective_cap);     // SL xa nhất (khống chế lỗ tối đa)
+            let min_allowed_sl = price * (1.0 - effective_cap);     // SL xa nhất (khống chế lỗ tối đa & né thanh lý)
             sl_price.min(max_allowed_sl).max(min_allowed_sl)
         } else {
             let min_allowed_sl = price * (1.0 + effective_min_pct); // SL gần nhất
@@ -91,7 +225,7 @@ impl RiskManager {
         }
     }
 
-    /// Tính giá cắt lỗ khởi tạo với Hard Max Cap ROE để khống chế rủi ro tối đa
+    /// Tính giá cắt lỗ khởi tạo với Hard Max Cap ROE và Liquidation Guard
     pub fn get_initial_sl(
         tick: &TickContext,
         sensors: &HeliosSensors,
@@ -100,6 +234,9 @@ impl RiskManager {
         max_sl_roe_cap: f64,
         min_initial_sl_pct: f64,
         leverage: f64,
+        mmr: f64,
+        taker_fee_rate: f64,
+        buffer_ratio: f64,
     ) -> f64 {
         let i = tick.i;
         let current_atr = sensors.atr_sl[i];
@@ -110,7 +247,9 @@ impl RiskManager {
             price + (current_atr * multiplier)
         };
 
-        Self::clamp_sl_price(price, raw_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage)
+        Self::clamp_sl_price(
+            price, raw_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee_rate, buffer_ratio,
+        )
     }
 
     /// Quản lý Trailing Stop cho tất cả các lệnh đang mở (Adaptive Loose Trailing & Stagnant Exit)
@@ -588,16 +727,23 @@ mod tests {
         let max_sl_roe_cap = 0.15; // 15% ROE
         let min_initial_sl_pct = 0.002; // 0.2% giá
         let leverage = 20.0;
+        let mmr = 0.010;
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
 
         // 1. SL quá xa (Trần khoảng cách giá = 15% ROE / 20x = 0.75% giá = 18.75 giá)
         let too_far_sl = 2300.0; // cách 200 giá = 8%
-        let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
+        let clamped = RiskManager::clamp_sl_price(
+            price, too_far_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         let expected_min_sl = price * (1.0 - 0.0075); // 2481.25
         assert_eq!(clamped, expected_min_sl, "SL quá xa phải bị kẹp bởi trần ROE Cap 15% trên 20x (0.75% giá)");
 
         // 2. SL quá gần (< 0.2% min_pct = 5 giá)
         let too_close_sl = 2499.0; // cách 1 giá = 0.04%
-        let clamped_close = RiskManager::clamp_sl_price(price, too_close_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
+        let clamped_close = RiskManager::clamp_sl_price(
+            price, too_close_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         let expected_max_sl = price * (1.0 - min_initial_sl_pct); // 2495.0
         assert_eq!(clamped_close, expected_max_sl, "SL quá gần phải bị kẹp bởi sàn min_pct");
 
@@ -605,7 +751,9 @@ mod tests {
         // Trần ROE 4% (0.08% giá) luôn được bảo toàn tuyệt đối, Sàn co lại còn 50% trần (0.04% giá = 1 giá)
         let nuke_leverage = 50.0;
         let small_roe_cap = 0.04; // 4% ROE / 50x = 0.08% giá (2.0 giá)
-        let clamped_nuke = RiskManager::clamp_sl_price(price, too_far_sl, is_long, small_roe_cap, min_initial_sl_pct, nuke_leverage);
+        let clamped_nuke = RiskManager::clamp_sl_price(
+            price, too_far_sl, is_long, small_roe_cap, min_initial_sl_pct, nuke_leverage, mmr, taker_fee, buffer_ratio
+        );
         let expected_nuke_sl = price * (1.0 - 0.0008); // 2500 - 2 = 2498.0
         assert_eq!(clamped_nuke, expected_nuke_sl, "Universal Floor Guard bảo vệ trần ROE 4% (2498.0) tuyệt đối không bị đè bẹp thành 2495.0");
     }
@@ -778,13 +926,20 @@ mod tests {
         let max_sl_roe_cap = 0.15; // 15% ROE / 1x = 15% giá -> SL xa nhất là 85.0
         let min_initial_sl_pct = 0.005; // 0.5% giá -> SL gần nhất là 99.5
         let leverage = 1.0;
+        let mmr = 0.010;
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
 
         let too_far_sl = 50.0;
-        let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
+        let clamped = RiskManager::clamp_sl_price(
+            price, too_far_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         assert_eq!(clamped, 85.0, "Với đòn bẩy Spot 1x, ROE Cap 15% tương đương 15% khoảng cách giá");
 
         let normal_sl = 90.0; // cách 10% giá
-        let clamped_normal = RiskManager::clamp_sl_price(price, normal_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
+        let clamped_normal = RiskManager::clamp_sl_price(
+            price, normal_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         assert_eq!(clamped_normal, 90.0, "SL hợp lệ phải được giữ nguyên");
     }
 
@@ -795,13 +950,20 @@ mod tests {
         let max_sl_roe_cap = 0.15; // 15% ROE / 20x = 0.75% giá = 15.0 giá -> SL xa nhất Short là 2015.0
         let min_initial_sl_pct = 0.002; // 0.2% giá = 4.0 giá -> SL gần nhất Short là 2004.0
         let leverage = 20.0;
+        let mmr = 0.010;
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
 
         let too_far_short_sl = 2100.0; // cách 100 giá
-        let clamped = RiskManager::clamp_sl_price(price, too_far_short_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
+        let clamped = RiskManager::clamp_sl_price(
+            price, too_far_short_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         assert!((clamped - 2015.0).abs() < 1e-6, "Short SL quá xa phải bị kẹp bởi trần 15% ROE trên 20x (2015.0)");
 
         let too_close_short_sl = 2001.0; // cách 1 giá < 4 giá sàn
-        let clamped_close = RiskManager::clamp_sl_price(price, too_close_short_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage);
+        let clamped_close = RiskManager::clamp_sl_price(
+            price, too_close_short_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         assert_eq!(clamped_close, 2004.0, "Short SL quá gần phải bị đẩy ra sàn an toàn 2004.0");
     }
 
@@ -812,9 +974,14 @@ mod tests {
         let small_roe_cap = 0.04; // 4% ROE / 100x = 0.04% giá (20 giá)
         let min_initial_sl_pct = 0.0015; // 0.15% giá sàn (75 giá)
         let leverage = 100.0;
+        let mmr = 0.004; // BTC MMR 0.4%
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
 
         let too_far_sl = 40000.0;
-        let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, small_roe_cap, min_initial_sl_pct, leverage);
+        let clamped = RiskManager::clamp_sl_price(
+            price, too_far_sl, is_long, small_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         let expected_sl = price * (1.0 - 0.0004); // 50000 * 0.9996 = 49980.0
         assert_eq!(clamped, expected_sl, "Đòn bẩy 100x cực đoan: Trần ROE 4% phải được bảo toàn tuyệt đối không bị đè bẹp");
     }
@@ -826,9 +993,14 @@ mod tests {
         let range_roe_cap = 0.15; // 15% ROE trần cho Range
         let min_initial_sl_pct = 0.0355; // GA Optimizer chọn sàn spread 3.55% giá
         let leverage = 20.0;
+        let mmr = 0.010;
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
 
         let raw_sl = 2360.49; // SL cách tới 3.55% giá (71% ROE)
-        let clamped = RiskManager::clamp_sl_price(price, raw_sl, is_long, range_roe_cap, min_initial_sl_pct, leverage);
+        let clamped = RiskManager::clamp_sl_price(
+            price, raw_sl, is_long, range_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         
         let expected_sl = price * (1.0 - 0.0075);
         assert!((clamped - expected_sl).abs() < 1e-4, "SL bắt buộc phải bị chặn tại trần 15% ROE, không được dạt ra xa");
@@ -844,9 +1016,14 @@ mod tests {
         let crazy_roe_cap = 0.50; // Cố tình truyền vào 50% ROE
         let min_initial_sl_pct = 0.002;
         let leverage = 20.0;
+        let mmr = 0.010;
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
 
         let too_far_sl = 1800.0;
-        let clamped = RiskManager::clamp_sl_price(price, too_far_sl, is_long, crazy_roe_cap, min_initial_sl_pct, leverage);
+        let clamped = RiskManager::clamp_sl_price(
+            price, too_far_sl, is_long, crazy_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee, buffer_ratio
+        );
         
         // 15% ROE / 20x = 0.75% giá = 15.0 giá -> SL xa nhất là 1985.0
         assert_eq!(clamped, 1985.0, "Dù truyền vào 50% ROE thì GLOBAL_HARD_MAX_ROE vẫn kẹp cứng tại 15% ROE (1985.0)!");
@@ -857,22 +1034,36 @@ mod tests {
         let price = 2000.0;
         let leverage = 20.0;
         let max_roe = 0.15;
+        let mmr = 0.010;
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
+        let min_initial_sl_pct = 0.0015;
 
         // 1. SL cách 10.0 giá = 0.5% giá = 10% ROE <= 15% ROE -> Chấp nhận
         let safe_sl = 1990.0;
-        assert!(RiskManager::is_structural_sl_acceptable(price, safe_sl, max_roe, leverage));
+        assert!(RiskManager::is_structural_sl_acceptable(
+            price, safe_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+        ));
 
         // 2. SL cách đúng 15.0 giá = 0.75% giá = 15% ROE -> Chấp nhận
         let exact_sl = 1985.0;
-        assert!(RiskManager::is_structural_sl_acceptable(price, exact_sl, max_roe, leverage));
+        assert!(RiskManager::is_structural_sl_acceptable(
+            price, exact_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+        ));
 
         // 3. SL cách 20.0 giá = 1.0% giá = 20% ROE > 15% ROE -> Từ chối (VETO)
         let deep_sl = 1980.0;
-        assert!(!RiskManager::is_structural_sl_acceptable(price, deep_sl, max_roe, leverage));
+        assert!(!RiskManager::is_structural_sl_acceptable(
+            price, deep_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+        ));
 
         // 4. Edge cases NaN / 0
-        assert!(!RiskManager::is_structural_sl_acceptable(0.0, safe_sl, max_roe, leverage));
-        assert!(!RiskManager::is_structural_sl_acceptable(price, f64::NAN, max_roe, leverage));
+        assert!(!RiskManager::is_structural_sl_acceptable(
+            0.0, safe_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+        ));
+        assert!(!RiskManager::is_structural_sl_acceptable(
+            price, f64::NAN, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+        ));
     }
 
     #[test]
@@ -1071,5 +1262,125 @@ mod tests {
         let min_be = entry_price * (1.0 + fee_buffer_pct); // 2000 * 1.0013 = 2002.6
         let should_emergency_exit = is_be_triggered && (current_close <= min_be);
         assert!(should_emergency_exit, "Phải lập tức kích hoạt Emergency Exit khi giá sập thủng min_be!");
+    }
+
+    // =========================================================================
+    // 🛡️ BỘ TEST CASES KIỂM CHỨNG LIQUIDATION & MMR GUARD (TODO-RSK-01)
+    // =========================================================================
+
+    #[test]
+    fn test_liquidation_guard_kamikaze_rejection_at_100x() {
+        let entry_price = 2000.0;
+        let leverage = 100.0;
+        let mmr = 0.010; // 1.0% MMR
+        let taker_fee = 0.0004; // 0.04% fee
+        let buffer_ratio = 0.15; // 15% buffer
+        let min_initial_sl_pct = 0.0015; // 0.15% min SL
+        let max_roe_cap = 0.15; // 15% ROE
+
+        // Tại 100x: 1/100 = 1.0%. MMR = 1.0%, 2 * fee = 0.08%
+        // raw_liq = 1.0% - 1.0% - 0.08% = -0.08% <= 0!
+        let safe_cap = RiskManager::calculate_safe_sl_distance(
+            leverage, max_roe_cap, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert!(safe_cap.is_none(), "Tại 100x với MMR 1.0%, khoảng cách thanh lý âm -> Phải trả về None!");
+
+        // Kiểm tra thẩm định SL đề xuất (ví dụ SL cách 0.10% = 10% ROE)
+        let suggested_sl = entry_price * (1.0 - 0.0010);
+        let res = RiskManager::validate_structural_sl(
+            entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        match res {
+            SlValidationResult::LiquidationRiskVeto { suggested_dist_pct, safe_liq_dist_pct, mmr: res_mmr } => {
+                assert!((suggested_dist_pct - 0.0010).abs() < 1e-6);
+                assert_eq!(safe_liq_dist_pct, 0.0);
+                assert!((res_mmr - 0.010).abs() < 1e-6);
+            }
+            _ => panic!("Phải trả về LiquidationRiskVeto cho kịch bản 100x Kamikaze!"),
+        }
+    }
+
+    #[test]
+    fn test_liquidation_guard_safe_execution_at_20x() {
+        let entry_price = 2000.0;
+        let leverage = 20.0;
+        let mmr = 0.010; // 1.0% MMR
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
+        let min_initial_sl_pct = 0.0015;
+        let max_roe_cap = 0.15; // 15% ROE = 0.75% giá
+
+        // raw_liq = 5.0% - 1.0% - 0.08% = 3.92%
+        // safe_liq = 3.92% * 0.85 = 3.332%
+        // effective_cap = min(0.75%, 3.332%) = 0.75%
+        let safe_cap = RiskManager::calculate_safe_sl_distance(
+            leverage, max_roe_cap, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        ).expect("20x an toàn phải tính được safe_cap");
+        assert!((safe_cap - 0.0075).abs() < 1e-5, "Trần an toàn tại 20x phải là 0.75% giá (15% ROE)");
+
+        // SL đề xuất 0.50% giá (10% ROE) -> Acceptable
+        let suggested_sl = entry_price * (1.0 - 0.0050);
+        let res = RiskManager::validate_structural_sl(
+            entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert_eq!(res, SlValidationResult::Acceptable, "SL 10% ROE tại 20x phải được chấp thuận!");
+
+        // SL đề xuất 0.90% giá (18% ROE) -> StructuralRiskVeto (Vượt 15% ROE)
+        let suggested_sl_wide = entry_price * (1.0 - 0.0090);
+        let res_wide = RiskManager::validate_structural_sl(
+            entry_price, suggested_sl_wide, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        match res_wide {
+            SlValidationResult::StructuralRiskVeto { suggested_roe, max_roe } => {
+                assert!((suggested_roe - 0.18).abs() < 1e-4);
+                assert!((max_roe - 0.15).abs() < 1e-4);
+            }
+            _ => panic!("SL 18% ROE phải bị StructuralRiskVeto!"),
+        }
+    }
+
+    #[test]
+    fn test_liquidation_guard_veto_high_mmr_altcoin() {
+        let entry_price = 2000.0;
+        let leverage = 40.0;
+        let mmr = 0.025; // 2.5% MMR (Altcoin rác)
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
+        let min_initial_sl_pct = 0.0015;
+        let max_roe_cap = 0.15;
+
+        // raw_liq = 2.5% - 2.5% - 0.08% = -0.08% <= 0!
+        let safe_cap = RiskManager::calculate_safe_sl_distance(
+            leverage, max_roe_cap, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert!(safe_cap.is_none(), "Tại 40x với Altcoin MMR 2.5%, raw_liq <= 0 -> Phải trả về None!");
+
+        let suggested_sl = entry_price * (1.0 - 0.0020);
+        let res = RiskManager::validate_structural_sl(
+            entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        match res {
+            SlValidationResult::LiquidationRiskVeto { .. } => {}
+            _ => panic!("Altcoin MMR 2.5% tại 40x phải bị LiquidationRiskVeto!"),
+        }
+    }
+
+    #[test]
+    fn test_clamp_sl_price_with_liquidation_guard() {
+        let price = 2000.0;
+        let raw_sl = 1950.0; // Khoảng cách 50 giá = 2.5% giá
+        let is_long = true;
+        let max_sl_roe_cap = 0.15;
+        let min_initial_sl_pct = 0.0015;
+        let leverage = 20.0;
+        let mmr = 0.010;
+        let taker_fee_rate = 0.0004;
+        let buffer_ratio = 0.15;
+
+        // Tại 20x: trần tối đa là 0.75% giá (15 giá -> SL xa nhất là 1985.0)
+        let clamped = RiskManager::clamp_sl_price(
+            price, raw_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee_rate, buffer_ratio,
+        );
+        assert!((clamped - 1985.0).abs() < 1e-4, "SL 1950.0 bị kẹp về trần an toàn 1985.0!");
     }
 }

@@ -449,6 +449,7 @@ impl Strategy for HeliosStrategyV3 {
                 };
 
                 let min_initial_sl_pct = self.config.risk_management.stop_management.min_initial_sl_pct;
+                let risk_base = &self.config.risk_management.risk_base;
 
                 let raw_sl = decision.final_sl.unwrap_or_else(|| {
                     RiskManager::get_initial_sl(
@@ -459,14 +460,37 @@ impl Strategy for HeliosStrategyV3 {
                         playbook_max_sl_roe,
                         min_initial_sl_pct,
                         leverage,
+                        risk_base.maintenance_margin_rate,
+                        risk_base.taker_fee_rate,
+                        risk_base.liquidation_buffer_ratio,
                     )
                 });
                 
                 let price = tick.closes()[tick.i];
-                let initial_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, playbook_max_sl_roe, min_initial_sl_pct, leverage);
+                let initial_sl = RiskManager::clamp_sl_price(
+                    price,
+                    raw_sl,
+                    is_long,
+                    playbook_max_sl_roe,
+                    min_initial_sl_pct,
+                    leverage,
+                    risk_base.maintenance_margin_rate,
+                    risk_base.taker_fee_rate,
+                    risk_base.liquidation_buffer_ratio,
+                );
                 
                 // Ghi nhận kẹp SL vào Sổ cái nếu có
-                let hard_cap_sl = RiskManager::clamp_sl_price(price, raw_sl, is_long, 0.15, min_initial_sl_pct, leverage);
+                let hard_cap_sl = RiskManager::clamp_sl_price(
+                    price,
+                    raw_sl,
+                    is_long,
+                    0.15,
+                    min_initial_sl_pct,
+                    leverage,
+                    risk_base.maintenance_margin_rate,
+                    risk_base.taker_fee_rate,
+                    risk_base.liquidation_buffer_ratio,
+                );
                 let is_hard_clamped = (raw_sl - hard_cap_sl).abs() > 1e-4;
                 let is_playbook_clamped = (raw_sl - initial_sl).abs() > 1e-4;
                 let sl_clamped_note = if is_hard_clamped {
@@ -518,9 +542,11 @@ impl Strategy for HeliosStrategyV3 {
                 ledger.on_auction_decision(&decision);
             }
 
-            // 🛑 QUANT DECISION TELEMETRY: Xuất Thẻ Đỏ VETO nếu có proposal bị Sniper Guard hoặc Gatekeeper VETO
+            // 🛑 QUANT DECISION TELEMETRY: Xuất Thẻ Đỏ VETO nếu có proposal bị Sniper Guard, Liquidation Guard hoặc Gatekeeper VETO
             if self.telemetry_enabled {
-                let has_structural_veto = decision.auction_ledger.iter().any(|c| c.status == AuctionStatus::StructuralRiskVeto);
+                let has_structural_veto = decision.auction_ledger.iter().any(|c| {
+                    c.status == AuctionStatus::StructuralRiskVeto || c.status == AuctionStatus::LiquidationRiskVeto
+                });
                 let has_candidates = decision.auction_ledger.iter().any(|c| c.status != AuctionStatus::NotTriggered);
                 if has_structural_veto || (decision.gate_veto.is_some() && has_candidates) {
                     let price = tick.closes()[tick.i];
