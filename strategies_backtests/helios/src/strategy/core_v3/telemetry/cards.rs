@@ -87,8 +87,9 @@ impl DecisionCardFormatter {
         let price_z = sensors.z_score.get(i).copied().unwrap_or(0.0);
         let vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
         let mfi = sensors.mfi.get(i).copied().unwrap_or(0.0);
-        let natr = sensors.natr.get(i).copied().unwrap_or(0.0);
+        let macro_natr = sensors.natr.get(i).copied().unwrap_or(0.0);
         let atr_sl = sensors.atr_sl.get(i).copied().unwrap_or(0.0);
+        let micro_natr = if price > 0.0 { (atr_sl / price) * 100.0 } else { 0.0 };
 
         // Matrix snapshot
         let kama_slope_atr = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
@@ -143,10 +144,16 @@ impl DecisionCardFormatter {
 
         lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
         lines.push("║ 📊 SENSORS SNAPSHOT:                                                                                  ║".to_string());
-        lines.push(format!(
-            "║   Price: {:.2} | Price_Z: {:+.2} | Vol_Z: {:+.2} | MFI: {:.1} | CLV: {:+.2} | NATR: {:.2}% | ATR: {:.4}     ║",
-            price, price_z, vol_z, mfi, clv, natr, atr_sl
-        ));
+        let sensor_l1 = format!(
+            "Price: {:.2} | Price_Z: {:+.2} | Vol_Z: {:+.2} | MFI: {:.1} | CLV: {:+.2}",
+            price, price_z, vol_z, mfi, clv
+        );
+        let sensor_l2 = format!(
+            "NATR_Micro (Flatline): {:.2}% | NATR_Macro (Chaos): {:.2}% | ATR_SL: {:.4}",
+            micro_natr, macro_natr, atr_sl
+        );
+        lines.push(format!("║   {:<99} ║", sensor_l1));
+        lines.push(format!("║   {:<99} ║", sensor_l2));
         lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
         lines.push("║ 🧭 MATRIX STATE:                                                                                      ║".to_string());
         lines.push(format!(
@@ -213,8 +220,9 @@ impl DecisionCardFormatter {
         let price_z = sensors.z_score.get(i).copied().unwrap_or(0.0);
         let vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
         let mfi = sensors.mfi.get(i).copied().unwrap_or(0.0);
-        let natr = sensors.natr.get(i).copied().unwrap_or(0.0);
+        let macro_natr = sensors.natr.get(i).copied().unwrap_or(0.0);
         let atr_sl = sensors.atr_sl.get(i).copied().unwrap_or(0.0);
+        let micro_natr = if price > 0.0 { (atr_sl / price) * 100.0 } else { 0.0 };
 
         // Matrix snapshot
         let kama_slope_atr = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
@@ -232,10 +240,11 @@ impl DecisionCardFormatter {
         ));
 
         if let Some(gate_veto) = decision.gate_veto {
-            lines.push(format!(
-                "║ 🛑 GATEKEEPER VETO: {:<20} | Chaos: {:.3} | NATR: {:.2}%                            ║",
-                gate_veto.as_str(), decision.chaos_val, natr
-            ));
+            let veto_info = format!(
+                "GATEKEEPER VETO: {:<18} | Chaos: {:.3} | NATR_Mic: {:.2}% | NATR_Mac: {:.2}%",
+                gate_veto.as_str(), decision.chaos_val, micro_natr, macro_natr
+            );
+            lines.push(format!("║ 🛑 {:<97} ║", veto_info));
         }
 
         lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
@@ -267,10 +276,16 @@ impl DecisionCardFormatter {
 
         lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
         lines.push("║ 📊 SENSORS SNAPSHOT:                                                                                  ║".to_string());
-        lines.push(format!(
-            "║   Price: {:.2} | Price_Z: {:+.2} | Vol_Z: {:+.2} | MFI: {:.1} | NATR: {:.2}% | ATR: {:.4} | Lev: {:.0}x       ║",
-            price, price_z, vol_z, mfi, natr, atr_sl, leverage
-        ));
+        let sensor_l1 = format!(
+            "Price: {:.2} | Price_Z: {:+.2} | Vol_Z: {:+.2} | MFI: {:.1} | Lev: {:.0}x",
+            price, price_z, vol_z, mfi, leverage
+        );
+        let sensor_l2 = format!(
+            "NATR_Micro (Flatline): {:.2}% | NATR_Macro (Chaos): {:.2}% | ATR_SL: {:.4}",
+            micro_natr, macro_natr, atr_sl
+        );
+        lines.push(format!("║   {:<99} ║", sensor_l1));
+        lines.push(format!("║   {:<99} ║", sensor_l2));
         lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
         lines.push("║ 🧭 MATRIX STATE:                                                                                      ║".to_string());
         lines.push(format!(

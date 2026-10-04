@@ -29,14 +29,20 @@ Tài liệu này quản lý các hạng mục công việc, kiểm tra logic và
 
 ---
 
-- [ ] **`TODO-SEN-03`**: **Chuẩn Hóa Đơn Vị & Tính Nhất Quán Của Cặp Chỉ Báo Biến Động ATR vs NATR**
-  - *Mục tiêu:* Khắc phục độ lệch 2.2 lần giữa `NATR` và `ATR_SL` do GA ghép 2 khung thời gian khác nhau, đảm bảo các phép chuẩn hóa phi thứ nguyên và bộ lọc Gatekeeper có sự nhất quán về quy mô giá trị.
-  - *Tham chiếu:* [Mục 1: Giải mã độ lệch NATR 0.89% vs ATR/Price 0.41%](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/01_data_lineage_verification.md#1-giải-mã-độ-lệch-natr-089-vs-atrprice-041-lệch-22-lần)
-  - *Nhiệm vụ:*
-    - Rà soát lại việc sử dụng NATR trong Gatekeeper (`RegimeGatekeeper`) và ATR trong tính khoảng cách SL/TP.
-    - Đảm bảo trong cấu hình hoặc tài liệu ghi rõ mục đích của từng chỉ báo: NATR đo biến động tương đối vĩ mô (% giá), ATR đo khoảng cách tuyệt đối vi mô ($) cho trailing stop.
-  - *Test cases cần có:*
-    - `test_natr_and_atr_semantic_consistency`: Kiểm tra tính nhất quán toán học khi chuyển đổi giữa % NATR và khoảng cách ATR trên cùng nến.
+- [x] **`TODO-SEN-03`**: **Chuẩn Hóa Đơn Vị & Tính Nhất Quán Của Cặp Chỉ Báo Biến Động ATR vs NATR**
+  - *Mục tiêu:* Khắc phục độ lệch 2.2 lần giữa `NATR` và `ATR_SL` do GA ghép 2 khung thời gian khác nhau, đảm bảo các phép chuẩn hóa phi thứ nguyên và bộ lọc Gatekeeper có sự nhất quán về quy mô giá trị. Chấm dứt hiện tượng Cầu Dao Flatline Guard bị tê liệt khi so sánh ngưỡng vi mô ($0.12\%$) với biến động vĩ mô ($1\text{h}/4\text{h}$ luôn $> 1.0\%$).
+  - *Tham chiếu:* [Mục 1: Giải mã độ lệch NATR 0.89% vs ATR/Price 0.41%](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/01_data_lineage_verification.md#1-giải-mã-độ-lệch-natr-089-vs-atrprice-041-lệch-22-lần) & [Blueprint Phương Án A Phí Sàn Tương Lai](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/03_dynamic_exchange_fee_context_blueprint.md)
+  - *Nhiệm vụ Đã Hoàn Thành:*
+    - Khóa `NAtrParams.timeframe` trong miền vĩ mô `#[dna(subset = "15m, 1h, 4h")]` (loại bỏ $5\text{m}$) để `s.natr` phản ánh trung thực bão biến động vĩ mô phục vụ tính toán `chaos_index`.
+    - Tách dứt điểm logic Flatline Guard trong `gatekeeper.rs`: Tính toán biến động vi mô thực tế `micro_natr_ratio = (current_atr_sl / current_price).max(0.0)`.
+    - Thiết lập **Sàn Chi Phí Sinh Tồn (Physical Cost Floor)** $= 2 \times \text{taker\_fee\_rate} + \text{slippage\_allowance\_pct}$ (tận dụng 2 trường Non-DNA có sẵn trong `RiskBaseParams`) kết hợp với **DNA Net Alpha** (`min_natr_threshold`).
+    - Cập nhật Gatekeeper VETO: Nếu `micro_natr_ratio < (roundtrip_cost + min_natr_threshold)` $\to$ Kích hoạt `GateVetoReason::VolatilityFlatline`.
+    - Cập nhật Telemetry Cards: Phân tách rõ `NATR_Micro (Flatline)` và `NATR_Macro (Chaos)` để tránh gây hiểu nhầm trong log.
+    - Lập tài liệu kiến trúc bảo lưu Phương án A (Engine-injected fee qua `InitContext`/`TickContext` + WebSocket sàn) vào `03_dynamic_exchange_fee_context_blueprint.md` để triển khai sau khi hoàn tất Paper Trade.
+  - *Test cases đã có & PASS:*
+    - `test_gatekeeper_volatility_flatline_veto`: Kiểm tra Flatline Guard kích hoạt VETO khi `micro_natr < roundtrip_cost + min_natr_threshold`.
+    - `test_gatekeeper_immune_to_macro_natr_pollution`: Kiểm tra Gatekeeper Flatline Guard miễn nhiễm hoàn toàn với `s.natr` vĩ mô.
+    - `test_micro_sensors_timeframe_subset`: Kiểm tra `NAtrParams` chỉ nằm trong tập `["15m", "1h", "4h"]`.
 
 ---
 

@@ -13,7 +13,7 @@ Toàn bộ phát hiện, báo cáo phân tích chuyên sâu và danh mục kiể
 
 | Phân hệ / Thư mục | Báo cáo Chuyên sâu (Deep Dive Report) | Danh mục Công việc & Test Cases (TODO) | Số Tasks |
 | :--- | :--- | :--- | :---: |
-| **01. Cảm biến & Dữ liệu** | [📄 `01_sensors/01_data_lineage_verification.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/01_data_lineage_verification.md) | [📋 `01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | **6** |
+| **01. Cảm biến & Dữ liệu** | [📄 Data Lineage](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/01_data_lineage_verification.md) \| [📄 Micro vs Macro](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/02_micro_vs_macro_separation.md) \| [📄 Dynamic Fee Blueprint](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/03_dynamic_exchange_fee_context_blueprint.md) | [📋 `01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | **6** |
 | **02. Bốn Scanners Chủ Lực** | [📄 MOM](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/02_scanners/01_momentum_ignition_deep_dive.md) \| [📄 REV](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/02_scanners/02_reversal_deep_dive.md) \| [📄 TPB](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/02_scanners/03_trend_pb_deep_dive.md) \| [📄 ABS](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/02_scanners/04_absorption_deep_dive.md) | [📋 `02_scanners/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/02_scanners/TODO.md) | **4** |
 | **02b. Độ Phủ Thị Trường** | [📄 `scanner_coverage_audit.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/scanner_coverage_audit.md) | [📋 `TODO_scanner_coverage.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/TODO_scanner_coverage.md) | **5** |
 | **03. Trọng Tài & Cầu Dao** | [📄 `03_arbiter/01_arbiter_deep_dive.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/03_arbiter/01_arbiter_deep_dive.md) | [📋 `03_arbiter/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/03_arbiter/TODO.md) | **4** |
@@ -99,7 +99,7 @@ flowchart LR
 
 1. [x] **`TODO-SEN-01`**: Tách bạch Timeframe của `vol_z_score` độc lập với KAMA Timeframe, khử ô nhiễm MTF 15 nến.
 2. [x] **`TODO-SEN-02`**: Tách bạch Timeframe Bollinger Bands đo SL khỏi khung vĩ mô MTF trong Absorption.
-3. [ ] **`TODO-SEN-03`**: Chuẩn hóa đơn vị và tính nhất quán toán học giữa cặp chỉ báo biến động ATR vs NATR.
+3. [x] **`TODO-SEN-03`**: Chuẩn hóa đơn vị và tính nhất quán toán học giữa cặp chỉ báo biến động ATR vs NATR.
 4. [x] **`TODO-SEN-04`**: Tách bạch Timeframe `price_z_score` độc lập khỏi KAMA vĩ mô, khử đóng băng độ lệch chuẩn 15-60 nến.
 5. [x] **`TODO-SEN-05`**: Khóa dải Timeframe `atr_sl` trong miền vi mô `[1m, 5m]`, chống bẫy kéo giãn SL 25-35% ROE.
 6. [ ] **`TODO-SEN-06`**: Quy hoạch ranh giới 3 cặp phạm trù vi mô vs vĩ mô giữa các cảm biến cốt lõi.
@@ -166,7 +166,7 @@ flowchart LR
 | :--- | :--- | :--- | :---: | :--- | :---: | :---: |
 | `TODO-SEN-01` | Sensors | Tách Timeframe Vol Z-score độc lập khỏi KAMA | **P0** | [`01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | Phase 1 | `[x]` |
 | `TODO-SEN-02` | Sensors | Tách BBands MTF đo SL trong Absorption | **P0** | [`01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | Phase 1 | `[x]` |
-| `TODO-SEN-03` | Sensors | Chuẩn hóa tính nhất quán ATR vs NATR | **P2** | [`01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | Phase 1 | `[ ]` |
+| `TODO-SEN-03` | Sensors | Chuẩn hóa tính nhất quán ATR vs NATR | **P2** | [`01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | Phase 1 | `[x]` |
 | `TODO-SEN-04` | Sensors | Tách Timeframe Price Z-score độc lập khỏi KAMA | **P1** | [`01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | Phase 1 | `[x]` |
 | `TODO-SEN-05` | Sensors | Khóa dải Timeframe ATR_SL trong miền vi mô [1m, 5m] | **P0** | [`01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | Phase 1 | `[x]` |
 | `TODO-SEN-06` | Sensors | Quy hoạch ranh giới 3 cặp vi mô vs vĩ mô cốt lõi | **P2** | [`01_sensors/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/01_sensors/TODO.md) | Phase 1 | `[ ]` |

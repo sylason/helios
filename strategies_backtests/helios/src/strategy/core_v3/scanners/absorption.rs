@@ -157,8 +157,6 @@ impl TacticalScanner for AbsorptionScanner {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_absorption_sl_spring_geometry() {
         // Giả lập nến Spring vi mô 1m:

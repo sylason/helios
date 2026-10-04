@@ -204,6 +204,7 @@ mod tests {
             veto_reason: None,
             current_chaos: 0.15,
             current_natr: 0.20,
+            macro_natr: 0.20,
             is_hysteresis_active: false,
         };
         assert!(ledger.on_gatekeeper_tick(100, &eval_pass).is_none());
@@ -214,6 +215,7 @@ mod tests {
             veto_reason: Some(GateVetoReason::ChaosWhipsaw),
             current_chaos: 0.35,
             current_natr: 0.20,
+            macro_natr: 0.20,
             is_hysteresis_active: false,
         };
         let msg_engaged = ledger.on_gatekeeper_tick(101, &eval_chaos);
