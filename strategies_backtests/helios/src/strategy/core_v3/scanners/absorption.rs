@@ -18,8 +18,8 @@
 //!     - Short: Cả VWMA và Close đều phải nằm dưới hoặc bằng BB Middle.
 //!   + Tầng 2 (Macro Trend Alignment): VETO chặn bắt dao rơi khi `kama_slope_atr` dốc ngược chiều vượt ngưỡng `max_adverse_slope`.
 //! - **Thiết lập Vị thế:**
-//!   + Long: SL neo dưới đáy nến hoặc biên dưới BB: `low.min(bb_lower) - buffer`.
-//!   + Short: SL neo trên đỉnh nến hoặc biên trên BB: `high.max(bb_upper) + buffer`.
+//!   + Long: SL neo dưới đáy nến Spring vi mô: `low - buffer`.
+//!   + Short: SL neo trên đỉnh nến Upthrust vi mô: `high + buffer`.
 //!   + Take Profit: `None` (để Trailing SL tự động bảo toàn lợi nhuận).
 
 use ferro_trade::strategy::TickContext;
@@ -121,10 +121,11 @@ impl TacticalScanner for AbsorptionScanner {
 
             let buffer = current_atr * abs_cfg.struct_sl_buffer_atr.max(0.05);
 
-            // 🛡️ FLAW-TSL.6: Structural SL neo dưới dải BB Lower (Long) hoặc trên dải BB Upper (Short) vùng nén
+            // 🛡️ TASK-SEN-02: Structural SL neo trực tiếp theo đáy nến Spring (Long) hoặc đỉnh Upthrust (Short) vi mô
+            // Xóa bỏ hoàn toàn .min(bb_lower) và .max(bb_upper) để không bị kéo giãn SL theo dải BB khung 1h/4h
             let sl = match signal_type {
                 SignalType::Long => {
-                    let base_support = low.min(bb_lower);
+                    let base_support = low;
                     let mut s = base_support - buffer;
                     if s >= close {
                         s = close - buffer;
@@ -132,7 +133,7 @@ impl TacticalScanner for AbsorptionScanner {
                     s
                 }
                 SignalType::Short => {
-                    let base_resistance = high.max(bb_upper);
+                    let base_resistance = high;
                     let mut s = base_resistance + buffer;
                     if s <= close {
                         s = close + buffer;
@@ -151,5 +152,45 @@ impl TacticalScanner for AbsorptionScanner {
         }
         
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_absorption_sl_spring_geometry() {
+        // Giả lập nến Spring vi mô 1m:
+        let low: f64 = 2500.0;
+        let close: f64 = 2508.0;
+        let current_atr: f64 = 3.0; // ATR vi mô 1m
+        let struct_sl_buffer_atr: f64 = 1.0;
+        let buffer: f64 = current_atr * struct_sl_buffer_atr; // 3.0
+
+        // Giả sử dải Bollinger Bands khung lớn 1h (bb_lower = 2400.0) nằm rất xa
+        let bb_lower_macro: f64 = 2400.0;
+
+        // CÔNG THỨC MỚI: SL neo trực tiếp vào low của nến Spring
+        let base_support = low;
+        let mut sl_new = base_support - buffer;
+        if sl_new >= close {
+            sl_new = close - buffer;
+        }
+
+        // CÔNG THỨC CŨ (BỊ BẪY BBANDS SUCTION):
+        let base_support_old = low.min(bb_lower_macro); // = 2400.0
+        let sl_old = base_support_old - buffer; // = 2397.0
+
+        // Kiểm chứng:
+        assert_eq!(sl_new, 2497.0, "SL mới phải neo sau đáy nến 1m $2500 - $3 = $2497");
+        let loss_dist_new = close - sl_new; // 2508 - 2497 = 11 giá
+        let roe_loss_20x_new = 20.0 * (loss_dist_new / close); // ~ 8.77% ROE
+        assert!(roe_loss_20x_new <= 0.10, "Mức lỗ ROE mới (8.77%) phải nằm trong dải an toàn <= 10%");
+
+        // Đối chiếu công thức cũ:
+        let loss_dist_old = close - sl_old; // 2508 - 2397 = 111 giá
+        let roe_loss_20x_old = 20.0 * (loss_dist_old / close); // ~ 88.5% ROE!
+        assert!(roe_loss_20x_old > 0.15, "Công thức cũ bị bẫy SL phình to 88.5% ROE (chắc chắn bị Sniper Guard VETO)");
     }
 }

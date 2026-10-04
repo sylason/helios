@@ -20,6 +20,12 @@
   - **Fix:** Bỏ `current_pnl > 0.0 &&`, duy trì trạng thái kích hoạt BE khi râu nến đã đạt đỉnh an toàn (Ratchet Memory).
   - **Trạng thái:** ✅ Đã hoàn thành 100% & Pass 22/22 tests trong `risk::tests` (bao gồm `test_be_triggered_on_flash_crash`).
 
+- [x] **TODO-WFE-01: Xóa Bỏ Cửa Sau Dung Thứ OOS Âm (Hard Zero-Tolerance WFE Gate)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:405-420`
+  - **Vấn đề:** `is_tolerant_pass` cho phép OOS Return âm tới -1.2% nếu In-Sample > 80%, đưa cá thể cào lệnh overfit của Run 2 vào thực tế.
+  - **Fix:** Xóa bỏ hoàn toàn `is_tolerant_pass`. Bắt buộc 100%: `val_ret > 0.0%`, `val_trades > 0` và `val_dd <= 15.0%`.
+  - **Trạng thái:** ✅ Đã hoàn thành 100% & Pass 7/7 tests trong `prospector_runner::tests` (bao gồm `test_wfe_gate_hard_zero_tolerance`).
+
 - [ ] **TODO-R2-02: Giải quyết Giant Candle Trap cho Anomaly & Momentum**
   - **File:** `risk.rs:15-28` + `anomaly.rs:75,90` + `momentum_ignition.rs:144,151`
   - **Vấn đề:** Nến breakout to → SL xa Entry → ROE > 15% → `is_structural_sl_acceptable` VETO oan → mất tín hiệu tốt nhất.

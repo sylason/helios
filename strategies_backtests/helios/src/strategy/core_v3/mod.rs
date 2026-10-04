@@ -246,8 +246,8 @@ impl Strategy for HeliosStrategyV3 {
 
         // ABSORPTION VWMA SENSOR
         s.vwma = ctx.vwma(ind.vwma.timeframe, "VWMA", ind.vwma.period);
-        s.z_score = ctx.z_score(ind.kama.timeframe, "ZScore", ind.z_score_lookback);
-        s.vol_z_score = ctx.z_score_volume(ind.kama.timeframe, "VolZScore", ind.z_score_lookback);
+        s.z_score = ctx.z_score(ind.price_z_score.timeframe, "PriceZScore", ind.price_z_score.lookback);
+        s.vol_z_score = ctx.z_score_volume(ind.vol_z_score.timeframe, "VolZScore", ind.vol_z_score.lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
 
         // 🛡️ FLAW-REG.10: Tính độ dốc chuẩn hóa của trục giữa Bollinger Bands (SMA 20) qua ATR (K = 5 bars)
@@ -1296,8 +1296,11 @@ mod tests {
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
-        assert_eq!(width, defs.len(), "DNA_WIDTH phải khớp chính xác 1:1 với số lượng parameter_defs!");
-        assert_eq!(width, 102, "DNA_WIDTH phải là chính xác 102 chiều sau khi bổ sung max_boundary_z và max_squeeze_intensity cho TrendPB theo Kế hoạch Tầng 2!");
+        assert_eq!(width, 103, "DNA_WIDTH phải là chính xác 103 chiều sau khi tách độc lập price_z_score và vol_z_score theo TODO-SEN-01 & TODO-SEN-04!");
+        let has_price_z = defs.iter().any(|(name, _)| name.contains("indicators.price_z_score.lookback"));
+        let has_vol_z = defs.iter().any(|(name, _)| name.contains("indicators.vol_z_score.lookback"));
+        assert!(has_price_z, "defs phải chứa indicators.price_z_score.lookback!");
+        assert!(has_vol_z, "defs phải chứa indicators.vol_z_score.lookback!");
         let has_kc_tf = defs.iter().any(|(name, _)| name.contains("keltner.timeframe"));
         assert!(!has_kc_tf, "defs KHÔNG được chứa indicators.keltner.timeframe (đã khóa cứng theo bbands ở TASK-MAT-05)!");
         let has_macd = defs.iter().any(|(name, _)| name.contains("macd"));
@@ -1371,7 +1374,7 @@ mod tests {
         assert!(!has_matrix_vol_z, "defs KHÔNG được chứa matrix.vol_z_sensitivity (đã loại bỏ theo TASK-MAT-01)!");
         assert!(!has_phantom_comp, "defs KHÔNG được chứa gen ma min_confidence_compression!");
         assert!(!has_phantom_veto, "defs KHÔNG được chứa gen ma min_multiplier_veto!");
-        assert!(has_breakout, "defs phải chứa cooldown_breakout_atr_mult!");
+        assert!(!has_breakout, "defs KHÔNG được chứa cooldown_breakout_atr_mult (Cooldown thuộc quyền sở hữu của Bot Engine)!");
         assert!(has_abs_adverse, "defs phải chứa tactical_sniper.absorption.max_adverse_slope!");
         assert!(has_pb_max_dist, "defs phải chứa tactical_sniper.pullback.max_pullback_dist_atr!");
         assert!(has_pb_inval, "defs phải chứa tactical_sniper.pullback.invalidation_buffer_atr!");

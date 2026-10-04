@@ -63,9 +63,10 @@ pub struct IndicatorsConfig {
     #[dna(nest)]
     pub vwma: VwmaParams,
 
-    #[dna(min = 20.0, max = 600.0, step = 20.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
-    pub z_score_lookback: usize,
+    #[dna(nest)]
+    pub price_z_score: PriceZScoreParams,
+    #[dna(nest)]
+    pub vol_z_score: VolZScoreParams,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
@@ -186,10 +187,10 @@ pub struct StochasticParams {
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct AtrParams {
-    #[dna(min = 8.0, max = 80.0, step = 3.0)]
+    #[dna(min = 5.0, max = 60.0, step = 1.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub period: usize,
-    #[dna(subset = "5m, 15m, 1h, 4h")]
+    #[dna(subset = "1m, 3m, 5m")]
     pub timeframe: Timeframe,
 }
 
@@ -247,6 +248,26 @@ pub struct VwmaParams {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub period: usize,
     #[dna(subset = "5m, 15m, 1h, 4h")]
+    pub timeframe: Timeframe,
+}
+
+/// Cảm biến Độ lệch chuẩn Giá Vi mô (Dùng cho Boundary Guard & Reversal)
+#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+pub struct PriceZScoreParams {
+    #[dna(min = 10.0, max = 300.0, step = 5.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub lookback: usize,
+    #[dna(subset = "1m, 3m, 5m")]
+    pub timeframe: Timeframe,
+}
+
+/// Cảm biến Đột biến Khối lượng Vi mô (Dùng cho Momentum Ignition & Absorption)
+#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+pub struct VolZScoreParams {
+    #[dna(min = 20.0, max = 400.0, step = 5.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub lookback: usize,
+    #[dna(subset = "1m, 3m, 5m")]
     pub timeframe: Timeframe,
 }
 
@@ -1089,5 +1110,70 @@ fn default_true_be_roundtrip_fee_pct() -> f64 {
 
 fn default_hard_loss_roe_threshold() -> f64 {
     -0.05
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferro_trade::optimizer::DnaMappable;
+
+    #[test]
+    fn test_price_and_vol_zscore_params_dna_independence() {
+        assert_eq!(PriceZScoreParams::DNA_WIDTH, 2);
+        assert_eq!(VolZScoreParams::DNA_WIDTH, 2);
+        assert_eq!(AtrParams::DNA_WIDTH, 2);
+
+        // Kiểm tra parameter definitions
+        let p_defs = PriceZScoreParams::parameter_defs();
+        assert_eq!(p_defs.len(), 2);
+        assert_eq!(p_defs[0].0, "lookback");
+        assert_eq!(p_defs[1].0, "timeframe");
+
+        let v_defs = VolZScoreParams::parameter_defs();
+        assert_eq!(v_defs.len(), 2);
+        assert_eq!(v_defs[0].0, "lookback");
+        assert_eq!(v_defs[1].0, "timeframe");
+
+        // Kiểm tra IndicatorsConfig có chứa các khóa độc lập
+        let ind_defs = IndicatorsConfig::parameter_defs();
+        let has_price_lookback = ind_defs.iter().any(|(k, _)| k == "price_z_score.lookback");
+        let has_price_tf = ind_defs.iter().any(|(k, _)| k == "price_z_score.timeframe");
+        let has_vol_lookback = ind_defs.iter().any(|(k, _)| k == "vol_z_score.lookback");
+        let has_vol_tf = ind_defs.iter().any(|(k, _)| k == "vol_z_score.timeframe");
+
+        assert!(has_price_lookback, "Phải có indicators.price_z_score.lookback");
+        assert!(has_price_tf, "Phải có indicators.price_z_score.timeframe");
+        assert!(has_vol_lookback, "Phải có indicators.vol_z_score.lookback");
+        assert!(has_vol_tf, "Phải có indicators.vol_z_score.timeframe");
+    }
+
+    #[test]
+    fn test_micro_sensors_timeframe_subset() {
+        let p_defs = PriceZScoreParams::parameter_defs();
+        let p_tf_def = &p_defs[1].1;
+        if let ferro_trade::optimizer::ParamDefinition::Options { values } = p_tf_def {
+            let str_values: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
+            assert!(str_values.contains(&"1m"));
+            assert!(str_values.contains(&"3m"));
+            assert!(str_values.contains(&"5m"));
+            assert!(!str_values.contains(&"1h"), "Price Z-score không được chứa 1h");
+            assert!(!str_values.contains(&"4h"), "Price Z-score không được chứa 4h");
+        } else {
+            panic!("timeframe phải là ParamDefinition::Options");
+        }
+
+        let atr_defs = AtrParams::parameter_defs();
+        let atr_tf_def = &atr_defs[1].1;
+        if let ferro_trade::optimizer::ParamDefinition::Options { values } = atr_tf_def {
+            let str_values: Vec<&str> = values.iter().filter_map(|v| v.as_str()).collect();
+            assert!(str_values.contains(&"1m"));
+            assert!(str_values.contains(&"3m"));
+            assert!(str_values.contains(&"5m"));
+            assert!(!str_values.contains(&"1h"), "AtrParams không được chứa 1h");
+            assert!(!str_values.contains(&"4h"), "AtrParams không được chứa 4h");
+        } else {
+            panic!("timeframe phải là ParamDefinition::Options");
+        }
+    }
 }
 
