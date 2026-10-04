@@ -11,8 +11,9 @@ use smallvec::SmallVec;
 use crate::models::models::Candle;
 use tracing::{debug, warn, error};
 
-/// Danh sách các khung thời gian tiêu chuẩn cho chiến lược Helios V3
-pub const HELIOS_REQUIRED_TIMEFRAMES: [Timeframe; 4] = [
+/// Danh sách các khung thời gian tiêu chuẩn cho chiến lược Helios V3 (Bao gồm cả nến vi mô 3m)
+pub const HELIOS_REQUIRED_TIMEFRAMES: [Timeframe; 5] = [
+    Timeframe::T3m,
     Timeframe::T5m,
     Timeframe::T15m,
     Timeframe::T1h,
