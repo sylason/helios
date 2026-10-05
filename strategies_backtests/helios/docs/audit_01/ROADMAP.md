@@ -2,14 +2,14 @@
 
 > **Dự án:** Helios V3 Adaptive Trading Ecosystem & Binance Platform Execution  
 > **Phạm vi:** Chiến dịch Kiểm toán Toàn diện & Tái cấu trúc Hệ thống (**Audit 01 — Full Matrix**)  
-> **Tổng quy mô:** 16 Phân hệ • 25 Tài liệu TODO Chuyên sâu • 6 Giai đoạn Triển khai (Phases) • 94 Tasks Sắp Xếp Theo Mức Độ Ưu Tiên  
+> **Tổng quy mô:** 17 Phân hệ • 26 Tài liệu TODO Chuyên sâu • 6 Giai đoạn Triển khai (Phases) • 101 Tasks Sắp Xếp Theo Mức Độ Ưu Tiên  
 > **Nguyên tắc cốt tử:** First-Principles, Zero Magic Numbers, Clean Data Lineage, Decoupled Architecture, và Quy trình Triển khai Baby Steps (Kiểm chứng tới đâu, đóng gói tới đó).
 
 ---
 
 ## 🗺️ 1. BẢN ĐỒ ĐIỀU HƯỚNG TÀI LIỆU KIỂM TOÁN (AUDIT DIRECTORY INDEX)
 
-Toàn bộ các phát hiện kỹ thuật, lỗ hổng toán học, rủi ro khớp lệnh sàn và danh mục kiểm thử chi tiết được phân bổ trong 25 tài liệu `TODO.md` thuộc 16 thư mục chủ đề:
+Toàn bộ các phát hiện kỹ thuật, lỗ hổng toán học, rủi ro khớp lệnh sàn và danh mục kiểm thử chi tiết được phân bổ trong 26 tài liệu `TODO.md` thuộc 17 thư mục chủ đề:
 
 | STT | Phân hệ / Thư mục | Báo cáo Chuyên sâu (Deep Dive Report) | Danh mục Công việc & Test Cases (TODO) | Trọng Tâm Quản Trị & Rủi Ro Cốt Tử |
 | :---: | :--- | :--- | :--- | :--- |
@@ -27,6 +27,7 @@ Toàn bộ các phát hiện kỹ thuật, lỗ hổng toán học, rủi ro kh�
 | **12** | **Bộ Tối Ưu Hóa Di Truyền (Prospector Runner)** | [📄 `12_prospector_runner/01_optimizer_runner_deep_dive.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/12_prospector_runner/01_optimizer_runner_deep_dive.md) | [📋 `12_prospector_runner/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/12_prospector_runner/TODO.md) | Fallback Baseline Seed chống Cold-Start Starvation 20h, Top-K Champions qua WFE Gate, cắt Warmup Contamination. |
 | **13** | **Động Cơ Giả Lập Khớp Lệnh (Paper Engine)** | [📄 `13_paper_matching_engine/01_paper_engine_deep_dive.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/13_paper_matching_engine/01_paper_engine_deep_dive.md) | [📋 `13_paper_matching_engine/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/13_paper_matching_engine/TODO.md) | Marked-to-Market Floating PnL cho `get_equity()`, Market Filter step size, Liquidation Watchdog, Simulated Slippage. |
 | **14** | **Phát Hiện Kiểm Toán Chéo Mới** | [📄 `14_cross_audit_new_findings/01_cross_audit_report.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/14_cross_audit_new_findings/01_cross_audit_report.md) | [📋 `14_cross_audit_new_findings/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/14_cross_audit_new_findings/TODO.md) | Sửa SL Double Padding Absorption, siết cận dưới DNA chống Playbook Bias, xóa dead data `kama_slope`. |
+| **15** | **Bẫy Lệch Ngữ Nghĩa (Semantic Mismatch)** | [📄 Master Synthesis](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/04_semantic_mismatch_master_synthesis.md) \| [📄 6 Scanners](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/01_scanners_semantic_mismatch_report.md) \| [📄 Sensors](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/02_sensors_and_gatekeeper_report.md) \| [📄 Matrix & Risk](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/03_matrix_risk_arbiter_report.md) | [📋 `15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md) | Khử bẫy Flatline Guard veto oan 95%, bẫy KAMA Suction & chia ATR cọc cạch Trend_PB, bẫy Break-Even tự sát, vol_sma mồ côi. |
 
 ---
 
@@ -113,7 +114,7 @@ flowchart LR
 ## 📋 4. BẢNG THEO DÕI TIẾN ĐỘ TẬP TRUNG (MASTER PROGRESS TRACKER)
 *(Được sắp xếp nghiêm ngặt theo thứ tự ưu tiên từ cao xuống thấp: 🔴 P0 $\to$ 🟠 P1 $\to$ 🟡 P2 $\to$ 🟢 P3 kèm Ghi Chú Phân Tích Thực Tế)*
 
-### 🔴 NHÓM P0: CỐT TỬ / BẢO VỆ SINH TỒN & CHỐNG CHÁY TÀI KHOẢN (31 TASKS)
+### 🔴 NHÓM P0: CỐT TỬ / BẢO VỆ SINH TỒN & CHỐNG CHÁY TÀI KHOẢN (34 TASKS)
 
 | Mã Task | Phân Hệ | Tóm Tắt Nhiệm Vụ & Giải Pháp | Ghi Chú Phân Tích & Rủi Ro Thực Tế (Notes) | Thư Mục Chi Tiết | Phase | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- | :---: | :---: |
@@ -148,10 +149,13 @@ flowchart LR
 | `TODO-SYS-01` | Coverage | Tách cảm biến 1m khỏi dải MTF vĩ mô | Cảm biến hành vi vi cấu trúc vào lệnh (1m) không được phụ thuộc vào trạng thái đóng nến của các khung thời gian lớn. | [`TODO_scanner_coverage.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/TODO_scanner_coverage.md) | Phase 3 | `[ ]` |
 | `TODO-CFG-05` | Config | Loại bỏ Gen Ma `volume_lookback` (hạ DNA về 94) | Gen này chiếm 31 nấc tìm kiếm trong GA nhưng không hề được đọc trong `matrix.rs`, gây lãng phí không gian tối ưu. | [`09_core_v3_config/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/09_core_v3_config/TODO.md#L26) | Phase 5 | `[ ]` |
 | `TODO-CFG-06` | Config | Sửa dải gen RSI Momentum [55, 85] chống nghịch lý | Khi $RSI_{thresh} \le 40$, điều kiện `rsi > thresh` sẽ kích hoạt Long ngay đáy downtrend và Short ngay đỉnh uptrend! | [`09_core_v3_config/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/09_core_v3_config/TODO.md#L42) | Phase 5 | `[ ]` |
+| `TODO-SEM-01` | Gatekeeper | Sửa Bẫy "Mù Cầu Dao Flatline" (Semantic Mismatch) | Khắc phục `micro_natr` 1m so sánh khập khiễng với sàn chi phí vị thế, tránh Veto oan 95% nến bình thường. | [`15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md#L28) | Phase 1 | `[ ]` |
+| `TODO-SEM-02` | Scanners | Trend_PB: Khử KAMA Suction & Chuẩn Hóa `delta_kama` | Dùng `kama_atr` chuẩn hóa khoảng cách KAMA MTF, neo SL sau râu nến vi mô `low`/`high`, giải phóng Trend_PB khỏi Dead Zone. | [`15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md#L40) | Phase 3 | `[ ]` |
+| `TODO-SEM-03` | Risk | Khử Bẫy Break-Even Tự Sát Chịu Lỗ Phí Sàn 2 Chiều | Chỉ kích hoạt BE khi $\text{peak\_roe} \ge 2.5 \times \text{round\_trip\_fee}$, tránh bị cắt lệnh hoảng loạn `Emergency BE Rejection`. | [`15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md#L55) | Phase 2 | `[ ]` |
 
 ---
 
-### 🟠 NHÓM P1: NỀN TẢNG TOÁN HỌC, ĐỘNG CƠ GA & ĐỒNG BỘ LÕI (25 TASKS)
+### 🟠 NHÓM P1: NỀN TẢNG TOÁN HỌC, ĐỘNG CƠ GA & ĐỒNG BỘ LÕI (28 TASKS)
 
 | Mã Task | Phân Hệ | Tóm Tắt Nhiệm Vụ & Giải Pháp | Ghi Chú Phân Tích & Rủi Ro Thực Tế (Notes) | Thư Mục Chi Tiết | Phase | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- | :---: | :---: |
@@ -180,10 +184,13 @@ flowchart LR
 | `TODO-PPR-03` | PaperEngine | Liquidation Watchdog tự động thanh lý khi lỗ $\ge 90\%$ | Mô phỏng chính xác cơ chế thanh lý của sàn trong Paper Trading khi khoản lỗ vượt quá $90\%$ số tiền ký quỹ. | [`13_paper_matching_engine/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/13_paper_matching_engine/TODO.md#L47) | Phase 6 | `[ ]` |
 | `TODO-PPR-05` | PaperEngine | Mô hình trượt giá giả lập (Simulated Slippage & Spread) | Tránh kết quả paper trade "quá màu hồng" bằng cách trừ hao trượt giá thực tế khi khớp lệnh thị trường. | [`13_paper_matching_engine/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/13_paper_matching_engine/TODO.md#L78) | Phase 6 | `[ ]` |
 | `TODO-CRS-01` | Scanners | Sửa SL Double Padding trong Absorption, hạ trần SL | Gỡ bỏ 2 tầng đệm SL kép khiến khoảng cách dừng lỗ bị kéo giãn tới 26% ROE, hạ trần SL về mức $15 \sim 20\%$ ROE. | [`14_cross_audit_new_findings/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/14_cross_audit_new_findings/TODO.md#L48) | Phase 3 | `[ ]` |
+| `TODO-SEM-04` | Sensors | Khởi Tạo `vol_sma` & Xử Lý Gen Mồ Côi `rsi_reversal` | Gọi `ctx.volume_sma` trong `init()`, hồi sinh Volume kiệt sức cho Reversal Scanner. | [`15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md#L70) | Phase 1 | `[ ]` |
+| `TODO-SEM-05` | Scanners | Khóa Đồng Bộ Timeframe VWMA vs Bollinger Bands | Đồng bộ hóa `vwma.timeframe = bbands.timeframe`, loại bỏ lệch pha thời gian trong Absorption Scanner. | [`15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md#L83) | Phase 3 | `[ ]` |
+| `TODO-SEM-06` | Risk | Chuẩn Hóa Thang Đo Trailing Stop $\sqrt{T}$ | Khóa cố định Timeframe `atr_sl` vào nến 1m, chống méo mó biên độ Trailing Stop khi GA đổi timeframe ATR. | [`15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md#L94) | Phase 2 | `[ ]` |
 
 ---
 
-### 🟡 NHÓM P2: ĐỘ PHỦ TÁC CHIẾN, PHÒNG THỦ LIÊN NẾN & QUY MÔ (27 TASKS)
+### 🟡 NHÓM P2: ĐỘ PHỦ TÁC CHIẾN, PHÒNG THỦ LIÊN NẾN & QUY MÔ (28 TASKS)
 
 | Mã Task | Phân Hệ | Tóm Tắt Nhiệm Vụ & Giải Pháp | Ghi Chú Phân Tích & Rủi Ro Thực Tế (Notes) | Thư Mục Chi Tiết | Phase | Trạng Thái |
 | :--- | :--- | :--- | :--- | :--- | :---: | :---: |
@@ -214,6 +221,7 @@ flowchart LR
 | `TODO-BRG-06` | Bridge | Chuyển Resampling sang thuần Rust `fast_resample_ohlcv` | Thay thế Polars runtime bằng hàm resample $O(N)$ thuần Rust, tiết kiệm 11.2MB RAM và 100ms CPU/phút/symbol. | [`10_helios_bridge/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/10_helios_bridge/TODO.md#L58) | Phase 6 | `[ ]` |
 | `TODO-ACT-08` | AssetActor | Chống rớt nến WebSocket Lagged & Gap Healing | Bọc tác vụ nặng trong `spawn_blocking` và tự động kích hoạt Gap Filler khi phát hiện mất kết nối WebSocket. | [`11_asset_actor/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/11_asset_actor/TODO.md#L125) | Phase 6 | `[ ]` |
 | `TODO-RECOV-03` | Resilience | Bảng SQLite `active_positions` & `account_capital_ledger` | Lưu giữ peak ROE, entry time và ledger vốn thực tế để bot không bị "mất trí nhớ" sau khi restart/crash. | [`06_risk/TODO_round2.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/06_risk/TODO_round2.md#L157) | Phase 6 | `[ ]` |
+| `TODO-SEM-07` | Testing | Kiểm Thử Tích Hợp & Walk-Forward Smart Seed | Chạy full test suite và walk-forward verification xác nhận cả 4 Scanners hoạt động và WFE Gate pass ổn định. | [`15_semantic_mismatch_audit/TODO.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/15_semantic_mismatch_audit/TODO.md#L106) | Phase 6 | `[ ]` |
 
 ---
 
