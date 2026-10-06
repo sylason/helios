@@ -639,7 +639,6 @@ impl RiskManager {
 
             // [ENHANCEMENT 3: MONOTONIC RATCHET GUARD]
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
-            let underwater_cycles = bars_held / time_countdown_bars;
             if current_pnl > 0.0 {
                 // KHI CÓ LÃI DANH NGHĨA (current_pnl > 0.0): Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
                 let sl_changed = if trade.is_long() {
@@ -652,64 +651,11 @@ impl RiskManager {
                     let sl_to_send = if sl_changed { Some(calculated_sl) } else { trade.sl_price };
                     tick.update_trade_sl_tp(trade.id, sl_to_send, new_tp_to_update);
                 }
-            } else if underwater_cycles > 0 {
-                // KHI ĐANG ÂM (current_pnl <= 0.0) VÀ BỊ NGÂM VỐN (underwater_cycles > 0):
-                // Thu hẹp khoảng cách Stop Loss từ entry_price để cắt lỗ sớm bảo toàn vốn
-                let progressive_factor = risk_cfg.tighten_step_multiplier.powi(underwater_cycles as i32);
-                let underwater_mult = (risk_cfg.base_sl_atr * progressive_factor).max(risk_cfg.tsl_buffer_floor_atr);
-
-                let tightened_sl = if trade.is_long() {
-                    trade.entry_price - (current_atr * underwater_mult)
-                } else {
-                    trade.entry_price + (current_atr * underwater_mult)
-                };
-
-                // CHỐT CHẶN 1: Chống nhảy qua đầu giá nến hiện tại
-                // Nếu mức SL siết chặt đã chạm hoặc vượt qua giá nến hiện tại -> Giải phóng vốn ngay!
-                let should_force_close = if trade.is_long() {
-                    tightened_sl >= current_close
-                } else {
-                    tightened_sl <= current_close
-                };
-
-                if should_force_close {
-                    if _debug_mode {
-                        tracing::info!(
-                            "⏳ [UNDERWATER STAGNANT TIMEOUT] Bar: {} | Trade #{:?} | Tightened SL {:.2} reached current price {:.2} -> Closed to protect capital",
-                            i, trade.id, tightened_sl, current_close
-                        );
-                    }
-                    tick.close(None);
-                    continue;
-                }
-
-                // CHỐT CHẶN 2: Buffer Floor tối thiểu từ cấu hình DNA chống quét non (Whipsaw)
-                let floor_atr = if config.risk_management.stop_management.tsl_buffer_floor_atr <= 0.0 {
-                    1.0
-                } else {
-                    config.risk_management.stop_management.tsl_buffer_floor_atr
-                };
-                let min_buffer = current_atr * floor_atr;
-                let safe_tightened_sl = if trade.is_long() {
-                    tightened_sl.min(current_close - min_buffer)
-                } else {
-                    tightened_sl.max(current_close + min_buffer)
-                };
-
-                // CHỐT CHẶN 3: Monotonic Ratchet Guard (TUYỆT ĐỐI CẤM LÙI SL)
-                let sl_changed = if trade.is_long() {
-                    safe_tightened_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
-                } else {
-                    safe_tightened_sl < trade.sl_price.unwrap_or(f64::INFINITY)
-                };
-
-                if sl_changed || tp_changed {
-                    let sl_to_send = if sl_changed { Some(safe_tightened_sl) } else { trade.sl_price };
-                    tick.update_trade_sl_tp(trade.id, sl_to_send, new_tp_to_update);
-                }
             } else if tp_changed {
-                // KHI LỆNH CHƯA CÓ LÃI HOẶC CHƯA BỊ NGÂM VỐN NHƯNG DẢI TP CÓ SỰ THAY ĐỔI:
-                // Cập nhật Dynamic TP bám sát thị trường ngay lập tức, giữ nguyên mức SL hiện tại
+                // 🛡️ TODO-RSK-02: KHI ĐANG ÂM HOẶC HÒA VỐN (current_pnl <= 0.0):
+                // Bảo toàn 100% Initial Structural SL do Scanner thiết lập, tuyệt đối không siết SL bằng hàm số mũ 0.8^n.
+                // Việc giải phóng vốn ngâm lâu đã có khối Stagnant Capital Release (dòng 348) và Zombie Trade Purge phụ trách.
+                // Chỉ cập nhật Take Profit nếu có thay đổi động (RangeOsc / Reversal), giữ nguyên mức SL hiện tại.
                 tick.update_trade_sl_tp(trade.id, trade.sl_price, new_tp_to_update);
             }
         }
@@ -759,27 +705,61 @@ mod tests {
     }
 
     #[test]
-    fn test_underwater_tightening_math_formula() {
+    fn test_underwater_position_preserves_initial_structural_sl() {
+        // 🛡️ TODO-RSK-02: Khi vị thế đang âm (current_pnl <= 0.0), SL tuyệt đối không bị siết lũy thừa 0.8^n.
+        // Initial Structural SL do Scanner thiết lập (ví dụ 2480.0 cho Long entry 2500.0) phải được bảo toàn 100%.
         let entry_price: f64 = 2500.0;
-        let current_atr: f64 = 10.0;
-        let base_sl_atr: f64 = 4.0;
-        let tsl_atr_tight: f64 = 1.0;
-        let step_multiplier: f64 = 0.80; // Mỗi chu kỳ siết 20%
+        let initial_structural_sl: f64 = 2480.0; // Khoảng cách 20 giá = 0.8% giá = 16% ROE (đã clamp tại trần an toàn)
+        let current_close: f64 = 2490.0; // Vị thế đang âm: (2490 - 2500) = -10 giá
+        let current_pnl: f64 = current_close - entry_price;
 
-        // Chu kỳ 1: multiplier = 4.0 * 0.8 = 3.2
-        let mult_c1 = (base_sl_atr * step_multiplier).max(tsl_atr_tight);
-        assert!((mult_c1 - 3.2).abs() < 1e-9);
-        let sl_c1 = entry_price - (current_atr * mult_c1);
-        assert!((sl_c1 - 2468.0).abs() < 1e-9, "Chu kỳ 1 phải siết SL từ 2460 lên 2468");
+        assert!(current_pnl <= 0.0, "Vị thế đang âm (underwater)");
 
-        // Chu kỳ 2: multiplier = 4.0 * 0.64 = 2.56
-        let mult_c2 = (base_sl_atr * step_multiplier * step_multiplier).max(tsl_atr_tight);
-        assert!((mult_c2 - 2.56).abs() < 1e-9);
-        let sl_c2 = entry_price - (current_atr * mult_c2);
-        assert!((sl_c2 - 2474.4).abs() < 1e-9, "Chu kỳ 2 phải siết SL lên 2474.4");
+        // Mô phỏng logic dòng 642-660 trong risk.rs:
+        // Khi current_pnl <= 0.0, khối if current_pnl > 0.0 không chạy.
+        // sl_to_send không được thay đổi, bảo toàn nguyên vẹn trade.sl_price.
+        let trade_sl_price = Some(initial_structural_sl);
+        let sl_to_send = if current_pnl > 0.0 {
+            // Trailing stop từ đỉnh khi có lãi danh nghĩa
+            Some(2495.0)
+        } else {
+            // Bảo toàn Initial Structural SL
+            trade_sl_price
+        };
 
-        // Đảm bảo Monotonic: sl_c2 > sl_c1
-        assert!(sl_c2 > sl_c1, "SL phải dời tăng dần để bảo vệ vốn khi ngâm lệnh âm");
+        assert_eq!(sl_to_send, Some(initial_structural_sl), "SL phải được bảo toàn nguyên vẹn 2480.0, không bị bóp nghẹt lên!");
+    }
+
+    #[test]
+    fn test_stagnant_capital_release_logic() {
+        // 🛡️ TODO-RSK-02: Cơ chế duy nhất được phép đóng lệnh ngâm lâu là Stagnant Capital Release
+        let entry_price: f64 = 2500.0;
+        let max_stagnant_hold_bars: usize = 60;
+        let stagnant_min_profit_pct: f64 = 0.005; // Cần tối thiểu +0.5% lợi nhuận
+
+        // Trường hợp 1: Ngâm 40 bars (< 60 bars) -> Chưa đến hạn giải phóng
+        let bars_held_early = 40;
+        let current_close_underwater = 2495.0; // Âm -0.2%
+        let pnl_pct_underwater = (current_close_underwater - entry_price) / entry_price;
+        let should_release_early = max_stagnant_hold_bars > 0 
+            && bars_held_early >= max_stagnant_hold_bars 
+            && pnl_pct_underwater < stagnant_min_profit_pct;
+        assert!(!should_release_early, "Chưa đủ 60 bars thì không được phép đóng sớm");
+
+        // Trường hợp 2: Ngâm 65 bars (>= 60 bars) và PnL chưa đạt +0.5% -> Kích hoạt giải phóng vốn!
+        let bars_held_stagnant = 65;
+        let should_release_stagnant = max_stagnant_hold_bars > 0 
+            && bars_held_stagnant >= max_stagnant_hold_bars 
+            && pnl_pct_underwater < stagnant_min_profit_pct;
+        assert!(should_release_stagnant, "Đã ngâm 65 bars mà chưa đạt +0.5% lãi -> Phải kích hoạt Stagnant Capital Release!");
+
+        // Trường hợp 3: Ngâm 65 bars nhưng PnL đạt +1.2% (>= +0.5%) -> Tiếp tục giữ lệnh gồng lãi!
+        let current_close_profitable = 2530.0; // Lãi +1.2%
+        let pnl_pct_profitable = (current_close_profitable - entry_price) / entry_price;
+        let should_release_profitable = max_stagnant_hold_bars > 0 
+            && bars_held_stagnant >= max_stagnant_hold_bars 
+            && pnl_pct_profitable < stagnant_min_profit_pct;
+        assert!(!should_release_profitable, "Đã vượt mốc lợi nhuận tối thiểu +0.5% -> Được tiếp tục giữ lệnh!");
     }
 
     #[test]

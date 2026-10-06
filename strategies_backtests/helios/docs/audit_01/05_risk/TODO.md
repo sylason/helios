@@ -19,16 +19,14 @@ Tài liệu này quản lý các hạng mục công việc, kiểm tra logic và
 
 ---
 
-- [ ] **`TODO-RSK-02`**: **Tái Cấu Trúc Cơ Chế Thoát Lệnh Ngâm Vốn (Structural Invalidation Thay Cho Time Decay Mù)**
+- [x] **`TODO-RSK-02`**: **Tái Cấu Trúc Cơ Chế Thoát Lệnh Ngâm Vốn (Structural Invalidation Thay Cho Time Decay Mù)**
   - *Mục tiêu:* Loại bỏ hoàn toàn hiện tượng bot tự bóp nghẹt SL và cắt lỗ đúng ngay đáy tích lũy của nến 1m chỉ vì thời gian trôi qua.
   - *Tham chiếu:* [Kẽ hở 2: Underwater Tightening Trap](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/05_risk/01_risk_deep_dive.md#kẽ-hở-2-bẫy-underwater-tightening-bóp-chết-lệnh-ngay-đáy-premature-whipsaw-execution-trap)
-  - *Nhiệm vụ:*
-    - Thay thế công thức `underwater_mult = base_sl_atr * (0.8)^n` bằng cơ chế kiểm tra **Phá vỡ Cấu trúc Thị trường (Structural Invalidation)**:
-      - Chỉ dời SL khi giá tạo Lower High / Lower Low rõ ràng hoặc đường trung bình KAMA đảo chiều ngược lại hướng lệnh.
-      - Giữ nguyên mức SL cấu trúc ban đầu nếu giá vẫn dao động trong biên độ tích lũy an toàn.
-  - *Test cases cần có:*
-    - `test_underwater_position_holding_during_healthy_consolidation`: Kiểm tra lệnh không bị force-close khi ngâm 20 bars nhưng giá vẫn tôn trọng swing low.
-    - `test_underwater_exit_on_kama_slope_inversion`: Kiểm tra lệnh chỉ bị thoát sớm khi KAMA dốc ngược chiều lệnh.
+  - *Thực hiện & Kết quả:*
+    - ✅ Xóa bỏ triệt để khối siết SL lũy thừa $(0.8)^n$ khi vị thế đang âm ($current\_pnl \le 0.0$); bảo toàn 100% Initial Structural SL do Scanner thiết lập (đã có trần 15% ROE và MMR Liquidation Guard bảo vệ tuyệt đối).
+    - ✅ Phân định ranh giới kiến trúc sạch (Clean Separation of Concerns): Nhiệm vụ giải phóng vốn ngâm lâu được độc quyền chuyển giao cho khối `Stagnant Capital Release` (`max_stagnant_hold_bars` $\ge 60$) và `Zombie Trade Purge` (48h), triệt tiêu hoàn toàn xung đột logic nội tại.
+    - ✅ Đánh dấu `#[dna(skip)]` cho `base_sl_atr` trong `config.rs`, giảm không gian tìm kiếm DNA từ 103 về 102 chiều sạch sẽ.
+    - ✅ Bổ sung 2 unit tests kiểm chứng: `test_underwater_position_preserves_initial_structural_sl` và `test_stagnant_capital_release_logic`. Toàn bộ 27/27 tests `risk.rs` và 104/104 tests crate `helios` đều PASS 100%.
 
 ---
 

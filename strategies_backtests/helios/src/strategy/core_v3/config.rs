@@ -919,8 +919,9 @@ pub struct RiskStopParams {
     #[dna(min = 0.002, max = 0.050, step = 0.002)]
     pub stagnant_min_profit_pct: f64,
 
-    /// Khoảng Cách Cắt Lỗ Ban Đầu Mặc Định Theo ATR (0.5 -> 6.0 ATR, Step 0.10 -> 56 nấc)
-    #[dna(min = 0.5, max = 6.0, step = 0.10)]
+    /// Khoảng Cách Cắt Lỗ Ban Đầu Mặc Định Theo ATR (Bỏ khỏi DNA theo TODO-RSK-02)
+    #[dna(skip)]
+    #[serde(default = "default_base_sl_atr")]
     pub base_sl_atr: f64,
 
     /// 🛡️ CƠ CHẾ CẦU DAO BẢO VỆ TÀI KHOẢN TẠI BOT ENGINE (ENGINE COOLDOWN SENTINEL - PURE TTL)
@@ -1123,6 +1124,10 @@ fn default_true_be_roundtrip_fee_pct() -> f64 {
 
 fn default_hard_loss_roe_threshold() -> f64 {
     -0.05
+}
+
+fn default_base_sl_atr() -> f64 {
+    2.0
 }
 
 #[cfg(test)]
