@@ -36,7 +36,7 @@ flowchart TD
 
 ### 🔴 NHÓM P0: KHẮC PHỤC CẤP BÁCH (CRITICAL HOTFIXES)
 
-- [ ] **`TODO-SEM-01`**: Sửa Bẫy "Mù Cầu Dao Flatline" trong `gatekeeper.rs`
+- [x] **`TODO-SEM-01`**: Sửa Bẫy "Mù Cầu Dao Flatline" trong `gatekeeper.rs`
   - **File:** [`strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs#L115-L123)
   - **Vấn đề:** `micro_natr_ratio` tính trên nến 1m (~0.04%) so sánh với `effective_min_natr` tính trên chi phí toàn vòng đời vị thế ($0.18\% \to 0.40\%$) làm veto oan 95% nến bình thường.
   - **Hành động:** 

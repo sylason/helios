@@ -175,7 +175,7 @@ impl HeliosArbiter {
                     gate_eval.veto_reason,
                     gate_eval.current_chaos,
                     gate_eval.is_hysteresis_active,
-                    gate_eval.current_natr
+                    gate_eval.market_natr_pct
                 );
             }
             return ArbiterDecision {

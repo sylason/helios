@@ -73,7 +73,7 @@ impl DefenseLedger {
 
                 Some(format!(
                     "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: {:?} | Chaos: {:.3} (Hysteresis: {}) | NATR: {:.2}% | Entering Shelter!",
-                    current_bar, reason, gate_eval.current_chaos, gate_eval.is_hysteresis_active, gate_eval.current_natr
+                    current_bar, reason, gate_eval.current_chaos, gate_eval.is_hysteresis_active, gate_eval.market_natr_pct
                 ))
             } else {
                 None
@@ -86,7 +86,7 @@ impl DefenseLedger {
 
                 Some(format!(
                     "✅ [GATEKEEPER DISENGAGED] Bar: {} | Market Stabilized from {:?} | Chaos: {:.3} | NATR: {:.2}% | Storm Duration: {} bars",
-                    current_bar, prev, gate_eval.current_chaos, gate_eval.current_natr, duration
+                    current_bar, prev, gate_eval.current_chaos, gate_eval.market_natr_pct, duration
                 ))
             } else {
                 None
@@ -203,8 +203,7 @@ mod tests {
             passed: true,
             veto_reason: None,
             current_chaos: 0.15,
-            current_natr: 0.20,
-            macro_natr: 0.20,
+            market_natr_pct: 0.20,
             is_hysteresis_active: false,
         };
         assert!(ledger.on_gatekeeper_tick(100, &eval_pass).is_none());
@@ -214,8 +213,7 @@ mod tests {
             passed: false,
             veto_reason: Some(GateVetoReason::ChaosWhipsaw),
             current_chaos: 0.35,
-            current_natr: 0.20,
-            macro_natr: 0.20,
+            market_natr_pct: 0.20,
             is_hysteresis_active: false,
         };
         let msg_engaged = ledger.on_gatekeeper_tick(101, &eval_chaos);

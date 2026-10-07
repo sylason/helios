@@ -87,9 +87,9 @@ impl DecisionCardFormatter {
         let price_z = sensors.z_score.get(i).copied().unwrap_or(0.0);
         let vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
         let mfi = sensors.mfi.get(i).copied().unwrap_or(0.0);
-        let macro_natr = sensors.natr.get(i).copied().unwrap_or(0.0);
+        let market_natr_pct = sensors.natr.get(i).copied().unwrap_or(0.0);
         let atr_sl = sensors.atr_sl.get(i).copied().unwrap_or(0.0);
-        let micro_natr = if price > 0.0 { (atr_sl / price) * 100.0 } else { 0.0 };
+        let micro_natr_pct = if price > 0.0 { (atr_sl / price) * 100.0 } else { 0.0 };
 
         // Matrix snapshot
         let kama_slope_atr = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
@@ -150,8 +150,8 @@ impl DecisionCardFormatter {
             price, price_z, vol_z, mfi, clv
         );
         let sensor_l2 = format!(
-            "NATR_Micro (Flatline): {:.2}% | NATR_Macro (Chaos): {:.2}% | ATR_SL: {:.4}",
-            micro_natr, macro_natr, atr_sl
+            "NATR (Regime): {:.2}% | NATR_Micro: {:.2}% | ATR_SL: {:.4}",
+            market_natr_pct, micro_natr_pct, atr_sl
         );
         lines.push(format!("║   {:<99} ║", sensor_l1));
         lines.push(format!("║   {:<99} ║", sensor_l2));
@@ -221,9 +221,9 @@ impl DecisionCardFormatter {
         let price_z = sensors.z_score.get(i).copied().unwrap_or(0.0);
         let vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
         let mfi = sensors.mfi.get(i).copied().unwrap_or(0.0);
-        let macro_natr = sensors.natr.get(i).copied().unwrap_or(0.0);
+        let market_natr_pct = sensors.natr.get(i).copied().unwrap_or(0.0);
         let atr_sl = sensors.atr_sl.get(i).copied().unwrap_or(0.0);
-        let micro_natr = if price > 0.0 { (atr_sl / price) * 100.0 } else { 0.0 };
+        let micro_natr_pct = if price > 0.0 { (atr_sl / price) * 100.0 } else { 0.0 };
 
         // Matrix snapshot
         let kama_slope_atr = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
@@ -242,8 +242,8 @@ impl DecisionCardFormatter {
 
         if let Some(gate_veto) = decision.gate_veto {
             let veto_info = format!(
-                "GATEKEEPER VETO: {:<18} | Chaos: {:.3} | NATR_Mic: {:.2}% | NATR_Mac: {:.2}%",
-                gate_veto.as_str(), decision.chaos_val, micro_natr, macro_natr
+                "GATEKEEPER VETO: {:<18} | Chaos: {:.3} | NATR: {:.2}% | NATR_Micro: {:.2}%",
+                gate_veto.as_str(), decision.chaos_val, market_natr_pct, micro_natr_pct
             );
             lines.push(format!("║ 🛑 {:<97} ║", veto_info));
         }
@@ -283,8 +283,8 @@ impl DecisionCardFormatter {
             price, price_z, vol_z, mfi, leverage
         );
         let sensor_l2 = format!(
-            "NATR_Micro (Flatline): {:.2}% | NATR_Macro (Chaos): {:.2}% | ATR_SL: {:.4}",
-            micro_natr, macro_natr, atr_sl
+            "NATR (Regime): {:.2}% | NATR_Micro: {:.2}% | ATR_SL: {:.4}",
+            market_natr_pct, micro_natr_pct, atr_sl
         );
         lines.push(format!("║   {:<99} ║", sensor_l1));
         lines.push(format!("║   {:<99} ║", sensor_l2));
