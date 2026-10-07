@@ -20,17 +20,18 @@
 
 ## 🚨 MỨC ĐỘ P0: KHẨN CẤP / CHÁY TÀI KHOẢN & BẾ TẮC HỆ THỐNG
 
-### [P0-1] Khắc phục Lỗi Bế Tắc Cooldown Vĩnh Viễn khi Bộ Đệm Bão Hòa (VULN-AA-01)
-- **File mục tiêu:** [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L528-L587)
+### [x] [P0-1] Khắc phục Lỗi Bế Tắc Cooldown Vĩnh Viễn khi Bộ Đệm Bão Hòa (VULN-AA-01) - **ĐÃ HOÀN THÀNH**
+- **File mục tiêu:** [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs)
 - **Vấn đề:** Khi `Asset.ohlcv` đạt 43,200 nến, `current_bar_idx` bị ghim cố định ở 43,199. Điều kiện `current_bar_idx < locked_until_bar` vĩnh viễn đúng, bot bị liệt không bao giờ mở lệnh được nữa.
-- **Giải pháp kỹ thuật:**
-  1. Thêm trường `processed_candles_count: usize` vào struct `AssetActor` (khởi tạo bằng 0).
-  2. Mỗi lần nhận nến mới trong `on_new_candle`, tăng `self.processed_candles_count += 1`.
-  3. Sử dụng `self.processed_candles_count` làm `current_monotonic_bar` thay thế cho `current_bar_idx` khi tính `locked_until_bar` và trong hàm `should_veto`.
-  4. (Tùy chọn nâng cao) Chuyển toàn bộ logic Cooldown sang so sánh bằng timestamp mili-giây: `locked_until_timestamp = candle.timestamp + effective_cooldown * 60_000`.
+- **Giải pháp kỹ thuật (Occam's Razor Gốc Rễ):**
+  1. Thêm trường `pub processed_candles_count: usize` vào struct `AssetActor`. Khởi tạo bằng `0` và đồng bộ trong `sync_history`.
+  2. Mỗi lần nhận nến mới trong `on_new_candle`, tăng `self.processed_candles_count = self.processed_candles_count.saturating_add(1)`.
+  3. Sử dụng `self.processed_candles_count.saturating_sub(1)` làm `current_bar_idx` đơn điệu tăng dần.
+  4. Sửa `pos_age = current_bar_idx.saturating_sub(pos.live_entry_bar)` đảm bảo tuổi vị thế không bị bóp nghẹt về 0 khi buffer đầy 43,200 nến.
 - **Tiêu chí nghiệm thu (Acceptance Criteria):**
-  - Viết unit test giả lập buffer đầy 43,200 nến. Kích hoạt Cooldown 15 nến.
-  - Cho thêm 16 nến mới vào hệ thống. Xác nhận `should_veto` chuyển từ `true` sang `false` thành công khi hết 15 nến.
+  - [x] Đã viết unit test `test_monotonic_sequence_counter_cooldown_saturated_buffer`: kiểm chứng buffer 43,200 nến, phạt cooldown 15 bars, mở khóa chuẩn xác tại bar thứ 16.
+  - [x] Đã viết unit test `test_pos_age_calculation_monotonic_counter_saturated_buffer`: kiểm chứng tuổi vị thế tính chuẩn 119 nến thay vì bị bóp về 0.
+  - [x] Vượt qua 44/44 tests `bot_engine`, 105/105 tests `helios`, 50/50 tests `ferro_trade`.
 
 ---
 
