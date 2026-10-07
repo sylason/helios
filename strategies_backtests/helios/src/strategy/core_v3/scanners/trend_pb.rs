@@ -45,7 +45,11 @@ impl TacticalScanner for TrendPBScanner {
         let pb_cfg = &config.tactical_sniper.pullback;
         
         let kama_slope = matrix.kama_slope_atr.get(i).copied()
-            .unwrap_or_else(|| sensors.kama_slope_adj.get(i).copied().unwrap_or(0.0));
+            .unwrap_or_else(|| {
+                sensors.kama_slope_adj.get(i).copied()
+                    .map(|s| (s / 0.20).clamp(-1.0, 1.0))
+                    .unwrap_or(0.0)
+            });
         let stoch_k = sensors.stoch_trend_k.get(i).copied().unwrap_or(f64::NAN);
         let rsi = sensors.rsi_trend.get(i).copied().unwrap_or(f64::NAN);
         let z_score = sensors.z_score.get(i).copied().unwrap_or(0.0);
@@ -72,13 +76,25 @@ impl TacticalScanner for TrendPBScanner {
         let high = tick.highs()[i];
 
         let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
-        let kama_mid = sensors.kama_mid.get(i).copied().unwrap_or(close);
-        let buffer = current_atr * pb_cfg.struct_sl_buffer_atr.max(0.05);
+        let buffer_mult = pb_cfg.struct_sl_buffer_atr.clamp(0.10, 1.20);
+        let buffer = current_atr * buffer_mult;
 
-        // Khoảng cách chuẩn hóa không gian giá so với KAMA qua ATR
-        let delta_kama = (close - kama_mid) / current_atr;
-        let max_dist = pb_cfg.max_pullback_dist_atr.max(0.20);
-        let inval_floor = pb_cfg.invalidation_buffer_atr.max(0.05);
+        // 🛡️ Cửa sổ 3 nến vi mô cho điểm neo Stop Loss cấu trúc (bao bọc râu quét thanh khoản)
+        let low_0 = low;
+        let low_1 = if i >= 1 { tick.lows()[i - 1] } else { low_0 };
+        let low_2 = if i >= 2 { tick.lows()[i - 2] } else { low_1 };
+        let swing_low = low_0.min(low_1).min(low_2);
+
+        let high_0 = high;
+        let high_1 = if i >= 1 { tick.highs()[i - 1] } else { high_0 };
+        let high_2 = if i >= 2 { tick.highs()[i - 2] } else { high_1 };
+        let swing_high = high_0.max(high_1).max(high_2);
+
+        let prev_stoch_k = if i >= 1 {
+            sensors.stoch_trend_k.get(i - 1).copied().unwrap_or(stoch_k)
+        } else {
+            stoch_k
+        };
 
         // Đạo hàm vi phân gradient nến: Close Location Value (CLV) [-1.0, +1.0]
         let tr_span = (high - low).max(1e-6);
@@ -87,40 +103,37 @@ impl TacticalScanner for TrendPBScanner {
         let f_slope = sat_unbounded(kama_slope.abs(), slope_thresh);
 
         // -------------------------------------------------------------------------
-        // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên Rõ Rệt + Hồi Quy An Toàn + Gradient Dương)
+        // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên + Hồi Quy Vi Mô + Lực Cầu Rút Chân)
         // -------------------------------------------------------------------------
         if kama_slope > slope_thresh {
             // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống mua đu đỉnh phân phối
-            // Pullback lành mạnh bắt buộc giá phải nằm trong vùng giá trị lân cận trung bình.
-            // Cấm tuyệt đối Long khi Z > +max_boundary_z (vùng bùng nổ của momentum_ignition hoặc đỉnh phân phối).
             if z_score > pb_cfg.max_boundary_z {
                 return None;
             }
 
-            // Chốt chặn 1: Hộp không gian hồi quy (-inval <= delta_kama <= max_dist)
-            if delta_kama < -inval_floor || delta_kama > max_dist {
-                return None; // Thủng KAMA gãy trend hoặc bay quá xa KAMA mua đu đỉnh
-            }
-
-            // Chốt chặn 2: Vùng hạ nhiệt Stoch & Trần RSI an toàn (tránh hưng phấn đỉnh sóng)
+            // Chốt chặn 1: Vùng hạ nhiệt Stochastic vi mô & Trần RSI an toàn
             let stoch_thresh = pb_cfg.stoch_pullback_thresh.max(1.0);
             if stoch_k > stoch_thresh || rsi > pb_cfg.rsi_max_cap {
                 return None;
             }
 
-            // Chốt chặn 3: Gradient vận tốc nến xác nhận lực cầu (cấm nến đỏ Marubozu)
-            if clv < 0.15 || close < open {
+            // 🛡️ Chốt chặn 2: Soft Stochastic Hook Guard (Chống bắt dao rơi khi thác lũ thanh lý)
+            if stoch_k < 10.0 && stoch_k < prev_stoch_k {
+                return None; // Đang rơi tự do cắm đầu, cấm bắt dao rơi!
+            }
+
+            // Chốt chặn 3: Xác nhận lực cầu vi mô (Cho phép nến đỏ rút chân mạnh CLV >= 0.40)
+            if clv < 0.15 || (close < open && clv < 0.40) {
                 return None;
             }
 
-            let f_dist = sat_proximity(delta_kama.abs(), max_dist);
             let f_stoch = sat_proximity(stoch_k, stoch_thresh);
-            let score_long = convex_combine(&[f_slope, f_dist, f_stoch], &[1.0, 1.0, 1.0]);
+            let f_clv = ((clv - 0.15) / 0.85).clamp(0.0, 1.0);
+            let score_long = convex_combine(&[f_slope, f_stoch, f_clv], &[0.40, 0.30, 0.30]);
 
             if score_long >= pb_cfg.min_activation_score {
-                // 🛡️ Structural SL neo dưới đáy nhịp hồi hoặc đường hỗ trợ KAMA
-                let base_support = low.min(kama_mid);
-                let mut sl = base_support - buffer;
+                // 🛡️ Structural SL neo chặt chẽ theo đáy cụm 3 nến vi mô (Khử 100% KAMA Suction Trap)
+                let mut sl = swing_low - buffer;
                 if sl >= close {
                     sl = close - buffer.max(close * 0.002);
                 }
@@ -135,40 +148,38 @@ impl TacticalScanner for TrendPBScanner {
             }
         }
         // -------------------------------------------------------------------------
-        // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống Rõ Rệt + Hồi Quy An Toàn + Gradient Âm)
+        // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống + Hồi Quy Vi Mô + Lực Cung Đè Đỉnh)
         // -------------------------------------------------------------------------
         else if kama_slope < -slope_thresh {
             // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống bán đuổi đáy hoảng loạn
-            // Cấm tuyệt đối Short khi Z < -max_boundary_z (vùng quá bán cực đại, dễ bị rút chân quét SL).
             if z_score < -pb_cfg.max_boundary_z {
                 return None;
             }
 
-            // Chốt chặn 1: Hộp không gian hồi quy (-max_dist <= delta_kama <= inval)
-            if delta_kama > inval_floor || delta_kama < -max_dist {
-                return None; // Vượt thủng KAMA gãy trend hoặc rơi quá xa KAMA bán đuổi đáy
-            }
-
-            // Chốt chặn 2: Vùng hạ nhiệt Stoch & Sàn RSI an toàn
+            // Chốt chặn 1: Vùng hạ nhiệt Stochastic vi mô & Sàn RSI an toàn
             let stoch_thresh = pb_cfg.stoch_pullback_thresh.max(1.0);
             if stoch_k < (100.0 - stoch_thresh) || rsi < (100.0 - pb_cfg.rsi_max_cap) {
                 return None;
             }
 
-            // Chốt chặn 3: Gradient vận tốc nến xác nhận lực cung (cấm nến xanh bốc đầu)
-            if clv > -0.15 || close > open {
+            // 🛡️ Chốt chặn 2: Soft Stochastic Hook Guard (Chống bán khống khi FOMO bốc đầu)
+            if stoch_k > 90.0 && stoch_k > prev_stoch_k {
+                return None; // Đang tăng dựng đứng, cấm chặn đầu xe lửa!
+            }
+
+            // Chốt chặn 3: Xác nhận lực cung vi mô (Cho phép nến xanh rút râu trên CLV <= -0.40)
+            if clv > -0.15 || (close > open && clv > -0.40) {
                 return None;
             }
 
-            let f_dist = sat_proximity(delta_kama.abs(), max_dist);
             let stoch_dist = (100.0 - stoch_k).max(0.0);
             let f_stoch = sat_proximity(stoch_dist, stoch_thresh);
-            let score_short = convex_combine(&[f_slope, f_dist, f_stoch], &[1.0, 1.0, 1.0]);
+            let f_clv = ((-clv - 0.15) / 0.85).clamp(0.0, 1.0);
+            let score_short = convex_combine(&[f_slope, f_stoch, f_clv], &[0.40, 0.30, 0.30]);
 
             if score_short >= pb_cfg.min_activation_score {
-                // 🛡️ Structural SL neo trên đỉnh nhịp hồi hoặc đường kháng cự KAMA
-                let base_resistance = high.max(kama_mid);
-                let mut sl = base_resistance + buffer;
+                // 🛡️ Structural SL neo chặt chẽ theo đỉnh cụm 3 nến vi mô (Khử 100% KAMA Suction Trap)
+                let mut sl = swing_high + buffer;
                 if sl <= close {
                     sl = close + buffer.max(close * 0.002);
                 }
@@ -184,5 +195,245 @@ impl TacticalScanner for TrendPBScanner {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ferro_trade::data::{RawDataCache, DataView};
+    use ferro_trade::backtest::manager::IndicatorManager;
+    use ferro_trade::broker::position::Position;
+    use smallvec::SmallVec;
+    use std::collections::HashMap;
+
+    fn setup_mock_tick(
+        opens: Vec<f64>,
+        highs: Vec<f64>,
+        lows: Vec<f64>,
+        closes: Vec<f64>,
+        _i: usize,
+    ) -> (DataView, IndicatorManager, SmallVec<[ferro_trade::broker::actions::Action; 4]>, Vec<ferro_trade::broker::trade::Trade>) {
+        let len = closes.len();
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        (DataView::new(raw_cache), IndicatorManager::new(), SmallVec::new(), Vec::new())
+    }
+
+    #[test]
+    fn test_trend_pb_sl_geometry_no_kama_suction() {
+        let len = 10;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1998.0; len];
+        let mut closes = vec![2004.0; len];
+        opens[i] = 2000.0;
+        highs[i] = 2005.0;
+        lows[i] = 1998.0;
+        closes[i] = 2004.0; // CLV = (2*2004 - 2005 - 1998)/(2005-1998) = 5/7 = 0.71
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.rsi_max_cap = 70.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.struct_sl_buffer_atr = 0.50;
+
+        let mut sensors = HeliosSensors::default();
+        // Giả lập KAMA 4h nằm tít phía dưới cách 5% (1900.0 so với giá 2004.0)
+        sensors.kama_mid = std::sync::Arc::new(vec![1900.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]); // buffer = 4.0 * 0.5 = 2.0
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.25; len]); // Uptrend mạnh
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "Trend_PB phải kích hoạt Long!");
+        let p = prop.unwrap();
+        let sl = p.suggested_sl.unwrap();
+
+        // Với low=1998 và buffer=2.0 -> SL = 1996.0
+        // Khẳng định SL không bị kéo tụt xuống KAMA 1900.0!
+        assert!((sl - 1996.0).abs() < 1e-4, "SL phải neo tại 1996.0, thực tế nhận được: {}", sl);
+        assert!(sl > 1950.0, "KAMA Suction Trap bị triệt tiêu hoàn toàn!");
+    }
+
+    #[test]
+    fn test_trend_pb_allows_red_hammer() {
+        let len = 10;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1995.0; len];
+        let mut closes = vec![1999.0; len];
+        // Nến thân đỏ nhẹ: Open = 2000.0, Close = 1999.0 (Close < Open)
+        // High = 2001.0, Low = 1995.0 (Tr_span = 6.0)
+        // Close = 1999.5 -> 2*1999.5 - (2001 + 1995) = 3999 - 3996 = 3 -> CLV = 3/6 = 0.50 >= 0.40!
+        opens[i] = 2000.0;
+        highs[i] = 2001.0;
+        lows[i] = 1995.0;
+        closes[i] = 1999.5;
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.rsi_max_cap = 70.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "Nến Hammer thân đỏ rút chân mạnh CLV=0.50 PHẢI được phê duyệt mở Long!");
+    }
+
+    #[test]
+    fn test_trend_pb_soft_hook_guard_blocks_falling_knife() {
+        let len = 10;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2002.0; len];
+        let mut lows = vec![1990.0; len];
+        let mut closes = vec![1998.0; len];
+        opens[i] = 1995.0;
+        highs[i] = 2000.0;
+        lows[i] = 1992.0;
+        closes[i] = 1998.0; // CLV dương
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        // Kịch bản A: Stoch cực thấp (4.0 < 10.0) và ĐANG CẮM ĐẦU RƠI (prev = 8.0, curr = 4.0)
+        let mut stoch_falling = vec![30.0; len];
+        stoch_falling[i - 1] = 8.0;
+        stoch_falling[i] = 4.0;
+
+        let mut sensors_falling = HeliosSensors::default();
+        sensors_falling.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_falling.stoch_trend_k = std::sync::Arc::new(stoch_falling);
+        sensors_falling.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_falling = TrendPBScanner.scan(&tick, &sensors_falling, &matrix, &config);
+        assert!(prop_falling.is_none(), "Soft Hook Guard PHẢI chặn đứng dao rơi khi Stoch < 10 và đang cắm đầu!");
+
+        // Kịch bản B: Stoch cực thấp (4.0 < 10.0) nhưng ĐÃ NGÓC ĐẦU UỐN CONG (prev = 2.0, curr = 4.0)
+        let mut stoch_hooked = vec![30.0; len];
+        stoch_hooked[i - 1] = 2.0;
+        stoch_hooked[i] = 4.0;
+
+        let mut sensors_hooked = HeliosSensors::default();
+        sensors_hooked.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_hooked.stoch_trend_k = std::sync::Arc::new(stoch_hooked);
+        sensors_hooked.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_hooked = TrendPBScanner.scan(&tick, &sensors_hooked, &matrix, &config);
+        assert!(prop_hooked.is_some(), "Soft Hook Guard PHẢI phê duyệt khi Stoch đã ngóc đầu tạo đáy!");
+    }
+
+    #[test]
+    fn test_trend_pb_3_bar_swing_anchoring() {
+        let len = 10;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2005.0; len];
+        let mut lows = vec![1998.0; len];
+        let mut closes = vec![2004.0; len];
+
+        // Nến i: low = 2000.0
+        // Nến i-1: cây nến nhúng râu sâu nhất quét thanh khoản low = 1992.0!
+        // Nến i-2: low = 1996.0
+        lows[i - 2] = 1996.0;
+        lows[i - 1] = 1992.0; // Đáy swing thực tế của cả nhịp hồi
+        lows[i] = 2000.0;
+        closes[i] = 2004.0;
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.struct_sl_buffer_atr = 0.50; // buffer = 4.0 * 0.5 = 2.0
+
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some());
+        let sl = prop.unwrap().suggested_sl.unwrap();
+
+        // swing_low = min(2000, 1992, 1996) = 1992.0. SL = 1992.0 - 2.0 = 1990.0
+        assert!((sl - 1990.0).abs() < 1e-4, "SL phải neo theo đáy sâu nhất 1992.0 -> SL=1990.0, thực tế: {}", sl);
     }
 }

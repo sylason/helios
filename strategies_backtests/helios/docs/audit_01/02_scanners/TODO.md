@@ -12,17 +12,17 @@
 
 ## 🎯 GIAI ĐOẠN 1: KHỬ BẪY HÌNH HỌC STOP LOSS & MỞ KHÓA TÍN HIỆU BỊ VETO
 
-### 1. [ ] `TODO-SCN-01`: Khử KAMA Suction Trap & Nới Lỏng Nến Rút Chân (`Trend_PB`)
+### 1. [x] `TODO-SCN-01`: Khử KAMA Suction Trap & Nới Lỏng Nến Rút Chân (`Trend_PB`)
 - **Tài liệu chi tiết:** [§4 trong 03_trend_pb_deep_dive.md](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/02_scanners/03_trend_pb_deep_dive.md#4-đề-xuất-cải-tiến-cốt-lõi-cho-trend_pb)
 - **Vị trí code:** [`scanners/trend_pb.rs:112, 122-126, 159, 170-174`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs#L122)
 - **Các bước triển khai:**
-  - [ ] **Bước 1.1:** Sửa hình học SL Long: Bỏ `.min(kama_mid)`, chuyển thành `let sl = low - buffer;`.
-  - [ ] **Bước 1.2:** Sửa hình học SL Short: Bỏ `.max(kama_mid)`, chuyển thành `let sl = high + buffer;`.
-  - [ ] **Bước 1.3:** Nâng cấp bộ lọc nến xác nhận: Cho phép nến thân đỏ nếu lực rút chân mạnh (`if clv < 0.15 || (close < open && clv < 0.40) { return None; }`).
-  - [ ] **Bước 1.4:** Áp dụng tương tự cho chiều Short (`if clv > -0.15 || (close > open && clv > -0.40) { return None; }`).
+  - [x] **Bước 1.1:** Sửa hình học SL Long: Bỏ `.min(kama_mid)`, chuyển thành `let sl = low - buffer;`.
+  - [x] **Bước 1.2:** Sửa hình học SL Short: Bỏ `.max(kama_mid)`, chuyển thành `let sl = high + buffer;`.
+  - [x] **Bước 1.3:** Nâng cấp bộ lọc nến xác nhận: Cho phép nến thân đỏ nếu lực rút chân mạnh (`if clv < 0.15 || (close < open && clv < 0.40) { return None; }`).
+  - [x] **Bước 1.4:** Áp dụng tương tự cho chiều Short (`if clv > -0.15 || (close > open && clv > -0.40) { return None; }`).
 - **Tiêu chí nghiệm thu (Unit Tests):**
-  - [ ] Test `test_trend_pb_sl_geometry_no_kama_suction`: Khi giá cao hơn KAMA 2 ATR, SL phải neo theo `low - buffer`, không bị kéo xuống KAMA.
-  - [ ] Test `test_trend_pb_allows_red_hammer`: Nến thân đỏ nhẹ nhưng $CLV = 0.50$ vẫn được chấp thuận mở Long.
+  - [x] Test `test_trend_pb_sl_geometry_no_kama_suction`: Khi giá cao hơn KAMA 2 ATR, SL phải neo theo `low - buffer`, không bị kéo xuống KAMA.
+  - [x] Test `test_trend_pb_allows_red_hammer`: Nến thân đỏ nhẹ nhưng $CLV = 0.50$ vẫn được chấp thuận mở Long.
 
 ---
 

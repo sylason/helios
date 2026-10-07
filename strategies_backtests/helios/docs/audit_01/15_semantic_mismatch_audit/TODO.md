@@ -44,7 +44,7 @@ flowchart TD
     - Hoặc scale `micro_natr_ratio` theo thời gian nắm giữ kỳ vọng $\text{ratio} \times \sqrt{T_{\text{hold}}}$.
   - **Test Case:** Đảm bảo với dữ liệu BTC/ETH bình thường, tỷ lệ Flatline Veto giảm từ 95% xuống dưới 15% (chỉ chặn khi thị trường thực sự đóng băng thanh khoản).
 
-- [ ] **`TODO-SEM-02`**: Khử KAMA Suction Trap & Chuẩn Hóa `delta_kama` trong `trend_pb.rs`
+- [x] **`TODO-SEM-02`**: Khử KAMA Suction Trap & Chuẩn Hóa `delta_kama` trong `trend_pb.rs`
   - **File:** [`strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs#L79-L170)
   - **Vấn đề:** 
     1. `(close - kama_mid)` tính trên KAMA 4h nhưng bị chia cho ATR 1m làm `delta_kama` vọt lên $15 \to 50$ ATR, vượt trần 3.5 ATR $\to$ Tê liệt kích hoạt!

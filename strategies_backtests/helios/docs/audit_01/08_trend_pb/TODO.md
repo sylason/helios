@@ -7,27 +7,27 @@
 
 ## 🔥 NHÓM 1: CÁC CHỐT CHẶN SINH TỬ TRONG CODE `trend_pb.rs` (CRITICAL)
 
-- [ ] **TODO-PB-01: Khử Bẫy KAMA Suction Trap (Sửa Neo Stop Loss Động)**
+- [x] **TODO-PB-01: Khử Bẫy KAMA Suction Trap (Sửa Neo Stop Loss Động)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:122-126, 170-174`
   - **Bản chất:** Bỏ phép toán `.min(kama_mid)` cho Long và `.max(kama_mid)` cho Short. Khi nến hồi nông giữ được nhịp trên KAMA (`low > kama_mid`), chỉ neo SL theo `low - buffer` của nến hiện tại/gần nhất để giữ SL gọn trong trần 15% ROE.
   - **Test case:** Unit test với nhịp hồi nông cách KAMA 1.5 ATR $\to$ SL không bị dãn quá 1.0 ATR $\to$ không bị Arbiter VETO.
 
-- [ ] **TODO-PB-02: Giải Phóng Nến Pinbar / Hammer Rút Chân (Bỏ Bẫy Retail Candle Color Dogma)**
+- [x] **TODO-PB-02: Giải Phóng Nến Pinbar / Hammer Rút Chân (Bỏ Bẫy Retail Candle Color Dogma)**
   - **File:** `trend_pb.rs:112-114, 159-161`
   - **Bản chất:** Cho phép nến thân đỏ mỏng vào lệnh Long nếu có lực hấp thụ rút chân mạnh ($CLV \ge 0.50$). Chỉ cấm khi $CLV < 0.15$ HOẶC ($Close < Open$ VÀ $CLV < 0.50$). Tương tự cho Short.
   - **Test case:** Nến Hammer đỏ rút râu với $CLV = 0.85 \to$ Được phép Long thành công.
 
-- [ ] **TODO-PB-03: Sửa Lỗi Mất Tính Định Hướng Trong `f_dist`**
+- [x] **TODO-PB-03: Sửa Lỗi Mất Tính Định Hướng Trong `f_dist`**
   - **File:** `trend_pb.rs:116, 163`
   - **Bản chất:** Bỏ phép lấy `.abs()` trong `sat_proximity(delta_kama.abs(), max_dist)`. Khi giá xuyên thủng KAMA ($\text{delta\_kama} < 0$ cho Long), phải áp dụng hệ số phạt (penalty) thay vì thưởng điểm cao.
   - **Test case:** Giá thủng KAMA -0.4 ATR phải có điểm khoảng cách thấp hơn rõ rệt so với giá giữ vững hỗ trợ +0.1 ATR.
 
-- [ ] **TODO-PB-04: Bổ Sung Tín Hiệu Stochastic Ngóc Đầu Đảo Chiều (Stoch Hook Guard)**
+- [x] **TODO-PB-04: Bổ Sung Tín Hiệu Stochastic Ngóc Đầu Đảo Chiều (Stoch Hook Guard)**
   - **File:** `trend_pb.rs:106, 153`
   - **Bản chất:** Cấm Long khi $\text{stoch\_k} < 5.0$ (đang cắm đầu rơi tự do / thác lũ thanh lý) hoặc yêu cầu xác nhận ngóc đầu $\text{stoch\_k} \ge \text{stoch\_k}[i-1]$ (hoặc $\text{stoch\_k} \ge \text{stoch\_d}$).
   - **Test case:** Nến đang rơi tự do Stoch = 0 bị từ chối; nến tạo đáy cong ngóc đầu được phê duyệt.
 
-- [ ] **TODO-PB-05: Đưa Lực Nến `clv` Vào Hàm Chấm Điểm Lồi**
+- [x] **TODO-PB-05: Đưa Lực Nến `clv` Vào Hàm Chấm Điểm Lồi**
   - **File:** `trend_pb.rs:118, 166`
   - **Bản chất:** Bổ sung thành phần $f_{\text{clv}}$ vào `convex_combine(&[f_slope, f_dist, f_stoch, f_clv], &[0.35, 0.25, 0.20, 0.20])` để nâng phổ điểm tự tin của Trend_PB lên dải $0.75 \sim 0.88$, đủ sức cạnh tranh công bằng với Momentum.
   - **Test case:** Cú rút chân mạnh $CLV = 0.95$ nhận điểm tự tin cao hơn cú rút chân yếu $CLV = 0.20$.
