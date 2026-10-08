@@ -134,17 +134,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, c) in champs.iter().enumerate() {
         if i >= 10 { break; }
 
-        let ret = c.stats.get("Return %").unwrap_or(&0.0);
-        let dd = c.stats.get("Max DD %").unwrap_or(&0.0);
-        let trades = c.stats.get("Trades").unwrap_or(&0.0);
-        let win_rate = c.stats.get("Win Rate %").unwrap_or(&0.0);
-        let best = c.stats.get("Best Trade %").unwrap_or(&0.0);
-        let worst = c.stats.get("Worst Trade %").unwrap_or(&0.0);
-        let pf = c.stats.get("Profit Factor").unwrap_or(&0.0);
-        let sharpe = c.stats.get("Sharpe").unwrap_or(&0.0);
-        let sortino = c.stats.get("Sortino").unwrap_or(&0.0);
+        let ret = c.stats.return_pct;
+        let dd = c.stats.max_drawdown_pct;
+        let trades = c.stats.total_trades;
+        let win_rate = c.stats.win_rate_pct;
+        let best = c.stats.best_trade_pct;
+        let worst = c.stats.worst_trade_pct;
+        let pf = c.stats.profit_factor;
+        let sharpe = c.stats.sharpe_ratio;
+        let sortino = c.stats.sortino_ratio;
 
-        println!("{:<5} | {:<10.2} | {:<10.2} | {:<8.0} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.4} | {:<10.4}", 
+        println!("{:<5} | {:<10.2} | {:<10.2} | {:<8} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.2} | {:<10.4} | {:<10.4}", 
             i+1, ret, dd, trades, win_rate, best, worst, pf, sharpe, sortino);
         
         if let Some(dna) = &c.dna {

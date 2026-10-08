@@ -7,15 +7,20 @@
 
 ## 🔥 NHÓM 1: CÁC CHỐT CHẶN SINH TỬ TRONG CODE `trend_pb.rs` (CRITICAL)
 
-- [x] **TODO-PB-01: Khử Bẫy KAMA Suction Trap (Sửa Neo Stop Loss Động)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:122-126, 170-174`
-  - **Bản chất:** Bỏ phép toán `.min(kama_mid)` cho Long và `.max(kama_mid)` cho Short. Khi nến hồi nông giữ được nhịp trên KAMA (`low > kama_mid`), chỉ neo SL theo `low - buffer` của nến hiện tại/gần nhất để giữ SL gọn trong trần 15% ROE.
-  - **Test case:** Unit test với nhịp hồi nông cách KAMA 1.5 ATR $\to$ SL không bị dãn quá 1.0 ATR $\to$ không bị Arbiter VETO.
+- [x] **TODO-PB-01: Khử Bẫy KAMA Suction Trap (Neo Stop Loss Động Tối Giản Vi Mô)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`
+  - **Bản chất:** Bỏ hoàn toàn việc kéo SL theo KAMA 4h (`low.min(kama_mid)`). Neo SL tối giản hình học theo đáy/đỉnh nến vi mô hiện tại + đệm ATR vi mô: `low - buffer` cho Long và `high + buffer` cho Short kèm chốt chặn chống Inverted SL (`sl >= close` hoặc `sl <= close`).
+  - **Test case:** 
+    - `test_trend_pb_sl_geometry_no_kama_suction`: Đảm bảo SL không bị kéo tụt xuống KAMA 4h cách xa 3.0 ATR.
+    - `test_trend_pb_single_bar_sl_anchoring`: Xác nhận SL neo chuẩn xác tại `low - buffer` của nến hiện tại mà không nhìn ngược đa nến.
 
-- [x] **TODO-PB-02: Giải Phóng Nến Pinbar / Hammer Rút Chân (Bỏ Bẫy Retail Candle Color Dogma)**
-  - **File:** `trend_pb.rs:112-114, 159-161`
-  - **Bản chất:** Cho phép nến thân đỏ mỏng vào lệnh Long nếu có lực hấp thụ rút chân mạnh ($CLV \ge 0.50$). Chỉ cấm khi $CLV < 0.15$ HOẶC ($Close < Open$ VÀ $CLV < 0.50$). Tương tự cho Short.
-  - **Test case:** Nến Hammer đỏ rút râu với $CLV = 0.85 \to$ Được phép Long thành công.
+- [x] **TODO-PB-02: Giải Phóng Nến Pinbar / Hammer Rút Chân & Bổ Sung Gen DNA `min_clv`**
+  - **File:** `trend_pb.rs` & `config.rs:481-484, 1093-1095` & `mod.rs:1325`
+  - **Bản chất:** Xóa bỏ hoàn toàn định kiến màu nến bán lẻ `close < open` và `close > open`. Bổ sung gen DNA `min_clv` vào `TacticalPullbackParams` (`#[dna(min = 0.05, max = 0.50, step = 0.05)]`) đồng bộ chuẩn 4 scanners. Tăng kích thước chuỗi DNA hệ thống từ `102` lên `103` chiều.
+  - **Test case:** 
+    - `test_trend_pb_allows_red_hammer`: Nến Hammer thân đỏ rút chân mạnh ($CLV \ge min\_clv$) được duyệt mở Long.
+    - `test_trend_pb_blocks_marubozu`: Nến đỏ Marubozu xả đặc ruột ($CLV = -1.0$) bị chặn đứng.
+    - `test_dna_width_and_parameter_defs_integrity`: Kiểm tra chuỗi DNA chính xác 103 chiều và chứa trường `pullback.min_clv`.
 
 - [x] **TODO-PB-03: Sửa Lỗi Mất Tính Định Hướng Trong `f_dist`**
   - **File:** `trend_pb.rs:116, 163`
@@ -23,14 +28,14 @@
   - **Test case:** Giá thủng KAMA -0.4 ATR phải có điểm khoảng cách thấp hơn rõ rệt so với giá giữ vững hỗ trợ +0.1 ATR.
 
 - [x] **TODO-PB-04: Bổ Sung Tín Hiệu Stochastic Ngóc Đầu Đảo Chiều (Stoch Hook Guard)**
-  - **File:** `trend_pb.rs:106, 153`
-  - **Bản chất:** Cấm Long khi $\text{stoch\_k} < 5.0$ (đang cắm đầu rơi tự do / thác lũ thanh lý) hoặc yêu cầu xác nhận ngóc đầu $\text{stoch\_k} \ge \text{stoch\_k}[i-1]$ (hoặc $\text{stoch\_k} \ge \text{stoch\_d}$).
-  - **Test case:** Nến đang rơi tự do Stoch = 0 bị từ chối; nến tạo đáy cong ngóc đầu được phê duyệt.
+  - **File:** `trend_pb.rs:101-103, 140-142`
+  - **Bản chất:** Cấm Long khi $\text{stoch\_k} < 10.0$ và đang cắm đầu rơi tự do ($\text{stoch\_k} < \text{prev\_stoch\_k}$); Cấm Short khi $\text{stoch\_k} > 90.0$ và đang dựng đứng ($\text{stoch\_k} > \text{prev\_stoch\_k}$). Chỉ cho phép mở vị thế khi Stochastic đã uốn cong tạo điểm uốn (Hook inflection point).
+  - **Test case:** `test_trend_pb_soft_hook_guard_blocks_falling_knife`: Chặn đứng dao rơi Stoch cắm đầu, phê duyệt khi Stoch đã ngóc đầu tạo đáy.
 
 - [x] **TODO-PB-05: Đưa Lực Nến `clv` Vào Hàm Chấm Điểm Lồi**
-  - **File:** `trend_pb.rs:118, 166`
-  - **Bản chất:** Bổ sung thành phần $f_{\text{clv}}$ vào `convex_combine(&[f_slope, f_dist, f_stoch, f_clv], &[0.35, 0.25, 0.20, 0.20])` để nâng phổ điểm tự tin của Trend_PB lên dải $0.75 \sim 0.88$, đủ sức cạnh tranh công bằng với Momentum.
-  - **Test case:** Cú rút chân mạnh $CLV = 0.95$ nhận điểm tự tin cao hơn cú rút chân yếu $CLV = 0.20$.
+  - **File:** `trend_pb.rs:110, 149`
+  - **Bản chất:** Đưa thành phần $f_{\text{clv}} = \frac{CLV - min\_clv}{1 - min\_clv}$ vào tổ hợp lồi `convex_combine(&[f_slope, f_stoch, f_clv], &[0.40, 0.30, 0.30])`. Phản ánh trung thực chất lượng nến rút chân để tín hiệu Pullback đủ sức cạnh tranh công bằng với Momentum trong đấu thầu Arbiter.
+  - **Test case:** Đã xác minh qua test suite của `trend_pb.rs`.
 
 ---
 

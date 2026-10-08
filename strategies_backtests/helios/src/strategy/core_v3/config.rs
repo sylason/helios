@@ -479,6 +479,11 @@ pub struct TacticalPullbackParams {
     #[dna(min = 0.50, max = 0.90, step = 0.05)]
     #[serde(default = "default_pullback_max_squeeze_intensity")]
     pub max_squeeze_intensity: f64,
+
+    /// 11. Ngưỡng Phân Vị Lực Nến Tối Thiểu CLV (Close Location Value từ 0.05 -> 0.50, Step 0.05 -> 10 nấc)
+    #[dna(min = 0.05, max = 0.50, step = 0.05)]
+    #[serde(default = "default_pullback_min_clv")]
+    pub min_clv: f64,
 }
 
 impl Default for TacticalPullbackParams {
@@ -494,6 +499,7 @@ impl Default for TacticalPullbackParams {
             struct_sl_buffer_atr: default_pullback_sl_buffer_atr(),
             max_boundary_z: default_pullback_max_boundary_z(),
             max_squeeze_intensity: default_pullback_max_squeeze_intensity(),
+            min_clv: default_pullback_min_clv(),
         }
     }
 }
@@ -1082,6 +1088,10 @@ fn default_pullback_max_boundary_z() -> f64 {
 
 fn default_pullback_max_squeeze_intensity() -> f64 {
     0.75
+}
+
+fn default_pullback_min_clv() -> f64 {
+    0.20
 }
 
 fn default_reversal_min_clv() -> f64 {

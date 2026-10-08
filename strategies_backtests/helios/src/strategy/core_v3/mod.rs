@@ -1322,7 +1322,9 @@ mod tests {
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
-        assert_eq!(width, 102, "DNA_WIDTH phải là chính xác 102 chiều sau khi loại bỏ base_sl_atr theo TODO-RSK-02!");
+        assert_eq!(width, 103, "DNA_WIDTH phải là chính xác 103 chiều sau khi bổ sung gen min_clv cho Pullback theo TODO-PB-02!");
+        let has_pb_min_clv = defs.iter().any(|(name, _)| name.contains("pullback.min_clv"));
+        assert!(has_pb_min_clv, "defs phải chứa tactical_sniper.pullback.min_clv theo TODO-PB-02!");
         let has_base_sl = defs.iter().any(|(name, _)| name.contains("base_sl_atr"));
         assert!(!has_base_sl, "defs KHÔNG được chứa base_sl_atr (đã đánh dấu #[dna(skip)] theo TODO-RSK-02)!");
         let has_price_z = defs.iter().any(|(name, _)| name.contains("indicators.price_z_score.lookback"));
