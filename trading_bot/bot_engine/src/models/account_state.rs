@@ -54,6 +54,7 @@ pub enum AccountEvent {
         executed_qty: f64,
         client_order_id: String,
         order_id: i64,
+        realized_pnl: f64,
     },
 }
 

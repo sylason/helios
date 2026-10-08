@@ -39,8 +39,8 @@ const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
 
 // 2. Dữ liệu & Cửa sổ thời gian
-const TOTAL_FETCH_DAYS: i64 = 22;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 8 ngày OOS Paper Trade test
-const TRAIN_WINDOW_DAYS: i64 = 14;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
+const TOTAL_FETCH_DAYS: i64 = 67;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 8 ngày OOS Paper Trade test
+const TRAIN_WINDOW_DAYS: i64 = 62;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
 const VALIDATION_SPAN_DAYS: i64 = 3;     // Độ dài cửa sổ nến kiểm định Out-Of-Sample WFE Gate (3 ngày = 4.320 nến 1m)
 const VALIDATION_SPAN_BARS: usize = (VALIDATION_SPAN_DAYS * 24 * 60) as usize; // 4.320 nến (Tỷ lệ vàng 80/20)
 

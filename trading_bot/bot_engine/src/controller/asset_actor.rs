@@ -87,10 +87,15 @@ pub struct AssetActor {
     pub pending_dna: Option<crate::models::models::OptimizedDna>,
     /// Chốt chặn Cooldown hai chiều tại Engine chống bẫy Alternating Whipsaw (Dual Sentinels)
     pub cooldown_guard: EngineCooldownGuard,
+    /// Bộ đếm số lượng nến đơn điệu tăng dần (Monotonic Sequence Counter)
+    /// Đảm bảo không bao giờ bị bão hòa trần khi bộ đệm trượt ohlcv đạt 43,200 nến
+    pub processed_candles_count: usize,
     /// Bản sao cấu hình chiến lược Helios V3 để đọc động tham số DNA
     pub helios_config: HeliosConfigV3,
     /// Ảnh chụp vị thế chu kỳ trước phục vụ Unified Lifecycle Sentinel nhận diện đóng lệnh
     pub previous_position: Option<LivePositionState>,
+    /// Bộ đệm tạm thời chứa lệnh vừa đóng để truyền vào HeliosBridge trong nến đóng vị thế
+    pub last_closed_trade_for_bridge: Option<crate::execution::paper_trader::PaperTradeRecord>,
 }
 
 impl AssetActor {
@@ -127,8 +132,10 @@ impl AssetActor {
             initial_sync_until: None,
             pending_dna: None,
             cooldown_guard: EngineCooldownGuard::default(),
+            processed_candles_count: 0,
             helios_config: HeliosConfigV3::default(),
             previous_position: None,
+            last_closed_trade_for_bridge: None,
         }
     }
 
@@ -179,6 +186,11 @@ impl AssetActor {
         let engine_closed_trade = self.execution_engine.take_last_closed_trade();
 
         if pos_closed || engine_closed_trade.is_some() {
+            // 🎯 LƯU VẾT CHO HELIOS BRIDGE TRUYỀN VÀO STRATEGY QUA TICKCONTEXT
+            if let Some(ref trade) = engine_closed_trade {
+                self.last_closed_trade_for_bridge = Some(trade.clone());
+            }
+
             let stop_cfg = &self.helios_config.risk_management.stop_management;
             
             // Phân định thắng/thua bằng Dual-Feed (tự động trừ phí sàn, không bẫy mệnh giá):
@@ -306,7 +318,7 @@ impl AssetActor {
                         // Nếu đang có vị thế mở -> Khóa vị thế với DNA cũ, lưu DNA mới vào pending_dna để kích hoạt sau khi vị thế đóng.
                         if let Some(pos) = self.execution_engine.get_position() {
                             let side_str = if pos.position_amt > 0.0 { "LONG" } else { "SHORT" };
-                            let current_bars = self.asset.ohlcv.len().saturating_sub(pos.live_entry_bar);
+                            let current_bars = self.processed_candles_count.saturating_sub(pos.live_entry_bar);
                             warn!(
                                 "🔒 [LOCK DNA ON ACTIVE TRADE] Symbol: {} | Active Position: {} @ {:.2} (Age: {} bars) \
                                 | DNA HOT-SWAP RECEIVED MID-TRADE! Locking active trade with existing DNA. Storing new DNA (Fitness: {:.2}%, Dim: {}) in pending_dna!",
@@ -354,7 +366,7 @@ impl AssetActor {
                 Ok(acc_evt) = self.account_rx.recv() => {
                     self.execution_engine.on_account_event(&acc_evt).await;
                     let last_close = self.asset.get_candles_vec().last().map(|c| c.close).unwrap_or(0.0);
-                    let bar_idx = self.asset.get_candles_vec().len().saturating_sub(1);
+                    let bar_idx = self.processed_candles_count.saturating_sub(1);
                     self.sync_and_handle_closed_positions(bar_idx, last_close);
                 }
 
@@ -478,7 +490,7 @@ impl AssetActor {
             if let Some(ref dna) = *dna_data {
                 if let Some(pos) = self.execution_engine.get_position() {
                     let side_str = if pos.position_amt > 0.0 { "LONG" } else { "SHORT" };
-                    let current_bars = self.asset.ohlcv.len().saturating_sub(pos.live_entry_bar);
+                    let current_bars = self.processed_candles_count.saturating_sub(pos.live_entry_bar);
                     warn!(
                         "🔒 [LOCK DNA ON ACTIVE TRADE] Symbol: {} | Active Position: {} @ {:.2} (Age: {} bars) \
                         | Postponing DNA update (Fitness: {:.2}%) until position closes! Storing in pending_dna.",
@@ -534,6 +546,7 @@ impl AssetActor {
         for candle in candles {
             self.asset.push_candle(candle);
         }
+        self.processed_candles_count = self.asset.get_candles_vec().len();
 
         info!("✅ [{}] Synchronized {} historical 1m candles into Rolling Buffer (Total buffer: {}).", 
             self.symbol, count, self.asset.get_candles_vec().len());
@@ -545,6 +558,7 @@ impl AssetActor {
         
         // 1. Đẩy vào Rolling Buffer (Trí nhớ 30 ngày)
         self.asset.push_candle(candle.clone());
+        self.processed_candles_count = self.processed_candles_count.saturating_add(1);
 
         let current_close = candle.close;
 
@@ -564,11 +578,11 @@ impl AssetActor {
 
             let full_buffer = self.asset.get_candles_vec();
             let live_position = self.execution_engine.get_position();
-            let current_bar_idx = full_buffer.len().saturating_sub(1);
+            let current_bar_idx = self.processed_candles_count.saturating_sub(1);
             
             // Cắt nến bộ nhớ: Đảm bảo cửa sổ luôn chứa nến mở vị thế (live_entry_bar) và padding an toàn
             let max_mem = if let Some(ref pos) = live_position {
-                let pos_age = full_buffer.len().saturating_sub(pos.live_entry_bar);
+                let pos_age = current_bar_idx.saturating_sub(pos.live_entry_bar);
                 self.config.max_live_mem_candles.max(pos_age + self.config.buffer_padding_bars)
             } else {
                 self.config.max_live_mem_candles
@@ -596,7 +610,9 @@ impl AssetActor {
                     current_position.as_ref(),
                     strategy.as_mut(),
                     current_equity,
+                    self.last_closed_trade_for_bridge.as_ref(),
                 );
+                self.last_closed_trade_for_bridge = None;
 
                 // 🛡️ BƯỚC 2: CHỐT CHẶN REVENGE RE-ENTRY & COOLDOWN GUARD (DUAL SENTINELS)
                 let mut valid_actions = Vec::new();
@@ -810,5 +826,53 @@ mod tests {
 
         assert!(!is_hard_win);
         assert!(!is_hard_be, "Lệnh HardStopLoss tuyệt đối không được coi là True BE!");
+    }
+
+    #[test]
+    fn test_monotonic_sequence_counter_cooldown_saturated_buffer() {
+        // Mô phỏng TODO-ACT-01: Bộ đệm đã bão hòa ở ngưỡng 43,200 nến
+        let mut processed_candles_count: usize = 43_200;
+        let mut guard = EngineCooldownGuard::default();
+
+        // Lệnh bị dính StopLoss tại cây nến 43,199 (current_bar_idx = processed_candles_count - 1)
+        let current_bar_idx: usize = processed_candles_count.saturating_sub(1); // 43,199
+        let cooldown_penalty: usize = 15;
+        guard.locked_until_bar = current_bar_idx + cooldown_penalty; // 43,214
+
+        // Tại các cây nến tiếp theo trong thời gian phạt: VETO phải chặn
+        for _ in 0..15 {
+            processed_candles_count += 1;
+            let bar_idx = processed_candles_count.saturating_sub(1);
+            if bar_idx < guard.locked_until_bar {
+                assert!(guard.should_veto(bar_idx, true), "Phải chặn vào lệnh khi chưa hết cooldown");
+            }
+        }
+
+        // Cây nến thứ 16 sau lệnh thua: bar_idx = 43,214 -> guard mở khóa hoàn toàn
+        let unlock_bar_idx = processed_candles_count.saturating_sub(1);
+        assert_eq!(unlock_bar_idx, 43_214);
+        assert!(!guard.should_veto(unlock_bar_idx, true), "Cooldown phải tự giải phóng sau 15 nến!");
+    }
+
+    #[test]
+    fn test_pos_age_calculation_monotonic_counter_saturated_buffer() {
+        // Mô phỏng TODO-ACT-01: Tính tuổi vị thế khi buffer ohlcv đã bão hòa 43,200
+        let buffer_len_capped: usize = 43_200;
+        let mut processed_candles_count: usize = 50_000;
+
+        // Vị thế được mở tại bar_idx = 50,000
+        let live_entry_bar: usize = processed_candles_count;
+
+        // Trôi qua 120 nến mới trong khi buffer ohlcv vẫn bị trần ở 43,200
+        processed_candles_count += 120;
+        let current_bar_idx: usize = processed_candles_count.saturating_sub(1); // 50,119
+
+        // Logic cũ (lỗi): buffer_len_capped.saturating_sub(live_entry_bar) -> 43,200 - 50,000 = 0
+        let old_broken_age = buffer_len_capped.saturating_sub(live_entry_bar);
+        assert_eq!(old_broken_age, 0, "Logic cũ bị bug bóp nghẹt pos_age về 0!");
+
+        // Logic mới (chuẩn): current_bar_idx.saturating_sub(live_entry_bar) -> 50,119 - 50,000 = 119
+        let new_fixed_age = current_bar_idx.saturating_sub(live_entry_bar);
+        assert_eq!(new_fixed_age, 119, "Logic mới phản ánh chuẩn xác 119 nến đã trôi qua!");
     }
 }

@@ -337,6 +337,7 @@ impl WsManager {
                     let executed_qty = parse_f64(&o.z);
                     let client_order_id = o.c.clone().unwrap_or_default();
                     let order_id = o.i.unwrap_or(0);
+                    let realized_pnl = parse_f64(&o.rp);
 
                     events.push(crate::models::account_state::AccountEvent::OrderTradeUpdate {
                         symbol,
@@ -348,6 +349,7 @@ impl WsManager {
                         executed_qty,
                         client_order_id,
                         order_id,
+                        realized_pnl,
                     });
                 }
             }
@@ -464,7 +466,8 @@ mod tests {
                 "N": "USDT",
                 "T": 1568747495000,
                 "wt": "MARK_PRICE",
-                "ot": "STOP_MARKET"
+                "ot": "STOP_MARKET",
+                "rp": "-15.50"
             }
         }"#;
 
@@ -474,7 +477,7 @@ mod tests {
         let events = WsManager::parse_user_data_event(&parsed);
         assert_eq!(events.len(), 1);
 
-        if let AccountEvent::OrderTradeUpdate { symbol, side, order_type, order_status, avg_price, orig_qty, executed_qty, client_order_id, order_id } = &events[0] {
+        if let AccountEvent::OrderTradeUpdate { symbol, side, order_type, order_status, avg_price, orig_qty, executed_qty, client_order_id, order_id, realized_pnl } = &events[0] {
             assert_eq!(symbol, "ETHUSDT");
             assert_eq!(side, "SELL");
             assert_eq!(order_type, "STOP_MARKET");
@@ -484,6 +487,7 @@ mod tests {
             assert_eq!(*executed_qty, 1.0);
             assert_eq!(client_order_id, "test-client-id-123");
             assert_eq!(*order_id, 99887766);
+            assert_eq!(*realized_pnl, -15.50);
         } else {
             panic!("Event không phải là OrderTradeUpdate!");
         }

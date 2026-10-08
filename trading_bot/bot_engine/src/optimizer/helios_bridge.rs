@@ -158,6 +158,7 @@ impl HeliosBridge {
         live_position: Option<&crate::controller::asset_actor::LivePositionState>,
         strategy: &mut dyn Strategy,
         current_equity: f64,
+        last_closed_trade: Option<&crate::execution::paper_trader::PaperTradeRecord>,
     ) -> Vec<Action> {
         if candles.is_empty() {
             return Vec::new();
@@ -262,6 +263,26 @@ impl HeliosBridge {
 
         let mut actions_buffer: SmallVec<[Action; 4]> = SmallVec::new();
 
+        // 🎯 UNIFIED CLOSED-TRADE PIPELINE: Chuyển tiếp lệnh vừa đóng vào Strategy qua TickContext
+        let closed_trade_snapshot = last_closed_trade.map(|t| {
+            let is_long = t.pos_type == crate::execution::paper_trader::PositionType::Long;
+            let size = if is_long { 1.0 } else { -1.0 };
+            let mut trade = ferro_trade::broker::trade::Trade::new(
+                t.id,
+                size,
+                t.entry_price,
+                0, // entry_bar tượng trưng
+                None,
+                t.opening_playbook_tag.clone(),
+            );
+            trade.exit_price = Some(t.exit_price);
+            trade.exit_bar = Some(last_idx);
+            // Gán commission sao cho trade.pl(None) khớp chuẩn xác net_pnl
+            let gross_pnl = (t.exit_price - t.entry_price) * size;
+            trade.commission = gross_pnl - t.net_pnl;
+            trade
+        });
+
         {
             let mut tick_context = TickContext {
                 i: last_idx,
@@ -269,7 +290,7 @@ impl HeliosBridge {
                 data_view: &data_view,
                 indicator_manager: &indicator_manager,
                 trades: &live_trades,
-                last_closed_trade: None,
+                last_closed_trade: closed_trade_snapshot.as_ref(),
                 actions: &mut actions_buffer,
                 position: live_position_snapshot,
             };
