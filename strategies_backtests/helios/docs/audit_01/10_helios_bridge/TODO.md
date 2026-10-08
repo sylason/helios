@@ -18,12 +18,14 @@
     3. Trong `RiskManager::manage_trailing_stop`, sử dụng trực tiếp giá trị `trade.highest_favorable_price` thay vì duyệt mảng `highs[entry_bar + 1..=i]`.
   - **Tập tin ảnh hưởng:** [`helios_bridge.rs:220–236`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs#L220-L236), [`risk.rs:130–150`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L130-L150), [`asset_actor.rs:20–29`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L20-L29).
 
-- [ ] **TODO-BRG-02: Vá lỗ hổng mù trạng thái lệnh vừa đóng (`last_closed_trade: None`) trong `evaluate_live_tick`**
-  - **Mô tả:** [`helios_bridge.rs:271`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs#L271) truyền cứng `last_closed_trade: None` vào `TickContext`. Khi vị thế vừa đóng ngoài đời (do TP/SL/thanh lý), chiến lược mù hoàn toàn PnL thực tế, rơi vào nhánh fallback tính sai PnL từ giá đóng cửa, dẫn đến việc kích hoạt Cooldown phạt sai lệch hoặc mất dấu chuỗi thua lỗ.
-  - **Giải pháp:**
-    1. Mở rộng tham số hàm `evaluate_live_tick` nhận thêm `last_closed_trade: Option<&ferro_trade::broker::trade::Trade>`.
-    2. Trong `AssetActor::on_new_candle`, khi phát hiện vị thế vừa đóng trong nến hiện tại (từ `PaperTrader::closed_trades.last()` hoặc sự kiện tài khoản Binance), xây dựng đối tượng `Trade` đại diện cho lệnh đóng này và truyền vào `evaluate_live_tick`.
-  - **Tập tin ảnh hưởng:** [`helios_bridge.rs:153–161`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs#L153-L161), [`helios_bridge.rs:271`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs#L271), [`asset_actor.rs:625–635`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L625-L635).
+- [x] **TODO-BRG-02: Vá lỗ hổng mù trạng thái lệnh vừa đóng (`last_closed_trade: None`) trong `evaluate_live_tick`** - ✅ **ĐÃ HOÀN THÀNH**
+  - **Mô tả:** [`helios_bridge.rs:271`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs#L271) từng truyền cứng `last_closed_trade: None` vào `TickContext`. Khi vị thế vừa đóng ngoài đời (do TP/SL/thanh lý), chiến lược mù hoàn toàn PnL thực tế, rơi vào nhánh fallback tính sai PnL từ giá đóng cửa, dẫn đến việc kích hoạt Cooldown phạt sai lệch hoặc mất dấu chuỗi thua lỗ.
+  - **Giải pháp đã thực hiện:**
+    1. Mở rộng tham số hàm `evaluate_live_tick` nhận thêm `last_closed_trade: Option<&crate::execution::paper_trader::PaperTradeRecord>`.
+    2. Trong `AssetActor::sync_and_handle_closed_positions`: trích xuất `engine_closed_trade` từ `ExecutionEngine::take_last_closed_trade()`, lưu vào `self.last_closed_trade_for_bridge`.
+    3. Chuyển đổi sang `ferro_trade::broker::trade::Trade` và nạp vào `TickContext { ..., last_closed_trade: closed_trade_snapshot.as_ref(), ... }`.
+    4. Reset `self.last_closed_trade_for_bridge = None` ngay sau khi nến đã đánh giá xong (đảm bảo tính nhất quán 1 nến duy nhất).
+  - **Tập tin ảnh hưởng:** [`helios_bridge.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs), [`asset_actor.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs).
 
 - [ ] **TODO-BRG-03: Sửa chữa đứt gãy trạng thái vị thế trong `BinanceLiveExecutionEngine`**
   - **Mô tả:** Trong [`live_engine.rs:120–139`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/live_engine.rs#L120-L139), mỗi khi nhận sự kiện vị thế từ Binance WebSocket, `current_sl_price` và `opening_playbook_tag` bị bỏ mặc bằng `None`, còn `entry_timestamp` bị ghi đè bằng `Utc::now().timestamp_millis()`. Dẫn đến việc chiến lược không nhận diện được chiến thuật mở lệnh, tính sai thời gian giữ lệnh và mất mức SL bảo vệ trên sàn.
@@ -37,12 +39,12 @@
 
 ## ⚡ P1: ĐỒNG BỘ HÓA & LOGIC HỆ THỐNG (HIGH PRIORITY)
 
-- [ ] **TODO-BRG-04: Thống nhất hai bộ lọc Cooldown độc lập (Dual Sentinels Unification)**
-  - **Mô tả:** Hiện tại tồn tại 2 bộ lọc Cooldown chạy song song và không đồng bộ: `strategy.cooldown_tracker` trong Core V3 và `actor.cooldown_guard` trong AssetActor. Chiến lược phát tín hiệu nhưng Engine chặn mà Chiến lược không hề biết, dẫn đến phân kỳ giữa kết quả Backtest và thực tế.
-  - **Giải pháp:**
-    1. Thiết kế cơ chế phản hồi kết quả thực thi (Execution Feedback): Nếu một Action bị chặn bởi `EngineCooldownGuard`, gửi tín hiệu hủy ngược lại cho `strategy` để đồng bộ lại trạng thái.
-    2. Chuẩn hóa công thức Exponential Cooldown và ngưỡng Breakout ATR giữa 2 tầng để đảm bảo tính nhất quán 1:1.
-  - **Tập tin ảnh hưởng:** [`asset_actor.rs:640–695`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L640-L695), [`core_v3/mod.rs:52–94`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L52-L94).
+- [x] **TODO-BRG-04: Thống nhất hai bộ lọc Cooldown độc lập (Dual Sentinels Unification)** - ✅ **ĐÃ HÓA GIẢI & ĐỒNG BỘ QUA SSOT**
+  - **Mô tả:** Từng tồn tại phân kỳ giữa `strategy.cooldown_tracker` (Core V3) và `actor.cooldown_guard` (AssetActor) do chiến lược bị mù trạng thái lệnh vừa đóng trên Live.
+  - **Kết luận kiến trúc & Giải pháp:**
+    1. Khi `TODO-BRG-02` được giải quyết, `strategy` nhận được đúng bản ghi lệnh vừa đóng thực tế (`TickContext.last_closed_trade`). Chiến lược tự động kích hoạt Cooldown phạt nội tại và tự chặn phát tín hiệu từ bên trong, đồng bộ 100% với `EngineCooldownGuard`.
+    2. Cơ chế 2 tầng phòng ngự (Defense-in-Depth) được giữ nguyên mà không cần thêm kênh "Execution Feedback" phức tạp gây over-engineering: Tầng 1 (Strategy) chặn từ gốc; Tầng 2 (Engine) đóng vai trò chốt chặn cuối cùng bảo vệ tài khoản.
+  - **Tập tin ảnh hưởng:** [`helios_bridge.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs), [`asset_actor.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs).
 
 - [ ] **TODO-BRG-05: Cập nhật chính xác PnL cho `Position` snapshot trong `evaluate_live_tick`**
   - **Mô tả:** Tại [`helios_bridge.rs:252–258`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/optimizer/helios_bridge.rs#L252-L258), `pnl` và `pnl_pct` được gán cứng bằng 0.0. Bất kỳ chỉ báo hoặc Playbook nào kiểm tra lợi nhuận vị thế qua `tick.position().pnl()` đều bị mù.

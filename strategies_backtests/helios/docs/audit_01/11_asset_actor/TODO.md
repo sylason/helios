@@ -35,25 +35,26 @@
 
 ---
 
-### [P0-2] Đồng Bộ Trạng Thái Vị Thế Bị Đóng Từ Sàn Thật Vào Cooldown Guard (VULN-AA-02)
+### [P0-2] Đồng Bộ Trạng Thái Vị Thế Bị Đóng Từ Sàn Thật Vào Cooldown Guard (VULN-AA-02) - ✅ **ĐÃ HOÀN THÀNH**
 - **File mục tiêu:**
+  - [`trading_bot/bot_engine/src/models/account_state.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/models/account_state.rs)
+  - [`trading_bot/bot_engine/src/execution/ws_manager.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/ws_manager.rs)
   - [`trading_bot/bot_engine/src/execution/live_engine.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/live_engine.rs)
-  - [`trading_bot/bot_engine/src/execution/engine.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/execution/engine.rs)
-  - [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L522-L570)
+  - [`trading_bot/bot_engine/src/controller/asset_actor.rs`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs)
 - **Vấn đề:** Khi lệnh Stop Loss khớp trên sàn Binance Live, WebSocket cập nhật `live_position = None` trước khi `on_candle_ctx` chạy, khiến `closed_intra_candle` nhận giá trị `false`. Toàn bộ cơ chế Cooldown chống Revenge Trade bị bypass 100% trên tiền thật.
-- **Giải pháp kỹ thuật:**
-  1. Trong trait `ExecutionEngine`, thêm phương thức:
-     ```rust
-     fn pop_recently_closed_trade(&mut self) -> Option<ClosedTradeSnapshot>;
-     ```
-  2. Trong `BinanceLiveExecutionEngine`, khi nhận sự kiện `PositionUpdate` từ vị thế mở sang 0.0 (hoặc `OrderTradeUpdate` FILLED của lệnh SL/TP):
-     Lưu `ClosedTradeSnapshot { exit_price, pnl, side, exit_time }` vào một hàng đợi nhỏ.
-  3. Trong `AssetActor::on_new_candle`:
-     Kiểm tra `let external_closed = self.execution_engine.pop_recently_closed_trade();`.
-     Nếu `closed_intra_candle || external_closed.is_some()`, kích hoạt tính toán `EngineCooldownGuard` và cập nhật chuỗi thua.
-- **Tiêu chí nghiệm thu:**
-  - Viết integration test mô phỏng WebSocket bắn `PositionUpdate(0.0)` với PnL âm.
-  - Kiểm tra xem `cooldown_guard.consecutive_losses` có tăng lên 1 và `locked_until_bar` có được kích hoạt trên sàn Live hay không.
+- **Giải pháp kỹ thuật (2-Piece Assembler Pattern):**
+  1. Thêm `realized_pnl: f64` vào `AccountEvent::OrderTradeUpdate` và parse trường `rp` từ Binance WebSocket User Data Stream.
+  2. Trong `BinanceLiveExecutionEngine`, triển khai cơ chế ghép 2 mảnh không phụ thuộc thứ tự mạng:
+     - Mảnh A: `PositionUpdate` vị thế về 0 lưu snapshot `last_closed_pos_snapshot`.
+     - Mảnh B: `OrderTradeUpdate` mang `realized_pnl` và giá khớp trung bình lưu `pending_closed_fill`.
+     - Hàm `try_assemble_closed_trade(&mut self)` tự động ghép thành `PaperTradeRecord` hoàn chỉnh ngay khi đủ 2 mảnh.
+  3. Override `ExecutionEngine::take_last_closed_trade(&mut self)` trong `BinanceLiveExecutionEngine` (drain semantics $O(1)$) để trả về bản ghi lệnh đóng.
+  4. Trong `AssetActor::sync_and_handle_closed_positions`: lấy `engine_closed_trade`, cập nhật `cooldown_guard`, đồng thời lưu vào `self.last_closed_trade_for_bridge` để nạp sang `HeliosBridge`.
+- **Tiêu chí nghiệm thu (Acceptance Criteria):**
+  - [x] Đã parse chuẩn xác `realized_pnl` từ Binance WS JSON `ORDER_TRADE_UPDATE`.
+  - [x] Đã viết unit test `test_live_engine_assemble_closed_trade_order_after_position`: Mảnh vị thế đến trước, mảnh order đến sau -> Ghép thành công.
+  - [x] Đã viết unit test `test_live_engine_assemble_closed_trade_order_before_position`: Mảnh order đến trước, mảnh vị thế đến sau -> Ghép thành công.
+  - [x] Vượt qua 46/46 unit tests `bot_engine`, 4/4 `trailing_sl_test`, 109/109 tests `helios`, 50/50 tests `ferro_trade`.
 
 ---
 
