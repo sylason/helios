@@ -273,47 +273,23 @@ pub struct VolZScoreParams {
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
 pub struct MatrixConfig {
+    /// 1. Chu kỳ quan sát xu hướng vĩ mô (100 -> 1000 nến, Step 30 -> 31 nấc)
     #[dna(min = 100.0, max = 1000.0, step = 30.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub trend_lookback: usize,
     
+    /// 2. Chu kỳ quan sát độ nén bão hòa Squeeze (100 -> 1000 nến, Step 30 -> 31 nấc)
     #[dna(min = 100.0, max = 1000.0, step = 30.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub squeeze_lookback: usize,
-    
-    // 🛡️ TASK-MAT-07: Bỏ gen DNA momentum_lookback (cấu hình mảng chết liquidity)
-    #[dna(skip)]
-    #[serde(default = "default_matrix_lookback", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
-    pub momentum_lookback: usize,
-    
-    // 🛡️ TASK-MAT-07: Bỏ gen DNA volume_lookback (gen mồ côi 100% không nơi nào đọc)
-    #[dna(skip)]
-    #[serde(default = "default_matrix_lookback", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
-    pub volume_lookback: usize,
-    
-    #[dna(min = 1.0, max = 10.0, step = 0.3)]
-    pub z_score_sensitivity: f64,
 
-    /// 🚀 3 GEN TRỰC GIAO CHO DE-OVERENGINEERED MATRIX:
-    // 🛡️ TASK-MAT-07: Bỏ gen DNA adx_trend_threshold (trục trực giao chết trend_axis)
-    #[dna(skip)]
-    #[serde(default = "default_adx_trend_threshold")]
-    pub adx_trend_threshold: f64,
-
-    /// 2. Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR (0.05 -> 0.50, Step 0.01 -> 46 nấc)
+    /// 3. Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR (0.05 -> 0.50, Step 0.01 -> 46 nấc)
     #[dna(min = 0.05, max = 0.50, step = 0.01)]
     #[serde(default = "default_kama_slope_scale_atr")]
     pub kama_slope_scale_atr: f64,
-
-    /// 3. Độ nhạy bùng nổ khối lượng qua Z-score (Đã bỏ gen DNA theo TASK-MAT-01: Scanners đọc trực tiếp sensors.vol_z_score)
-    #[serde(default = "default_vol_z_sensitivity")]
-    pub vol_z_sensitivity: f64,
 }
 
-fn default_matrix_lookback() -> usize { 20 }
-fn default_adx_trend_threshold() -> f64 { 25.0 }
 fn default_kama_slope_scale_atr() -> f64 { 0.20 }
-fn default_vol_z_sensitivity() -> f64 { 1.50 }
 
 /// ============================================================================
 /// PHẦN 3: BỘ TRỌNG TÀI & ĐẤU GIÁ TÍN HIỆU (ARBITER CONFIDENCE AUCTION CONFIG)

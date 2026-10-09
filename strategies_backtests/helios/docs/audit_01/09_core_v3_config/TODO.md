@@ -10,7 +10,7 @@
 
 | Thứ Tự | Mã Task | Tên Công Việc | Mức Độ | Trạng Thái | File Liên Quan |
 | :---: | :--- | :--- | :---: | :---: | :--- |
-| **1** | `TASK-CFG-01` | Loại bỏ Gen Ma `volume_lookback` khỏi `MatrixConfig` và hạ DNA_WIDTH về 94 | **CRITICAL** | 🔴 Chưa xử lý | `core_v3/config.rs:266–269`, `core_v3/mod.rs:887` |
+| **1** | `TASK-CFG-01` | Loại bỏ Gen Ma `volume_lookback`, `z_score_sensitivity` và dọn sạch `MatrixConfig` (DNA về 102) | **CRITICAL** | 🟢 Đã xử lý | `core_v3/config.rs:274–287`, `core_v3/mod.rs:1325` |
 | **2** | `TASK-CFG-02` | Sửa lỗi toán học dải gen `momentum.rsi_threshold` chống đảo lộn Short/Long | **CRITICAL** | 🔴 Chưa xử lý | `core_v3/config.rs:408–409`, `scanners/momentum_ignition.rs:55–60` |
 | **3** | `TASK-CFG-03` | Rút ngắn dải gen `absorption.struct_sl_buffer_atr` từ 10.0 ATR về 2.50 ATR | **HIGH** | 🔴 Chưa xử lý | `core_v3/config.rs:554–555`, `core_v3/risk.rs:44–50` |
 | **4** | `TASK-CFG-04` | Hiệu chỉnh cận dưới `momentum.vol_z_threshold` & `reversal.exhaustion_vol_drop` | **HIGH** | 🔴 Chưa xử lý | `core_v3/config.rs:412, 499`, `scanners/` |
@@ -23,7 +23,7 @@
 
 ## 📋 CHI TIẾT CÁC ĐẦU VIỆC CẦN THỰC HIỆN
 
-### 🔴 TASK-CFG-01: Loại bỏ Gen Ma `volume_lookback` khỏi `MatrixConfig` và hạ DNA_WIDTH về 94
+### 🟢 TASK-CFG-01: Loại bỏ Gen Ma `volume_lookback`, `z_score_sensitivity` khỏi `MatrixConfig` và hạ DNA_WIDTH về 102 - [ĐÃ XỬ LÝ ✅]
 - **Mã lỗi liên đới:** `VULN-CFG-01` (Critical).
 - **Hiện trạng:**
   - Tại [`core_v3/config.rs:266–269`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L266-L269), trường `volume_lookback` có gắn attribute `#[dna(min = 100.0, max = 1000.0, step = 30.0)]`, chiếm 1 chiều gen DNA với 31 nấc tìm kiếm.

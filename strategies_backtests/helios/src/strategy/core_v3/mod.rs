@@ -890,8 +890,7 @@ mod tests {
         sensors.kc_lower = std::sync::Arc::new(vec![1988.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
 
-        let mut config = HeliosConfigV3::default();
-        config.matrix.z_score_sensitivity = 2.0;
+        let config = HeliosConfigV3::default();
         let _matrix = MarketMatrixV3::from_sensors(&config, &sensors);
 
         // 🎯 KIỂM CHỨNG FLAW-3.2:
@@ -1322,7 +1321,7 @@ mod tests {
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
-        assert_eq!(width, 103, "DNA_WIDTH phải là chính xác 103 chiều sau khi bổ sung gen min_clv cho Pullback theo TODO-PB-02!");
+        assert_eq!(width, 102, "DNA_WIDTH phải là chính xác 102 chiều sau khi loại bỏ gen ma z_score_sensitivity theo TODO-CFG-05!");
         let has_pb_min_clv = defs.iter().any(|(name, _)| name.contains("pullback.min_clv"));
         assert!(has_pb_min_clv, "defs phải chứa tactical_sniper.pullback.min_clv theo TODO-PB-02!");
         let has_base_sl = defs.iter().any(|(name, _)| name.contains("base_sl_atr"));
@@ -1353,6 +1352,7 @@ mod tests {
         let has_matrix_adx = defs.iter().any(|(name, _)| name.contains("adx_trend_threshold"));
         let has_matrix_vol_lb = defs.iter().any(|(name, _)| name.contains("volume_lookback"));
         let has_matrix_mom_lb = defs.iter().any(|(name, _)| name.contains("momentum_lookback"));
+        let has_matrix_z_sens = defs.iter().any(|(name, _)| name.contains("z_score_sensitivity"));
         let has_matrix_kama_scale = defs.iter().any(|(name, _)| name.contains("kama_slope_scale_atr"));
         let has_matrix_vol_z = defs.iter().any(|(name, _)| name.contains("vol_z_sensitivity"));
         let has_phantom_comp = defs.iter().any(|(name, _)| name.contains("min_confidence_compression"));
@@ -1400,6 +1400,7 @@ mod tests {
         assert!(!has_matrix_adx, "defs KHÔNG được chứa matrix.adx_trend_threshold (đã loại bỏ theo TASK-MAT-07)!");
         assert!(!has_matrix_vol_lb, "defs KHÔNG được chứa matrix.volume_lookback (đã loại bỏ theo TASK-MAT-07)!");
         assert!(!has_matrix_mom_lb, "defs KHÔNG được chứa matrix.momentum_lookback (đã loại bỏ theo TASK-MAT-07)!");
+        assert!(!has_matrix_z_sens, "defs KHÔNG được chứa matrix.z_score_sensitivity (đã loại bỏ theo TODO-CFG-05)!");
         assert!(has_matrix_kama_scale, "defs phải chứa matrix.kama_slope_scale_atr!");
         assert!(!has_matrix_vol_z, "defs KHÔNG được chứa matrix.vol_z_sensitivity (đã loại bỏ theo TASK-MAT-01)!");
         assert!(!has_phantom_comp, "defs KHÔNG được chứa gen ma min_confidence_compression!");
