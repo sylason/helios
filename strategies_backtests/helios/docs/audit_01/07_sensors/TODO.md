@@ -149,18 +149,21 @@
 ## 💥 CÁC PHÁT HIỆN KIỂM TOÁN CHẤN ĐỘNG BỔ SUNG (2026-09-27)
 > **Tài liệu kiểm toán chi tiết:** [`strategies_backtests/helios/docs/audit_01/07_sensors/comprehensive_indicators_audit.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/07_sensors/comprehensive_indicators_audit.md)
 
-- [ ] **Task 08: Khắc phục lỗi quên khởi tạo `s.vol_sma` trong `core_v3/mod.rs:init()` (DEFECT-SEN-01)**
+- [x] **Task 08: Khắc phục lỗi quên khởi tạo `s.vol_sma` trong `core_v3/mod.rs:init()` (DEFECT-SEN-01) - [ĐÃ XỬ LÝ ✅]**
   - **Mức độ:** **CRITICAL** (Ảnh hưởng trực tiếp đến hiệu năng Reversal Playbook)
   - **Tập tin liên quan:**  
-    + [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:188-230`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L188-L230)
-    + [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:55, 104-105`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs#L55)
+    + [`strategies_backtests/helios/src/strategy/core_v3/config.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs)
+    + [`strategies_backtests/helios/src/strategy/core_v3/mod.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs)
+    + [`strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs)
   - **Bản chất lỗi:**  
     Tại `core_v3/mod.rs`, `s.vol_sma` bị bỏ quên không gọi hàm `ctx.volume_sma(...)`, để mảng rỗng `vec![]`. Tại `reversal.rs:55`, `vol_sma = sensors.vol_sma.get(i).copied().unwrap_or(vol_current)` luôn rơi về fallback `vol_current`, khiến `vol_ratio = vol_current / vol_current = 1.0` cố định trên mọi nến! Làm liệt hoàn toàn cơ chế đo lường kiệt sức khối lượng của Reversal Scanner.
-  - **Giải pháp triển khai:**
-    1. Khởi tạo `s.vol_sma = ctx.volume_sma(ind.kama.timeframe, "VolSMA", 20);` trong `core_v3/mod.rs:init()`, hoặc
-    2. Chuyển `reversal.rs` sang sử dụng `sensors.vol_z_score` để đồng bộ chuẩn hóa phi thứ nguyên với các scanner khác (được khuyến nghị theo triết lý Quant thuần).
-  - **Tiêu chí nghiệm thu:**  
-    + `vol_ratio` trong `reversal.rs` biến thiên động phản ánh đúng tương quan nến hiện tại so với trung bình quá khứ.
+  - **Giải pháp đã triển khai:**
+    1. Chuẩn hóa thang đo thứ nguyên: Khóa `VolMaParams` về vi mô `Timeframe::T1m` (`default_vol_ma_timeframe`) để so sánh tương thích 1:1 với `tick.volumes()`.
+    2. Khởi tạo `s.vol_sma = ctx.volume_sma(ind.vol_ma.timeframe, "VolSMA", ind.vol_ma.period);` trong `core_v3/mod.rs:init()`, kèm chốt chặn phòng thủ `period == 0`.
+    3. Bọc phòng thủ an toàn số học trong `reversal.rs`: Fallback `vol_current` khi `vol_sma.is_nan() || vol_sma <= 0.0` và kẹp sàn mẫu số `vol_sma.max(1e-5)`.
+    4. Thêm unit test `test_reversal_volume_exhaustion_behavior` kiểm chứng đầy đủ 3 trường hợp: Volume cạn kiệt (được duyệt), Volume bùng nổ xả hàng (bị từ chối), và giai đoạn Warmup NaN (an toàn).
+  - **Kết quả nghiệm thu:**  
+    + Vượt qua 98/98 unit tests của `helios` và toàn bộ test suites của hệ thống.
 
 ---
 

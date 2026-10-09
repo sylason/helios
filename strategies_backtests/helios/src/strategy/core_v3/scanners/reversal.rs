@@ -52,7 +52,8 @@ impl TacticalScanner for ReversalScanner {
         let low_price = tick.lows()[i];
         let close_price = tick.closes()[i];
         let vol_current = tick.volumes()[i];
-        let vol_sma = sensors.vol_sma.get(i).copied().unwrap_or(vol_current);
+        let vol_sma_raw = sensors.vol_sma.get(i).copied().unwrap_or(vol_current);
+        let vol_sma = if vol_sma_raw.is_nan() || vol_sma_raw <= 0.0 { vol_current } else { vol_sma_raw };
         let mfi = sensors.mfi.get(i).copied().unwrap_or(50.0);
 
         // 🛡️ Task REV-01: Vá Lỗ Hổng Bảo Vệ NaN & Dữ liệu không hợp lệ
@@ -101,7 +102,7 @@ impl TacticalScanner for ReversalScanner {
 
         let f_z = sat_unbounded(z_score.abs(), z_thresh);
         let f_disp = sat_unbounded(displacement, min_disp_dist);
-        let vol_ratio = if vol_sma > 0.0 { vol_current / vol_sma } else { 1.0 };
+        let vol_ratio = if vol_sma > 0.0 { vol_current / vol_sma.max(1e-5) } else { 1.0 };
         let f_vol = sat_proximity(vol_ratio, exhaust_drop);
 
         // Trọng số lồi (Convex Weights)

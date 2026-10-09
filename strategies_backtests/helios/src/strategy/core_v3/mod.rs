@@ -86,7 +86,8 @@ impl Strategy for HeliosStrategyV3 {
 
         if ind.natr.period == 0 || ind.mfi.period == 0 || 
            ind.kama.short_period == 0 || ind.kama.long_period == 0 ||
-           ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 {
+           ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 ||
+           ind.vol_ma.period == 0 {
             println!("!!! [SAFETY V3.3] CRITICAL PERIOD IS ZERO, ABORTING INIT !!!");
             return;
         }
@@ -172,6 +173,7 @@ impl Strategy for HeliosStrategyV3 {
 
         // ABSORPTION VWMA SENSOR
         s.vwma = ctx.vwma(ind.vwma.timeframe, "VWMA", ind.vwma.period);
+        s.vol_sma = ctx.volume_sma(ind.vol_ma.timeframe, "VolSMA", ind.vol_ma.period);
         s.z_score = ctx.z_score(ind.price_z_score.timeframe, "PriceZScore", ind.price_z_score.lookback);
         s.vol_z_score = ctx.z_score_volume(ind.vol_z_score.timeframe, "VolZScore", ind.vol_z_score.lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
@@ -867,6 +869,80 @@ mod tests {
 
         let prop = ReversalScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "ReversalScanner PHẢI trả về None khi dữ liệu chứa NaN!");
+    }
+
+    #[test]
+    fn test_reversal_volume_exhaustion_behavior() {
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.reversal.z_score_threshold = 2.0;
+        config.tactical_sniper.reversal.min_activation_score = 0.70;
+        config.tactical_sniper.reversal.min_reversal_clv = 0.20;
+        config.tactical_sniper.reversal.mfi_reversal_thresh = 30.0;
+        config.tactical_sniper.reversal.exhaustion_vol_drop = 0.50;
+        config.tactical_sniper.reversal.w_z_score = 0.35;
+        config.tactical_sniper.reversal.w_displacement = 0.35;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![-3.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2040.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![25.0; len]);
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        let make_tick = |vol: f64| {
+            let raw_cache = RawDataCache {
+                datetime: std::sync::Arc::new(vec![0i64; len]),
+                open: std::sync::Arc::new(vec![2000.0; len]),
+                high: std::sync::Arc::new(vec![2000.0; len]),
+                low: std::sync::Arc::new(vec![1950.0; len]),
+                close: std::sync::Arc::new(vec![1995.0; len]),
+                volume: std::sync::Arc::new(vec![vol; len]),
+                custom_columns: HashMap::new(),
+            };
+            DataView::new(raw_cache)
+        };
+
+        let indicator_manager = IndicatorManager::new();
+        let mut actions_exhaust = SmallVec::new();
+        let mut actions_dump = SmallVec::new();
+        let trades = Vec::new();
+
+        // 1. KỊCH BẢN 1: Volume cạn kiệt (vol = 300 < 500 = 0.5 * SMA) -> Phê duyệt mở Long!
+        let dv_exhaust = make_tick(300.0);
+        let tick_exhaust = ferro_trade::strategy::TickContext {
+            i, equity: 1000.0, data_view: &dv_exhaust, indicator_manager: &indicator_manager,
+            trades: &trades, last_closed_trade: None, actions: &mut actions_exhaust, position: Position::default(),
+        };
+        let prop_exhaust = ReversalScanner.scan(&tick_exhaust, &sensors, &matrix, &config);
+        assert!(prop_exhaust.is_some(), "ReversalScanner PHẢI phê duyệt khi volume cạn kiệt!");
+
+        // 2. KỊCH BẢN 2: Volume xả hàng bùng nổ (vol = 2500 >> 500) -> f_vol = 0.0 -> Bị loại bỏ!
+        let dv_dump = make_tick(2500.0);
+        let tick_dump = ferro_trade::strategy::TickContext {
+            i, equity: 1000.0, data_view: &dv_dump, indicator_manager: &indicator_manager,
+            trades: &trades, last_closed_trade: None, actions: &mut actions_dump, position: Position::default(),
+        };
+        let prop_dump = ReversalScanner.scan(&tick_dump, &sensors, &matrix, &config);
+        assert!(prop_dump.is_none(), "ReversalScanner PHẢI từ chối khi volume xả hàng bùng nổ để chống bắt dao rơi!");
+
+        // 3. KỊCH BẢN 3: Warmup NaN trong vol_sma -> Fallback an toàn, không sinh panic
+        let mut sensors_nan = sensors.clone();
+        sensors_nan.vol_sma = std::sync::Arc::new(vec![f64::NAN; len]);
+        let prop_nan = ReversalScanner.scan(&tick_exhaust, &sensors_nan, &matrix, &config);
+        let _ = prop_nan; // Xác nhận chạy an toàn không panic
     }
 
     #[test]

@@ -216,17 +216,18 @@ pub struct MfiParams {
 pub struct VolMaParams {
     #[serde(default = "default_vol_ma_period", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub period: usize,
-    #[serde(default = "default_timeframe")]
+    #[serde(default = "default_vol_ma_timeframe")]
     pub timeframe: Timeframe,
 }
 
 fn default_vol_ma_period() -> usize { 20 }
+fn default_vol_ma_timeframe() -> Timeframe { Timeframe::T1m }
 
 impl Default for VolMaParams {
     fn default() -> Self {
         Self {
             period: default_vol_ma_period(),
-            timeframe: default_timeframe(),
+            timeframe: default_vol_ma_timeframe(),
         }
     }
 }
