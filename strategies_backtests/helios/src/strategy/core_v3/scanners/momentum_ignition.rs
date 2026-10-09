@@ -102,7 +102,7 @@ impl TacticalScanner for MomentumIgnitionScanner {
 
         // 🛡️ VẤN ĐỀ 4 (TODO-P0-06): Chuẩn hóa điểm số phi thứ nguyên qua Tanh & Trọng số DNA
         let vol_thresh = if mom_cfg.vol_z_threshold <= 0.0 { 1.50 } else { mom_cfg.vol_z_threshold.max(0.10) };
-        let rsi_thresh = if mom_cfg.rsi_threshold <= 0.0 { 60.0 } else { mom_cfg.rsi_threshold.clamp(40.0, 90.0) };
+        let rsi_thresh = if mom_cfg.rsi_threshold <= 0.0 { 60.0 } else { mom_cfg.rsi_threshold.clamp(50.0, 90.0) };
 
         let f_vol = sat_unbounded(raw_vol_z, vol_thresh);
         // Đặt mục tiêu bứt phá chuẩn qua BB là 0.25 ATR

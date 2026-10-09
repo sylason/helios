@@ -39,8 +39,8 @@
 
 ---
 
-### 🔴 TASK-CFG-02: Sửa lỗi toán học dải gen `momentum.rsi_threshold` chống đảo lộn Short/Long
-- **Mã lỗi liên đới:** `VULN-CFG-02` (Critical).
+### [x] 🔴 TASK-CFG-02: Sửa lỗi toán học dải gen `momentum.rsi_threshold` chống đảo lộn Short/Long
+- **Mã lỗi liên đới:** `VULN-CFG-02` (Critical) - **ĐÃ GIẢI QUYẾT**.
 - **Hiện trạng:**
   - Tại [`core_v3/config.rs:408–409`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L408-L409):
     ```rust

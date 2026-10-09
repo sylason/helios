@@ -487,8 +487,8 @@ pub struct TacticalMomentumParams {
     #[dna(min = 0.04, max = 0.15, step = 0.01)]
     pub max_initial_sl_pct: f64,
 
-    /// RSI Xung Lực Bùng Nổ (50.0 -> 80.0, Step 1.0 -> 31 nấc)
-    #[dna(min = 50.0, max = 80.0, step = 1.0)]
+    /// RSI Xung Lực Bùng Nổ (52.0 -> 88.0, Step 1.0 -> 37 nấc)
+    #[dna(min = 52.0, max = 88.0, step = 1.0)]
     pub rsi_threshold: f64,
 
     /// Ngưỡng Z-Score bùng nổ xung lực khối lượng (1.00 -> 3.50, Step 0.10 -> 26 nấc)

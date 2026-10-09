@@ -965,6 +965,18 @@ mod tests {
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
         assert_eq!(count_struct_sl, 3, "defs phải chứa chính xác 3 gene struct_sl_buffer_atr cho 3 Scanners (pullback, momentum, absorption)!");
 
+        let rsi_mom_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.rsi_threshold"));
+        assert!(rsi_mom_def.is_some(), "defs phải chứa tactical_sniper.momentum.rsi_threshold!");
+        let (_, rsi_attr) = rsi_mom_def.unwrap();
+        match rsi_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert_eq!(*min, 52.0, "rsi_threshold min phải là 52.0!");
+                assert_eq!(*max, 88.0, "rsi_threshold max phải là 88.0!");
+                assert_eq!(*step, Some(1.0), "rsi_threshold step phải là Some(1.0)!");
+            }
+            _ => panic!("rsi_threshold phải là ParamDefinition::Range"),
+        }
+
         // Thử cập nhật với vector toàn 0.0 (giả sử GA sinh số 0)
         let zeros = vec![0.0; width];
         let mut cfg = HeliosConfigV3::default();
@@ -2324,6 +2336,72 @@ mod tests {
         let sl = p.suggested_sl.unwrap();
         // Low 2014.0 - 0.5 * 10.0 = 2009.0
         assert!(sl < 2014.0, "SL {} phải dưới Low 2014.0", sl);
+    }
+
+    #[test]
+    fn test_momentum_rsi_sub_50_blocks_long() {
+        let len = 50;
+        let i = 49;
+
+        // Nến bứt phá nhẹ qua BB Upper: Close=2021 > bb_upper 2020.0, Low=2018, High=2022, Open=2019
+        // CLV = (2*2021 - 2022 - 2018) / 4 = 2/4 = 0.50 >= 0.20
+        // Breakout dist = 1.0, Target breakout = 10 * 0.25 = 2.5 => f_break = 1.0 / 2.5 = 0.40
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2019.0; len]),
+            high: std::sync::Arc::new(vec![2022.0; len]),
+            low: std::sync::Arc::new(vec![2018.0; len]),
+            close: std::sync::Arc::new(vec![2021.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        // Cố tình truyền cấu hình cũ dị rsi_threshold = 25.0 để kiểm tra chốt chặn clamp(50.0, 90.0)
+        config.tactical_sniper.momentum.rsi_threshold = 25.0;
+        config.tactical_sniper.momentum.vol_z_threshold = 1.5;
+        config.tactical_sniper.momentum.w_breakout = 0.35;
+        config.tactical_sniper.momentum.w_volume = 0.35;
+        // Điểm Breakout (0.35 * 0.40) + Vol (0.35 * tanh(1.0) = 0.266) = 0.406.
+        // Cần thêm f_rsi > 0 để vượt ngưỡng kích hoạt 0.50.
+        config.tactical_sniper.momentum.min_activation_score = 0.50;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.10; len]);
+
+        let matrix = MarketMatrixV3::default();
+
+        // 1. Kịch bản RSI = 45.0 (< 50.0, xu hướng yếu/giảm):
+        // Nếu không có clamp >= 50.0, rsi_threshold=25.0 sẽ cho rsi_excess = 45 - 25 = 20, f_rsi = tanh(20/15) = 0.87,
+        // khiến raw_score = 0.406 + 0.30 * 0.87 = 0.667 > 0.50 (kích hoạt bùng nổ sai lầm trong bear market)!
+        // Nhờ clamp(50.0, 90.0), rsi_thresh = 50.0 => rsi_excess = 0 => f_rsi = 0 => raw_score = 0.406 < 0.50 => CHẶN ĐỨNG!
+        sensors.rsi_momentum = std::sync::Arc::new(vec![45.0; len]);
+        let prop_sub_50 = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_sub_50.is_none(), "Khi RSI < 50.0, điểm RSI Long phải triệt tiêu về 0, không được kích hoạt bùng nổ Long!");
+
+        // 2. Kịch bản RSI = 70.0 (xung lực bùng nổ thực sự):
+        // rsi_thresh = 50.0 => rsi_excess = 70 - 50 = 20 => f_rsi = 0.87 => raw_score = 0.667 > 0.50 => DUYỆT!
+        sensors.rsi_momentum = std::sync::Arc::new(vec![70.0; len]);
+        let prop_strong = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_strong.is_some(), "Khi RSI = 70.0 vượt ngưỡng xung lực, scanner phải kích hoạt bùng nổ Long hợp lệ!");
     }
 
     #[test]
