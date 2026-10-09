@@ -60,6 +60,11 @@ pub trait ExecutionEngine: Send + Sync {
     fn take_last_closed_trade(&mut self) -> Option<crate::execution::paper_trader::PaperTradeRecord> {
         None
     }
+
+    /// Lấy toàn bộ danh sách các lệnh đã đóng (dành cho Paper Trading / Visual Report)
+    fn get_closed_trades(&self) -> Vec<crate::execution::paper_trader::PaperTradeRecord> {
+        Vec::new()
+    }
 }
 
 /// Thành phần cốt lõi dùng chung (ExecutionCore) cho các Engine

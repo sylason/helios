@@ -98,6 +98,13 @@ pub struct AssetActor {
     pub last_closed_trade_for_bridge: Option<crate::execution::paper_trader::PaperTradeRecord>,
 }
 
+/// Kết quả xuất ra khi AssetActor kết thúc vòng đời chạy (phục vụ Audit & Visual Report)
+#[derive(Debug, Clone, Default)]
+pub struct ActorRunOutput {
+    pub closed_trades: Vec<crate::execution::paper_trader::PaperTradeRecord>,
+    pub gatekeeper_zones_json: Option<String>,
+}
+
 impl AssetActor {
     pub fn new(
         symbol: String,
@@ -274,7 +281,7 @@ impl AssetActor {
         false
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self) -> ActorRunOutput {
         info!("🎬 Actor [{}] started with strategy '{}'.", self.symbol, self.strategy_id);
 
         // Báo cáo trạng thái khởi đầu
@@ -284,7 +291,7 @@ impl AssetActor {
         if let Err(e) = self.sync_history().await {
             error!("❌ [{}] Initial Sync failed: {}", self.symbol, e);
             self.update_state(AssetState::Stopped, &format!("Lỗi đồng bộ: {}", e)).await;
-            return;
+            return ActorRunOutput::default();
         }
 
         // 2. Nạp tham số DNA tốt nhất từ Database (Nếu có)
@@ -416,7 +423,13 @@ impl AssetActor {
         self.log_paper_report(last_price, "FINAL RUN SUMMARY");
         self.log_all_trades_report(last_price);
         self.log_final_summary(last_price);
+        let gatekeeper_zones_json = self.strategy.as_ref().and_then(|s| s.get_gatekeeper_zones_json());
+        let closed_trades = self.execution_engine.get_closed_trades();
         info!("🏁 Actor [{}] stopped.", self.symbol);
+        ActorRunOutput {
+            closed_trades,
+            gatekeeper_zones_json,
+        }
     }
 
     /// Áp dụng bộ DNA vào cả Strategy và helios_config với kiểm tra tính hợp lệ và số chiều an toàn tuyệt đối

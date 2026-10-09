@@ -6,3 +6,4 @@ pub mod interface;
 pub mod models;
 pub mod optimizer;
 pub mod strategy_runner;
+pub mod telemetry;

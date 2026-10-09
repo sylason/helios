@@ -10,10 +10,11 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use bot_engine::data_engine::sqlite_impl::SqliteStore;
 use bot_engine::models::weight_monitor::WeightMonitor;
 
-/// Bộ bảo vệ WorkerGuard kép cho 2 luồng log không đồng bộ
+/// Bộ bảo vệ WorkerGuard kép cho 2 luồng log không đồng bộ kèm đường dẫn thư mục log phiên
 pub struct LoggingGuards {
     pub _system: WorkerGuard,
     pub _trades: WorkerGuard,
+    pub log_dir: String,
 }
 
 /// Khởi tạo Logger kép độc lập (Dual-Appender: System Log + Trades OOS Telemetry Log + Lean Console)
@@ -80,6 +81,7 @@ pub fn init_logging(strategy_id: &str) -> Result<LoggingGuards, Box<dyn Error>> 
     Ok(LoggingGuards {
         _system: system_guard,
         _trades: trades_guard,
+        log_dir,
     })
 }
 

@@ -19,10 +19,11 @@ use bot_engine::models::repository::{StrategyRepository, CandleRepository};
 use bot_engine::models::models::Candle;
 use bot_engine::models::bus::EventBus;
 use bot_engine::models::config::EngineConfig;
-use bot_engine::controller::asset_actor::AssetActor;
+use bot_engine::controller::asset_actor::{AssetActor, ActorRunOutput};
 use bot_engine::execution::engine::ExecutionEngineFactory;
 use bot_engine::optimizer::prospector_runner::ProspectorRunner;
 use bot_engine::optimizer::helios_bridge::HeliosBridge;
+use bot_engine::telemetry::visual_report::VisualReportGenerator;
 use helios::strategy::core_v3::HeliosStrategyV3;
 use ferro_trade::strategy::Strategy;
 
@@ -39,8 +40,8 @@ const STRATEGY_ID: &str = "walk_forward_smart_seed";
 
 
 // 2. Dữ liệu & Cửa sổ thời gian
-const TOTAL_FETCH_DAYS: i64 = 67;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 8 ngày OOS Paper Trade test
-const TRAIN_WINDOW_DAYS: i64 = 62;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
+const TOTAL_FETCH_DAYS: i64 = 45;        // Tổng số ngày dữ liệu tải về: 14 ngày Train + 8 ngày OOS Paper Trade test
+const TRAIN_WINDOW_DAYS: i64 = 40;       // Độ dài cửa sổ nến huấn luyện In-Sample (14 ngày, 20.160 nến 1m)
 const VALIDATION_SPAN_DAYS: i64 = 3;     // Độ dài cửa sổ nến kiểm định Out-Of-Sample WFE Gate (3 ngày = 4.320 nến 1m)
 const VALIDATION_SPAN_BARS: usize = (VALIDATION_SPAN_DAYS * 24 * 60) as usize; // 4.320 nến (Tỷ lệ vàng 80/20)
 
@@ -70,7 +71,7 @@ const ENABLE_PAPER_TRADE: bool = true;    // true: Bật Paper Trading ($60 vố
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Khởi tạo Log hệ thống từ module dùng chung
-    let _guard = common::init_logging(STRATEGY_ID)?;
+    let guard = common::init_logging(STRATEGY_ID)?;
 
     info!("================================================================================");
     info!("🧪 BẮT ĐẦU ĐÁNH GIÁ CHIẾN LƯỢC TỊNH TIẾN CÓ SMART SEEDING 0.5%");
@@ -228,7 +229,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_sync_data_rx(rx);
 
         let handle = tokio::spawn(async move {
-            actor.run().await;
+            actor.run().await
         });
 
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -252,8 +253,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut reopt_count = 0usize;
     let mut backtest_count = 0usize;
+    let mut reopt_events: Vec<(i64, String)> = Vec::new();
 
-    for candle in oos_candles {
+    for candle in &oos_candles {
         let current_ts = candle.timestamp;
 
         // Bơm nến đồng bộ có Backpressure (is_historical = true để tắt I/O SQLite thừa thãi)
@@ -309,6 +311,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             info!("🧬 [RE-OPTIMIZE TRIGGERED #{:04}] Cửa sổ tối ưu GA: [{} -> {}]", 
                   reopt_count, opt_start_str, opt_end_str);
+            reopt_events.push((current_ts, format!("Re-Opt #{:04}", reopt_count)));
 
             // [SMART SEEDING]: Lấy 1 cá thể Rank 1 Champion duy nhất từ kết quả trước đó
             let rank1_seed_dna = if !current_dna_vec.is_empty() {
@@ -351,15 +354,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Đóng kênh truyền nến để AssetActor hoàn tất các nến còn đọng và xuất báo cáo tổng kết
     drop(sync_tx);
-    if let Some(handle) = actor_handle {
-        let _ = handle.await;
-    }
+    let run_output = if let Some(handle) = actor_handle {
+        handle.await.unwrap_or_default()
+    } else {
+        ActorRunOutput::default()
+    };
 
     info!("================================================================================");
     info!("✅ KẾT THÚC BÀI ĐÁNH GIÁ WALK-FORWARD EVALUATOR VỚI SMART SEEDING!");
     info!("   Tổng số lần chạy Re-Optimize (N mins): {}", reopt_count);
     info!("   Tổng số lần chạy Single Backtest Eval (M mins): {}", backtest_count);
     info!("================================================================================");
+
+    // 8. TẠO BÁO CÁO TRỰC QUAN OOS VISUAL REPORT (HTML CANVAS 60FPS)
+    info!("🎨 [VISUAL REPORT] Đang khởi tạo báo cáo tương tác OOS HTML tại {}...", guard.log_dir);
+    match VisualReportGenerator::generate(
+        SYMBOL,
+        &oos_candles,
+        &run_output.closed_trades,
+        &reopt_events,
+        run_output.gatekeeper_zones_json.as_deref(),
+        INITIAL_CASH,
+        &guard.log_dir,
+    ) {
+        Ok(html_path) => {
+            info!("🌟 [VISUAL REPORT] Xuất báo cáo HTML thành công: {}", html_path);
+        }
+        Err(e) => {
+            error!("❌ [VISUAL REPORT] Lỗi khi tạo báo cáo HTML: {}", e);
+        }
+    }
 
     // Dọn dẹp sạch sẽ các file database SQLite trong examples/storage sau khi bài test hoàn tất
     info!("🧹 [STORAGE CLEANUP] Đang dọn dẹp các database trong examples/storage...");

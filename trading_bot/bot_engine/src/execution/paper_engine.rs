@@ -148,5 +148,9 @@ impl ExecutionEngine for PaperExecutionEngine {
     fn take_last_closed_trade(&mut self) -> Option<crate::execution::paper_trader::PaperTradeRecord> {
         self.paper_trader.take_last_closed_trade()
     }
+
+    fn get_closed_trades(&self) -> Vec<crate::execution::paper_trader::PaperTradeRecord> {
+        self.paper_trader.closed_trades.clone()
+    }
 }
 
