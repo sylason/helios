@@ -27,78 +27,6 @@ use tracing::warn;
 pub mod telemetry;
 use telemetry::{DecisionCardFormatter, DefenseLedger};
 
-/// Trạng thái Cooldown chống cào lệnh & bẫy trả thù (Losing Streak Memory & Exponential Backoff)
-#[derive(Clone, Debug, Default)]
-pub struct CooldownTracker {
-    pub locked_until_bar: usize,
-    pub locked_side: Option<SignalType>,
-    pub last_exit_price: f64,
-    pub consecutive_losses: usize,
-    pub last_losing_side: Option<SignalType>,
-    pub last_losing_price: f64,
-}
-
-impl CooldownTracker {
-    /// Tính toán số nến cooldown phạt lũy tiến (Exponential Backoff) với trần tối đa (Max Cap = 60 nến ~ 1 giờ)
-    #[inline]
-    pub fn calculate_exponential_cooldown(base_bars: usize, consecutive_losses: usize, max_cap: usize) -> usize {
-        if base_bars == 0 || consecutive_losses == 0 {
-            return 0;
-        }
-        let streak_power = (consecutive_losses.saturating_sub(1)).min(2) as u32;
-        let multiplier = 1usize << streak_power; // 1, 2, hoặc 4
-        let penalty = base_bars.saturating_mul(multiplier);
-        let cap = if max_cap == 0 { 60 } else { max_cap };
-        penalty.min(cap)
-    }
-
-    /// Kiểm tra xem một tín hiệu vào lệnh có bị chặn bởi Cooldown Tracker hay không
-    #[inline]
-    pub fn should_block(
-        &self,
-        enable_cooldown: bool,
-        current_bar: usize,
-        signal: SignalType,
-        current_price: f64,
-        atr: f64,
-        breakout_atr_mult: f64,
-    ) -> bool {
-        if !enable_cooldown {
-            return false;
-        }
-
-        // 🛡️ 1. SAME-SIDE PRICE GUARD:
-        // Nếu đang trong chuỗi thua cùng chiều: Cấm vào lệnh nếu giá hiện tại tồi tệ hơn giá vừa cắt lỗ!
-        if self.consecutive_losses > 0 && self.last_losing_side == Some(signal) {
-            let is_worse_price = match signal {
-                SignalType::Long => current_price < self.last_losing_price,
-                SignalType::Short => current_price > self.last_losing_price,
-            };
-            if is_worse_price {
-                return true; // Chặn đứng bắt dao rơi / cản đầu xe tăng khi giá tồi tệ hơn điểm cắt lỗ
-            }
-        }
-
-        // 🛡️ 2. UNIVERSAL BIDIRECTIONAL EXPONENTIAL COOLDOWN:
-        if current_bar < self.locked_until_bar {
-            let mult = if breakout_atr_mult <= 0.0 { 1.5 } else { breakout_atr_mult };
-            let threshold = mult * atr.max(1e-5);
-
-            // Chỉ mở khóa sớm nếu giá bứt phá vượt ngưỡng thuận chiều
-            let is_favorable_breakout = match signal {
-                SignalType::Long => (current_price - self.last_exit_price) >= threshold,
-                SignalType::Short => (self.last_exit_price - current_price) >= threshold,
-            };
-
-            if !is_favorable_breakout {
-                return true;
-            }
-        }
-
-        false
-    }
-}
-
 /// Chiến lược Helios V3.3 - Clean Quant Architecture
 #[derive(Clone, Debug)]
 pub struct HeliosStrategyV3 {
@@ -106,7 +34,6 @@ pub struct HeliosStrategyV3 {
     pub sensors: HeliosSensors,
     pub matrix: MarketMatrixV3,
     pub debug_mode: bool,
-    pub cooldown_tracker: CooldownTracker,
     pub prev_open_trade: Option<Trade>,
     pub arbiter: HeliosArbiter,
     pub telemetry_enabled: bool,
@@ -129,7 +56,6 @@ impl Strategy for HeliosStrategyV3 {
             sensors: HeliosSensors::default(),
             matrix: MarketMatrixV3::default(),
             debug_mode: std::env::var("HELIOS_DEBUG").is_ok(),
-            cooldown_tracker: CooldownTracker::default(),
             prev_open_trade: None,
             arbiter,
             telemetry_enabled: false,
@@ -293,71 +219,9 @@ impl Strategy for HeliosStrategyV3 {
             self.debug_mode
         );
 
-        // 2. Theo dõi trạng thái đóng lệnh để kích hoạt Cooldown chống cào lệnh
+        // 2. Theo dõi trạng thái đóng lệnh để giải phóng vị thế trước đó
         if !is_pos_open {
-            if let Some(ref last_trade) = self.prev_open_trade {
-                let stop_cfg = &self.config.risk_management.stop_management;
-                if stop_cfg.enable_re_entry_cooldown && stop_cfg.re_entry_cooldown_bars > 0 {
-                    // [CHỐNG BẪY FALSE WIN KHI NẾN RÚT CHÂN]
-                    // Ưu tiên 1: Đọc PnL và giá thoát thực tế 100% từ Broker qua tick.last_closed_trade
-                    // Fallback 2: Nếu chưa có closed_trade, dùng sl_price thay vì current_close
-                    let (is_long, trade_pnl, exit_price) = if let Some(closed) = tick.last_closed_trade {
-                        let exit_p = closed.exit_price.unwrap_or_else(|| tick.closes()[i]);
-                        (closed.is_long(), closed.pl(None), exit_p)
-                    } else {
-                        let is_l = last_trade.is_long();
-                        let exit_p = last_trade.sl_price.unwrap_or_else(|| tick.closes()[i]);
-                        let pnl = if is_l { exit_p - last_trade.entry_price } else { last_trade.entry_price - exit_p };
-                        (is_l, pnl, exit_p)
-                    };
-
-                    let closed_side = if is_long { SignalType::Long } else { SignalType::Short };
-
-                    // Nếu lệnh vừa đóng hòa vốn hoặc lỗ danh nghĩa (<= 0.001)
-                    if trade_pnl <= 0.001 {
-                        // 1. Cập nhật Losing Streak Memory:
-                        if self.cooldown_tracker.last_losing_side == Some(closed_side) {
-                            self.cooldown_tracker.consecutive_losses = self.cooldown_tracker.consecutive_losses.saturating_add(1);
-                        } else {
-                            self.cooldown_tracker.consecutive_losses = 1;
-                        }
-                        self.cooldown_tracker.last_losing_side = Some(closed_side);
-                        self.cooldown_tracker.last_losing_price = exit_price;
-
-                        // 2. Tính phạt Exponential Backoff (15 -> 30 -> 60 nến max cap):
-                        let effective_cooldown = CooldownTracker::calculate_exponential_cooldown(
-                            stop_cfg.re_entry_cooldown_bars,
-                            self.cooldown_tracker.consecutive_losses,
-                            60, // Trần Max Cap 60 nến (~1 giờ) chống khóa vô hạn
-                        );
-
-                        self.cooldown_tracker.locked_until_bar = i + effective_cooldown;
-                        self.cooldown_tracker.locked_side = Some(closed_side);
-                        self.cooldown_tracker.last_exit_price = exit_price;
-
-                        if self.debug_mode {
-                            warn!(
-                                "🛑 [EXPONENTIAL COOLDOWN TRIGGERED] Bar: {} | Side: {:?} | Streak: {} | Penalty: {} bars (Cap: 60) | Exit: {:.2} | Realized PnL: {:.4} <= 0.001 | Locked until Bar: {}",
-                                i, closed_side, self.cooldown_tracker.consecutive_losses, effective_cooldown, exit_price, trade_pnl, self.cooldown_tracker.locked_until_bar
-                            );
-                        }
-                    } else {
-                        // 3. LỆNH THẮNG THỰC TẾ (> 0.001): RESET TOÀN BỘ CHUỖI THUA & COOLDOWN VỀ 0
-                        self.cooldown_tracker.consecutive_losses = 0;
-                        self.cooldown_tracker.locked_until_bar = 0;
-                        self.cooldown_tracker.locked_side = None;
-                        self.cooldown_tracker.last_losing_side = None;
-
-                        if self.debug_mode {
-                            warn!(
-                                "🎉 [COOLDOWN FULL RESET - WINNING TRADE] Bar: {} | Side: {:?} | Entry: {:.2} | Exit: {:.2} | Realized PnL: {:.4} > 0.001 -> Reset streak & Cooldown to 0!",
-                                i, closed_side, last_trade.entry_price, exit_price, trade_pnl
-                            );
-                        }
-                    }
-                }
-                self.prev_open_trade = None;
-            }
+            self.prev_open_trade = None;
         }
 
         // 3. Strict Exclusive Order: Nếu đang có vị thế mở thì không mở lệnh mới
@@ -399,31 +263,7 @@ impl Strategy for HeliosStrategyV3 {
             if let Some(signal) = decision.final_signal {
                 // 4. [ARCH-COOLDOWN-SEPARATION]: Cầu Dao Cooldown VETO được độc quyền sở hữu và thực thi
                 // bởi Bot Engine (AssetActor) dựa trên PnL thực tế của tài khoản (Net PnL).
-                // Helios Strategy chuyên tâm 100% vào việc sinh tín hiệu Alpha, không tự ý chặn tín hiệu bằng PnL ước lượng.
-                // Khối code dưới đây được comment out an toàn để bảo toàn logic kiểm chứng/đối chiếu khi cần.
-                /*
-                let stop_cfg = &self.config.risk_management.stop_management;
-                let current_price = tick.closes()[i];
-                let current_atr = self.sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
-
-                if self.cooldown_tracker.should_block(
-                    stop_cfg.enable_re_entry_cooldown,
-                    i,
-                    signal,
-                    current_price,
-                    current_atr,
-                    stop_cfg.cooldown_breakout_atr_mult,
-                ) {
-                    if self.debug_mode {
-                        warn!(
-                            "⚠️ [COOLDOWN BLOCKED] Bar: {} | Signal: {:?} BLOCKED by Cooldown/Guard! Streak: {} | Locked until: {} | LastExit: {:.2} | Curr: {:.2}",
-                            i, signal, self.cooldown_tracker.consecutive_losses, self.cooldown_tracker.locked_until_bar,
-                            self.cooldown_tracker.last_exit_price, current_price
-                        );
-                    }
-                    return;
-                }
-                */
+                // Helios Strategy chuyên tâm 100% vào việc sinh tín hiệu Alpha, không tự ý can thiệp Cooldown.
                 let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
                 
                 let size = RiskManager::calculate_size(
@@ -596,269 +436,9 @@ mod tests {
     use smallvec::SmallVec;
     use std::collections::HashMap;
 
-    fn should_block_by_cooldown(
-        enable_cooldown: bool,
-        current_bar: usize,
-        locked_until_bar: usize,
-        signal: SignalType,
-        current_price: f64,
-        last_exit_price: f64,
-        atr: f64,
-        atr_mult: f64,
-    ) -> bool {
-        let tracker = CooldownTracker {
-            locked_until_bar,
-            locked_side: None,
-            last_exit_price,
-            consecutive_losses: 0,
-            last_losing_side: None,
-            last_losing_price: 0.0,
-        };
-        tracker.should_block(enable_cooldown, current_bar, signal, current_price, atr, atr_mult)
-    }
 
-    #[test]
-    fn test_cooldown_toggle_disabled() {
-        // Khi enable_re_entry_cooldown = false -> KHÔNG BAO GIỜ CHẶN
-        let blocked = should_block_by_cooldown(
-            false,
-            10,
-            20,
-            SignalType::Long,
-            1760.0,
-            1760.5,
-            5.0,
-            1.5,
-        );
-        assert!(!blocked, "Khi tắt Cooldown, không được chặn lệnh");
-    }
 
-    #[test]
-    fn test_cooldown_same_side_in_range_blocked() {
-        // Khi BẬT, cùng chiều Long, giá chưa thoát range -> BỊ CHẶN
-        let blocked = should_block_by_cooldown(
-            true,
-            10,
-            25,
-            SignalType::Long,
-            1760.0,
-            1760.5,
-            5.0, // 1.5 * ATR = 7.5; diff = 0.5 < 7.5
-            1.5,
-        );
-        assert!(blocked, "Cùng chiều trong vùng nén phải bị chặn");
-    }
 
-    #[test]
-    fn test_cooldown_opposite_side_in_range_blocked() {
-        // 🎯 SỬA FLAW-TSL.7: Khi BẬT, tín hiệu ngược chiều (Short) nhưng giá lình xình trong vùng nhiễu -> PHẢI BỊ CHẶN!
-        // Chống tuyệt đối bẫy Alternating Whipsaw vừa cắt lỗ Long ở đáy lại Short ở đáy.
-        let blocked = should_block_by_cooldown(
-            true,
-            10,
-            25,
-            SignalType::Short, // Tín hiệu ngược chiều
-            1760.0,
-            1760.5, // diff = 1760.5 - 1760.0 = 0.5 < 7.5
-            5.0,
-            1.5,
-        );
-        assert!(blocked, "Ngược chiều trong vùng nhiễu đáy PHẢI BỊ CHẶN để chống Whipsaw 2 đầu!");
-    }
-
-    #[test]
-    fn test_cooldown_opposite_side_breakout_allowed() {
-        // 🎯 SỬA FLAW-TSL.7: Tín hiệu ngược chiều (Short) khi thị trường thực sự sập gãy mạnh -> MỞ KHÓA SỚM!
-        let blocked = should_block_by_cooldown(
-            true,
-            10,
-            25,
-            SignalType::Short,
-            1750.0, // Giá sập từ 1760.5 xuống 1750.0 (diff = 10.5 >= 1.5 * 5.0 = 7.5)
-            1760.5,
-            5.0,
-            1.5,
-        );
-        assert!(!blocked, "Ngược chiều nhưng sập gãy vượt k*ATR phải được giải phóng sớm!");
-    }
-
-    #[test]
-    fn test_cooldown_volatility_breakout_override() {
-        // Khi BẬT, cùng chiều, nhưng giá bứt phá TĂNG NGƯỢC LÊN >= k*ATR -> MỞ KHÓA SỚM
-        let blocked = should_block_by_cooldown(
-            true,
-            10,
-            25,
-            SignalType::Long,
-            1770.0, // diff = 1770.0 - 1760.0 = +10.0 >= 1.5*5.0 (7.5) -> Tăng có lợi
-            1760.0,
-            5.0,
-            1.5,
-        );
-        assert!(!blocked, "Bứt phá biến động tăng mạnh phải mở khóa Cooldown sớm");
-    }
-
-    #[test]
-    fn test_cooldown_falling_knife_blocked() {
-        // 🎯 KIỂM CHỨNG FLAW-4.3 & FLAW-TSL.7: Giá sập hầm giảm sâu 10 USD (1750 < 1760)
-        // Nếu phát tín hiệu Long bắt dao rơi -> TIẾP TỤC CHẶN COOLDOWN!
-        let blocked = should_block_by_cooldown(
-            true,
-            10,
-            25,
-            SignalType::Long,
-            1750.0, // Giá sập hầm từ 1760 về 1750
-            1760.0,
-            5.0,
-            1.5,
-        );
-        assert!(blocked, "Giá sập hầm rơi tự do PHẢI BỊ CHẶN COOLDOWN, cấm bắt dao rơi!");
-    }
-
-    #[test]
-    fn test_cooldown_expired_allowed() {
-        // Khi đã hết thời gian nghỉ (current_bar >= locked_until_bar) -> CHO PHÉP
-        let blocked = should_block_by_cooldown(
-            true,
-            26,
-            25,
-            SignalType::Long,
-            1760.0,
-            1760.5,
-            5.0,
-            1.5,
-        );
-        assert!(!blocked, "Hết thời gian nghỉ phải cho phép vào lệnh");
-    }
-
-    #[test]
-    fn test_cooldown_dynamic_dna_multiplier() {
-        // 🎯 KIỂM CHỨNG DẢI DNA ĐỘNG: atr_mult = 2.5 (threshold = 2.5 * 5.0 = 12.5)
-        // Khi diff = +10.0 (1770 - 1760): Trước đây 1.5 thì mở khóa, nhưng với 2.5 thì VẪN BỊ CHẶN!
-        let blocked_at_2_5 = should_block_by_cooldown(
-            true,
-            10,
-            25,
-            SignalType::Long,
-            1770.0,
-            1760.0,
-            5.0,
-            2.5, // Ngưỡng bứt phá cao hơn
-        );
-        assert!(blocked_at_2_5, "Với atr_mult = 2.5, bứt phá +10.0 < 12.5 vẫn phải bị chặn");
-
-        // Khi diff = +13.0 (1773 - 1760 >= 12.5) -> ĐƯỢC MỞ KHÓA!
-        let unlocked_at_2_5 = should_block_by_cooldown(
-            true,
-            10,
-            25,
-            SignalType::Long,
-            1773.0,
-            1760.0,
-            5.0,
-            2.5,
-        );
-        assert!(!unlocked_at_2_5, "Bứt phá +13.0 >= 12.5 phải được mở khóa");
-    }
-
-    #[test]
-    fn test_bidirectional_cooldown_blocks_both_sides() {
-        // 🎯 KIỂM CHỨNG FLAW-TSL.7 (BƯỚC 1): Sau khi cắt lỗ/hòa vốn, cả Long và Short đều bị khóa nếu trong vùng nhiễu
-        let exit_p = 2500.0;
-        let atr = 10.0;
-        let k = 1.5; // Ngưỡng bứt phá = 15.0 USD (vùng nhiễu: [2485.0, 2515.0])
-
-        // Giá lình xình tại 2505.0 (+5.0):
-        // Long bị chặn (diff = +5.0 < 15.0)
-        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Long, 2505.0, exit_p, atr, k), "Long trong vùng nhiễu phải bị chặn");
-        // Short bị chặn (diff = -5.0 < 15.0)
-        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Short, 2505.0, exit_p, atr, k), "Short trong vùng nhiễu phải bị chặn");
-
-        // Giá lình xình tại 2495.0 (-5.0):
-        // Long bị chặn (diff = -5.0 < 15.0)
-        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Long, 2495.0, exit_p, atr, k), "Long lình xình dưới đáy phải bị chặn");
-        // Short bị chặn (diff = +5.0 < 15.0)
-        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Short, 2495.0, exit_p, atr, k), "Short lình xình dưới đáy phải bị chặn");
-    }
-
-    #[test]
-    fn test_directional_early_release_long_breakout() {
-        // 🎯 KIỂM CHỨNG FLAW-TSL.7 (BƯỚC 2): Giá bốc đầu tăng mạnh >= k*ATR (2520.0 - 2500.0 = +20.0 >= 15.0)
-        let exit_p = 2500.0;
-        let atr = 10.0;
-        let k = 1.5;
-
-        // Long được mở khóa sớm
-        assert!(!should_block_by_cooldown(true, 5, 20, SignalType::Long, 2520.0, exit_p, atr, k), "Long bứt phá tăng mạnh phải được giải phóng sớm");
-        // Short bị chặn triệt để (chống cản tàu khi giá đang bốc đầu: diff = 2500 - 2520 = -20 < 15)
-        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Short, 2520.0, exit_p, atr, k), "Cấm tuyệt đối Short cản tàu khi giá đang bốc đầu");
-    }
-
-    #[test]
-    fn test_directional_early_release_short_breakout() {
-        // 🎯 KIỂM CHỨNG FLAW-TSL.7 (BƯỚC 3): Giá sập gãy mạnh >= k*ATR (2500.0 - 2480.0 = +20.0 >= 15.0)
-        let exit_p = 2500.0;
-        let atr = 10.0;
-        let k = 1.5;
-
-        // Short được mở khóa sớm
-        assert!(!should_block_by_cooldown(true, 5, 20, SignalType::Short, 2480.0, exit_p, atr, k), "Short bứt phá sập gãy phải được giải phóng sớm");
-        // Long bị chặn triệt để (chống bắt dao rơi khi giá đang rơi tự do: diff = 2480 - 2500 = -20 < 15)
-        assert!(should_block_by_cooldown(true, 5, 20, SignalType::Long, 2480.0, exit_p, atr, k), "Cấm tuyệt đối Long bắt dao rơi khi giá đang sập hầm");
-    }
-
-    #[test]
-    fn test_exponential_cooldown_calculation() {
-        let base = 15;
-        let cap = 60;
-
-        // Thua 0 lần -> 0 nến
-        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 0, cap), 0);
-        // Thua lần 1 -> 15 * 2^0 = 15 nến
-        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 1, cap), 15);
-        // Thua lần 2 liên tiếp -> 15 * 2^1 = 30 nến
-        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 2, cap), 30);
-        // Thua lần 3 liên tiếp -> 15 * 2^2 = 60 nến (chạm trần)
-        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 3, cap), 60);
-        // Thua lần 4+ liên tiếp -> vẫn giữ trần 60 nến (chống khóa vô hạn)
-        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 4, cap), 60);
-        assert_eq!(CooldownTracker::calculate_exponential_cooldown(base, 10, cap), 60);
-    }
-
-    #[test]
-    fn test_same_side_price_guard_blocks_worse_price() {
-        // Vừa cắt lỗ Long tại 2400.0, streak = 1
-        let tracker = CooldownTracker {
-            locked_until_bar: 10, // Giả sử đã hết thời gian khóa bar
-            locked_side: Some(SignalType::Long),
-            last_exit_price: 2400.0,
-            consecutive_losses: 1,
-            last_losing_side: Some(SignalType::Long),
-            last_losing_price: 2400.0,
-        };
-
-        // 1. Long ở giá tồi tệ hơn (2390.0 < 2400.0) -> BỊ CHẶN TUYỆT ĐỐI bởi Same-Side Price Guard (dù đã qua bar 10)
-        assert!(tracker.should_block(true, 15, SignalType::Long, 2390.0, 10.0, 1.5), "Long ở giá thấp hơn giá vừa cắt lỗ PHẢI BỊ CHẶN!");
-
-        // 2. Long ở giá phục hồi tốt hơn (2405.0 > 2400.0) và đã qua bar 10 -> CHO PHÉP
-        assert!(!tracker.should_block(true, 15, SignalType::Long, 2405.0, 10.0, 1.5), "Long ở giá hồi phục cao hơn giá cắt lỗ được phép vào");
-
-        // 3. Vừa cắt lỗ Short tại 2400.0, streak = 1
-        let tracker_short = CooldownTracker {
-            locked_until_bar: 10,
-            locked_side: Some(SignalType::Short),
-            last_exit_price: 2400.0,
-            consecutive_losses: 1,
-            last_losing_side: Some(SignalType::Short),
-            last_losing_price: 2400.0,
-        };
-
-        // Short ở giá cao hơn (2410.0 > 2400.0) -> BỊ CHẶN bởi Same-Side Price Guard
-        assert!(tracker_short.should_block(true, 15, SignalType::Short, 2410.0, 10.0, 1.5), "Short ở giá cao hơn giá vừa cắt lỗ PHẢI BỊ CHẶN!");
-
-        // Short ở giá sập sâu hơn (2395.0 < 2400.0) -> CHO PHÉP
-        assert!(!tracker_short.should_block(true, 15, SignalType::Short, 2395.0, 10.0, 1.5), "Short ở giá sập sâu hơn giá cắt lỗ được phép vào");
-    }
 
     #[test]
     fn test_volume_zscore_differentiation_from_price() {
@@ -900,49 +480,7 @@ mod tests {
         assert!(sensors.vol_z_score[len - 1] > 3.0, "Vol Z-Score phải độc lập phản ánh bùng nổ thanh khoản!");
     }
 
-    #[test]
-    fn test_cooldown_triggered_on_hammer_wick_loss() {
-        // 🎯 KIỂM CHỨNG FLAW-4.4: Bẫy False Win khi nến rút chân
-        // Kịch bản: Long mở tại 2500, SL tại 2485. Trong nến tiếp theo, giá sập cắn SL tại 2485 (lỗ -$15).
-        // Nhưng cuối nến rút chân cực mạnh đẩy Close vọt lên 2505 (+5 so với Entry).
-        // Code cũ so sánh 2505 - 2500 = +5 > 0.001 nên BỎ QUA COOLDOWN!
-        // Code mới đọc closed_trade có pl = -1.5 <= 0.001 -> PHẢI KÍCH HOẠT COOLDOWN!
 
-        let mut strategy = HeliosStrategyV3::new(&std::collections::HashMap::new());
-        strategy.config.risk_management.stop_management.enable_re_entry_cooldown = true;
-        strategy.config.risk_management.stop_management.re_entry_cooldown_bars = 15;
-
-        // Giả lập một Trade Long đã mở trước đó
-        let mut prev_trade = ferro_trade::broker::trade::Trade::new(
-            1, 0.1, 2500.0, 10, None, Some("TREND_PB".to_string())
-        );
-        prev_trade.sl_price = Some(2485.0);
-        strategy.prev_open_trade = Some(prev_trade);
-
-        // Giả lập Trade đã đóng trong Broker tại mức SL 2485.0
-        let mut closed_trade = ferro_trade::broker::trade::Trade::new(
-            1, 0.1, 2500.0, 10, None, Some("TREND_PB".to_string())
-        );
-        closed_trade.exit_price = Some(2485.0);
-        closed_trade.exit_bar = Some(11);
-
-        assert!(closed_trade.pl(None) < 0.0, "PnL của lệnh đóng phải âm");
-
-        // Đọc từ closed_trade.pl(None)
-        let real_pnl = closed_trade.pl(None);
-        let exit_p = closed_trade.exit_price.unwrap();
-        let stop_cfg = &strategy.config.risk_management.stop_management;
-
-        if real_pnl <= 0.001 {
-            strategy.cooldown_tracker.locked_until_bar = 11 + stop_cfg.re_entry_cooldown_bars;
-            strategy.cooldown_tracker.locked_side = Some(SignalType::Long);
-            strategy.cooldown_tracker.last_exit_price = exit_p;
-        }
-
-        assert_eq!(strategy.cooldown_tracker.locked_until_bar, 26, "Cooldown phải khóa tới bar 26");
-        assert_eq!(strategy.cooldown_tracker.locked_side, Some(SignalType::Long));
-        assert_eq!(strategy.cooldown_tracker.last_exit_price, 2485.0);
-    }
 
     #[test]
     fn test_reversal_and_anomaly_use_raw_z_score_not_double_tanh() {
