@@ -44,7 +44,7 @@ impl GateVetoReason {
 }
 
 /// Kết quả thẩm định trạng thái thị trường của Gatekeeper
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GateEvaluation {
     /// Cho phép Arbiter tiếp tục quét tín hiệu hay không
     pub passed: bool,
@@ -56,6 +56,14 @@ pub struct GateEvaluation {
     pub market_natr_pct: f64,
     /// Trạng thái khóa trễ Hysteresis có đang hoạt động hay không
     pub is_hysteresis_active: bool,
+    /// 📉 Ngưỡng NATR tối thiểu yêu cầu (%) = fee_floor_pct + min_alpha_pct
+    pub required_min_natr_pct: f64,
+    /// 💰 Sàn chi phí thực tế (%) = 2*taker_fee + slippage
+    pub fee_floor_pct: f64,
+    /// 🧬 Ngưỡng Alpha bù đắp từ DNA (%)
+    pub min_alpha_pct: f64,
+    /// 🌪️ Ngưỡng cắt bão Chaos
+    pub chaos_threshold: f64,
 }
 
 /// Bộ gác cổng chế độ thị trường vi mô
@@ -88,6 +96,10 @@ impl RegimeGatekeeper {
                 current_chaos: 0.0,
                 market_natr_pct: 0.0,
                 is_hysteresis_active: false,
+                required_min_natr_pct: 0.0,
+                fee_floor_pct: 0.0,
+                min_alpha_pct: 0.0,
+                chaos_threshold: 0.0,
             };
         }
 
@@ -108,6 +120,10 @@ impl RegimeGatekeeper {
                 current_chaos: 0.0,
                 market_natr_pct: 0.0,
                 is_hysteresis_active: false,
+                required_min_natr_pct: 0.0,
+                fee_floor_pct: 0.0,
+                min_alpha_pct: 0.0,
+                chaos_threshold: 0.0,
             };
         }
 
@@ -119,6 +135,7 @@ impl RegimeGatekeeper {
         let roundtrip_fee_pct = (risk_base.taker_fee_rate * 2.0 + risk_base.slippage_allowance_pct) * 100.0;
         let min_alpha_pct = config.arbiter.min_natr_threshold * 100.0;
         let required_min_natr_pct = roundtrip_fee_pct + min_alpha_pct;
+        let t_enter = config.arbiter.chaos_veto_threshold;
 
         if market_natr_pct < required_min_natr_pct {
             return GateEvaluation {
@@ -127,11 +144,14 @@ impl RegimeGatekeeper {
                 current_chaos,
                 market_natr_pct,
                 is_hysteresis_active: false,
+                required_min_natr_pct,
+                fee_floor_pct: roundtrip_fee_pct,
+                min_alpha_pct,
+                chaos_threshold: t_enter,
             };
         }
 
         // 3. Chốt chặn Bão Chaos Whipsaw (Stateless Hysteresis Lookback K = 5 bars)
-        let t_enter = config.arbiter.chaos_veto_threshold;
         let delta = config.arbiter.chaos_hysteresis_delta;
         let t_exit = (t_enter - delta).max(0.0);
 
@@ -143,6 +163,10 @@ impl RegimeGatekeeper {
                 current_chaos,
                 market_natr_pct,
                 is_hysteresis_active: true,
+                required_min_natr_pct,
+                fee_floor_pct: roundtrip_fee_pct,
+                min_alpha_pct,
+                chaos_threshold: t_enter,
             };
         }
 
@@ -173,6 +197,10 @@ impl RegimeGatekeeper {
                     current_chaos,
                     market_natr_pct,
                     is_hysteresis_active: true,
+                    required_min_natr_pct,
+                    fee_floor_pct: roundtrip_fee_pct,
+                    min_alpha_pct,
+                    chaos_threshold: t_enter,
                 };
             }
         }
@@ -184,6 +212,10 @@ impl RegimeGatekeeper {
             current_chaos,
             market_natr_pct,
             is_hysteresis_active: false,
+            required_min_natr_pct,
+            fee_floor_pct: roundtrip_fee_pct,
+            min_alpha_pct,
+            chaos_threshold: t_enter,
         }
     }
 }

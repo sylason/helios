@@ -237,9 +237,15 @@ impl Strategy for HeliosStrategyV3 {
         // 🛡️ THEO DÕI MA TRẬN PHÒNG THỦ VỐN (Zero-cost trong GA, Some trong Live/Paper)
         if let Some(ref mut ledger) = self.defense_ledger {
             // Tầng 1: Chuyển đổi trạng thái Gatekeeper (Vào bão / Ra bão)
+            let candle_ts = tick.data_view.raw_cache().datetime.get(tick.i).copied().unwrap_or(0) / 1_000_000;
             let gate_eval = crate::strategy::core_v3::gatekeeper::RegimeGatekeeper::evaluate(tick, &self.sensors, &self.matrix, &self.config);
-            if let Some(msg) = ledger.on_gatekeeper_tick(tick.i, &gate_eval) {
+            if let Some(msg) = ledger.on_gatekeeper_tick(tick.i, candle_ts, &gate_eval) {
                 self.last_decision_telemetry = Some(msg);
+            } else if self.last_decision_telemetry.is_none() {
+                let price = tick.closes().get(tick.i).copied().unwrap_or(0.0);
+                if let Some(hb_msg) = ledger.check_hourly_heartbeat(tick.i, price, &gate_eval) {
+                    self.last_decision_telemetry = Some(hb_msg);
+                }
             }
 
             // Tầng 2: Chốt chặn Boundary Guard & Chop Zone của TrendPB
@@ -431,6 +437,10 @@ impl Strategy for HeliosStrategyV3 {
 
     fn get_defense_summary(&self) -> Option<String> {
         self.defense_ledger.as_ref().map(|l| l.format_summary_table())
+    }
+
+    fn get_gatekeeper_zones_json(&self) -> Option<String> {
+        self.defense_ledger.as_ref().map(|l| l.export_zones_json())
     }
 }
 

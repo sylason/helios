@@ -12,6 +12,15 @@
 use crate::strategy::core_v3::gatekeeper::{GateEvaluation, GateVetoReason};
 use crate::strategy::core_v3::arbiter::{ArbiterDecision, AuctionStatus};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GatekeeperZoneRecord {
+    pub start_bar: usize,
+    pub end_bar: usize,
+    pub start_ts: i64,
+    pub end_ts: i64,
+    pub reason: String,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct DefenseLedger {
     // -------------------------------------------------------------------------
@@ -27,6 +36,16 @@ pub struct DefenseLedger {
     pub prev_gate_veto: Option<GateVetoReason>,
     /// Mốc thanh nến bắt đầu rơi vào bão
     pub veto_start_bar: usize,
+    /// Mốc thời gian bắt đầu rơi vào bão (ms)
+    pub veto_start_ts: i64,
+    /// Mốc thanh nến cuối cùng được quan sát
+    pub last_seen_bar: usize,
+    /// Mốc thời gian cuối cùng được quan sát (ms)
+    pub last_seen_ts: i64,
+    /// Mốc thanh nến của lần phát Heartbeat gần nhất
+    pub last_heartbeat_bar: usize,
+    /// Danh sách các vùng bảo vệ đã hoàn thành để phục vụ Visual Report
+    pub zones: Vec<GatekeeperZoneRecord>,
 
     // -------------------------------------------------------------------------
     // 2. TẦNG 2: BOUNDARY GUARD & CHOP ZONE (TrendPB)
@@ -56,33 +75,94 @@ impl DefenseLedger {
 
     /// Theo dõi trạng thái Gatekeeper trên từng nến, phát hiện chuyển đổi trạng thái (Edge Trigger)
     /// Trả về thông điệp cảnh báo nếu có sự kiện Vào Bão hoặc Hết Bão.
-    pub fn on_gatekeeper_tick(&mut self, current_bar: usize, gate_eval: &GateEvaluation) -> Option<String> {
+    pub fn on_gatekeeper_tick(
+        &mut self,
+        current_bar: usize,
+        current_ts: i64,
+        gate_eval: &GateEvaluation,
+    ) -> Option<String> {
+        self.last_seen_bar = current_bar;
+        self.last_seen_ts = current_ts;
+
         if !gate_eval.passed {
             let reason = gate_eval.veto_reason?;
-            match reason {
-                GateVetoReason::ChaosWhipsaw => self.chaos_whipsaw_bars += 1,
-                GateVetoReason::VolatilityFlatline => self.volatility_flatline_bars += 1,
-                GateVetoReason::DataAnomaly => {},
+
+            // Nếu chuyển đổi giữa các loại veto khác nhau trong lúc đang né bão
+            if let Some(old_reason) = self.prev_gate_veto {
+                if old_reason != reason {
+                    self.zones.push(GatekeeperZoneRecord {
+                        start_bar: self.veto_start_bar,
+                        end_bar: current_bar,
+                        start_ts: self.veto_start_ts,
+                        end_ts: current_ts,
+                        reason: old_reason.as_str().to_string(),
+                    });
+                    self.veto_start_bar = current_bar;
+                    self.veto_start_ts = current_ts;
+                    self.prev_gate_veto = Some(reason);
+                    self.gatekeeper_state_transitions += 1;
+                }
             }
 
-            if self.prev_gate_veto.is_none() {
-                // Sự kiện cạnh lên (Rising Edge): Vừa bắt đầu rơi vào vùng bão
-                self.prev_gate_veto = Some(reason);
-                self.veto_start_bar = current_bar;
-                self.gatekeeper_state_transitions += 1;
-
-                Some(format!(
-                    "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: {:?} | Chaos: {:.3} (Hysteresis: {}) | NATR: {:.2}% | Entering Shelter!",
-                    current_bar, reason, gate_eval.current_chaos, gate_eval.is_hysteresis_active, gate_eval.market_natr_pct
-                ))
-            } else {
-                None
-            }
+            let msg = match reason {
+                GateVetoReason::ChaosWhipsaw => {
+                    self.chaos_whipsaw_bars += 1;
+                    if self.prev_gate_veto.is_none() {
+                        self.prev_gate_veto = Some(reason);
+                        self.veto_start_bar = current_bar;
+                        self.veto_start_ts = current_ts;
+                        self.gatekeeper_state_transitions += 1;
+                        Some(format!(
+                            "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: ChaosWhipsaw | Chaos: {:.3} >= Threshold: {:.3} (Hysteresis: {}) | NATR: {:.2}% | Entering Shelter!",
+                            current_bar, gate_eval.current_chaos, gate_eval.chaos_threshold, gate_eval.is_hysteresis_active, gate_eval.market_natr_pct
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                GateVetoReason::VolatilityFlatline => {
+                    self.volatility_flatline_bars += 1;
+                    if self.prev_gate_veto.is_none() {
+                        self.prev_gate_veto = Some(reason);
+                        self.veto_start_bar = current_bar;
+                        self.veto_start_ts = current_ts;
+                        self.gatekeeper_state_transitions += 1;
+                        Some(format!(
+                            "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: VolatilityFlatline | NATR: {:.2}% < Req: {:.2}% (FeeFloor: {:.2}% + DNAAlpha: {:.2}%) | Entering Shelter!",
+                            current_bar, gate_eval.market_natr_pct, gate_eval.required_min_natr_pct, gate_eval.fee_floor_pct, gate_eval.min_alpha_pct
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                GateVetoReason::DataAnomaly => {
+                    if self.prev_gate_veto.is_none() {
+                        self.prev_gate_veto = Some(reason);
+                        self.veto_start_bar = current_bar;
+                        self.veto_start_ts = current_ts;
+                        self.gatekeeper_state_transitions += 1;
+                        Some(format!(
+                            "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: DataAnomaly | Entering Shelter!",
+                            current_bar
+                        ))
+                    } else {
+                        None
+                    }
+                }
+            };
+            msg
         } else {
             if let Some(prev) = self.prev_gate_veto.take() {
                 // Sự kiện cạnh xuống (Falling Edge): Bão vừa tan, thị trường ổn định trở lại
                 let duration = current_bar.saturating_sub(self.veto_start_bar);
                 self.gatekeeper_state_transitions += 1;
+                self.zones.push(GatekeeperZoneRecord {
+                    start_bar: self.veto_start_bar,
+                    end_bar: current_bar,
+                    start_ts: self.veto_start_ts,
+                    end_ts: current_ts,
+                    reason: prev.as_str().to_string(),
+                });
 
                 Some(format!(
                     "✅ [GATEKEEPER DISENGAGED] Bar: {} | Market Stabilized from {:?} | Chaos: {:.3} | NATR: {:.2}% | Storm Duration: {} bars",
@@ -91,6 +171,45 @@ impl DefenseLedger {
             } else {
                 None
             }
+        }
+    }
+
+    /// Xuất danh sách các vùng bảo vệ dạng JSON cho Visual Report
+    pub fn export_zones_json(&self) -> String {
+        let mut all_zones = self.zones.clone();
+        if let Some(active_reason) = self.prev_gate_veto {
+            all_zones.push(GatekeeperZoneRecord {
+                start_bar: self.veto_start_bar,
+                end_bar: self.last_seen_bar,
+                start_ts: self.veto_start_ts,
+                end_ts: self.last_seen_ts,
+                reason: active_reason.as_str().to_string(),
+            });
+        }
+        serde_json::to_string(&all_zones).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Kiểm tra và phát nhịp đập thị trường (Hourly Heartbeat) mỗi 60 bars (60 phút) khi bot đang né bão / nằm im
+    pub fn check_hourly_heartbeat(&mut self, current_bar: usize, current_price: f64, gate_eval: &GateEvaluation) -> Option<String> {
+        if self.last_heartbeat_bar == 0 {
+            self.last_heartbeat_bar = current_bar;
+            return None;
+        }
+
+        if current_bar.saturating_sub(self.last_heartbeat_bar) >= 60 {
+            self.last_heartbeat_bar = current_bar;
+            let regime_str = if gate_eval.passed {
+                "NORMAL_TRADING"
+            } else {
+                gate_eval.veto_reason.map(|r| r.as_str()).unwrap_or("UNKNOWN")
+            };
+
+            Some(format!(
+                "💓 [MARKET HEARTBEAT] Bar: {} | Price: {:.2} | Regime: {} | NATR: {:.2}% (Req: {:.2}%) | Chaos: {:.3} (Max: {:.2})",
+                current_bar, current_price, regime_str, gate_eval.market_natr_pct, gate_eval.required_min_natr_pct, gate_eval.current_chaos, gate_eval.chaos_threshold
+            ))
+        } else {
+            None
         }
     }
 
@@ -205,8 +324,9 @@ mod tests {
             current_chaos: 0.15,
             market_natr_pct: 0.20,
             is_hysteresis_active: false,
+            ..Default::default()
         };
-        assert!(ledger.on_gatekeeper_tick(100, &eval_pass).is_none());
+        assert!(ledger.on_gatekeeper_tick(100, 100_000, &eval_pass).is_none());
 
         // 2. Cạnh lên (Rising Edge): Bắt đầu vào bão Chaos
         let eval_chaos = GateEvaluation {
@@ -215,26 +335,65 @@ mod tests {
             current_chaos: 0.35,
             market_natr_pct: 0.20,
             is_hysteresis_active: false,
+            chaos_threshold: 0.65,
+            ..Default::default()
         };
-        let msg_engaged = ledger.on_gatekeeper_tick(101, &eval_chaos);
+        let msg_engaged = ledger.on_gatekeeper_tick(101, 101_000, &eval_chaos);
         assert!(msg_engaged.is_some());
         assert!(msg_engaged.unwrap().contains("[GATEKEEPER ENGAGED]"));
         assert_eq!(ledger.chaos_whipsaw_bars, 1);
         assert_eq!(ledger.gatekeeper_state_transitions, 1);
 
         // 3. Trong bão (No spam): Bar 102 tiếp tục bão
-        let msg_stay = ledger.on_gatekeeper_tick(102, &eval_chaos);
+        let msg_stay = ledger.on_gatekeeper_tick(102, 102_000, &eval_chaos);
         assert!(msg_stay.is_none(), "Trong bão không được spam log!");
         assert_eq!(ledger.chaos_whipsaw_bars, 2);
         assert_eq!(ledger.gatekeeper_state_transitions, 1);
 
         // 4. Cạnh xuống (Falling Edge): Hết bão ở Bar 150
-        let msg_disengaged = ledger.on_gatekeeper_tick(150, &eval_pass);
+        let msg_disengaged = ledger.on_gatekeeper_tick(150, 150_000, &eval_pass);
         assert!(msg_disengaged.is_some());
         let disengage_str = msg_disengaged.unwrap();
         assert!(disengage_str.contains("[GATEKEEPER DISENGAGED]"));
         assert!(disengage_str.contains("Storm Duration: 49 bars"));
         assert_eq!(ledger.gatekeeper_state_transitions, 2);
+
+        // 5. Kiểm tra export zones
+        assert_eq!(ledger.zones.len(), 1);
+        assert_eq!(ledger.zones[0].start_bar, 101);
+        assert_eq!(ledger.zones[0].end_bar, 150);
+        assert_eq!(ledger.zones[0].start_ts, 101_000);
+        assert_eq!(ledger.zones[0].end_ts, 150_000);
+        assert!(ledger.export_zones_json().contains("CHAOS_WHIPSAW"));
+    }
+
+    #[test]
+    fn test_gatekeeper_hourly_heartbeat() {
+        let mut ledger = DefenseLedger::new();
+        let eval_flatline = GateEvaluation {
+            passed: false,
+            veto_reason: Some(GateVetoReason::VolatilityFlatline),
+            current_chaos: 0.10,
+            market_natr_pct: 0.15,
+            required_min_natr_pct: 0.25,
+            ..Default::default()
+        };
+
+        // Lần đầu tiên gọi heartbeat (bar 100): chỉ lưu mốc ban đầu, chưa phát
+        let hb_init = ledger.check_hourly_heartbeat(100, 2500.0, &eval_flatline);
+        assert!(hb_init.is_none());
+
+        // Sau 30 bars (chưa đủ 60 bars): chưa phát
+        let hb_early = ledger.check_hourly_heartbeat(130, 2502.0, &eval_flatline);
+        assert!(hb_early.is_none());
+
+        // Sau 60 bars (bar 160): phát ra heartbeat!
+        let hb_60 = ledger.check_hourly_heartbeat(160, 2505.0, &eval_flatline);
+        assert!(hb_60.is_some());
+        let msg = hb_60.unwrap();
+        assert!(msg.contains("[MARKET HEARTBEAT]"));
+        assert!(msg.contains("VOLATILITY_FLATLINE"));
+        assert!(msg.contains("NATR: 0.15% (Req: 0.25%)"));
     }
 
     #[test]

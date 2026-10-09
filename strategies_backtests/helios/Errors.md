@@ -29,3 +29,17 @@
 - **Hiện tượng:** Dù đã có định hướng chỉ tập trung vào 4 Playbook chủ lực, nhưng trong `core_v3/mod.rs`, cả 6 Scanner vẫn được gọi `arbiter.add_scanner(...)`.
 - **Hệ quả:** `ANOMALY` với điều kiện vào lệnh dễ dãi đã chiếm tới 77.3% tổng số lệnh, làm sai lệch bức tranh kiểm thử thực tế của các Playbook khác.
 - **Giải pháp khắc phục:** Điều chỉnh đăng ký scanner trong `core_v3/mod.rs` đồng bộ với định hướng kiến trúc.
+
+---
+
+### ❌ Lỗi #004: Thiếu Định Lượng Telemetry & Heartbeat khi Gatekeeper Veto Flatline/Chaos 65.4 Giờ
+- **Hiện tượng:** ETHUSDT trong bài test Walk-Forward 5 ngày OOS chỉ thực hiện giao dịch trong 2 ngày, còn 65.4 giờ bị rơi vào trạng thái Volatility Flatline. Log trước đó chỉ in một dòng chuyển trạng thái ban đầu, thiếu định lượng cụ thể tại sao Flatline (giá trị NATR thực tế vs Fee Floor vs DNA Alpha) và thiếu nhịp đập Heartbeat khiến việc audit OOS thiếu dữ kiện.
+- **Nguyên nhân gốc rễ:**
+  1. `GateEvaluation` không lưu lại giá trị `required_min_natr_pct`, `fee_floor_pct`, `min_alpha_pct`, `chaos_threshold`.
+  2. `DefenseLedger` chỉ ghi nhận edge-trigger (vào/ra bão), khi bão kéo dài nhiều ngày thì hoàn toàn im lặng (silence trap).
+  3. Thiếu công cụ trực quan hóa (Visual Report) để soi ~7,200 nến OOS, vị trí vào/thoát lệnh, dải bảo vệ Flatline/Chaos và đường cong vốn.
+- **Giải pháp đã thực hiện (Phương án C):**
+  1. Nâng cấp `GateEvaluation` mang đầy đủ 4 trường định lượng của Gatekeeper (`gatekeeper.rs`).
+  2. Bổ sung `check_hourly_heartbeat` (phát log mỗi 60 nến = 1 giờ) hiển thị `[MARKET HEARTBEAT]` kèm giá và thông số NATR/Chaos thực tế (`defense_ledger.rs`).
+  3. Xây dựng module `visual_report.rs` xuất file `report_oos.html` tương tác (TradingView Lightweight Charts v4.2 canvas 60fps) cắt lát đúng ~7,200 nến OOS, hiển thị candlestick, markers trade, dải shading Flatline/Chaos, và đường cong vốn Equity Subplot, tự động sinh vào thư mục log trước khi dọn dẹp storage trong `walk_forward_smart_seed.rs`.
+
