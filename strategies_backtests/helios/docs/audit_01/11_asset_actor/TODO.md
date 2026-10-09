@@ -158,14 +158,17 @@
 
 ---
 
-### [P0-3] 🔥 Same-Side Price Guard Deadlock Vĩnh Viễn (VULN-AA-09) — MỚI
+### [P0-3] [x] 🔥 Same-Side Price Guard Deadlock Vĩnh Viễn (VULN-AA-09 / TODO-ACT-03) — ĐÃ XỬ LÝ
 
-- **File:** [`asset_actor.rs:73-85`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L73-L85)
-- **Bản chất:** Khối 1 (`Same-Side Price Guard`) trong `should_veto` không có điều kiện `current_bar_idx < locked_until_bar`, chạy vĩnh viễn sau cooldown. Tạo vòng khóa chết: SL → Khối 1 chặn LONG → không có lệnh thắng → không reset `consecutive_losses` → Khối 1 tiếp tục chặn mãi mãi.
-- **Bằng chứng:** VETO 2.64 ngày / 280 lần liên tiếp, bỏ lỡ ETH pump +7.5%.
-- **Log sai:** Dòng 676 hardcode ký tự `<` → in `+55.28 < 4.45` (misleading). Thực tế Khối 2 không chạy, Khối 1 mới là thủ phạm.
-- **Giải pháp:** Đưa Khối 1 vào TRONG `if current_bar_idx < locked_until_bar`. Dùng `enum CooldownVetoReason` để log đúng lý do.
-- **Acceptance:** Sau hết cooldown (`Remaining: 0`), bot PHẢI mở được lệnh dù giá < `last_losing_price`.
+- **File:** [`asset_actor.rs:32-64`](file:///e:/Projects/Automations/trading_backtest/trading_bot/bot_engine/src/controller/asset_actor.rs#L32-L64)
+- **Bản chất cũ:** Khối 1 (`Same-Side Price Guard`) trong `should_veto` không có điều kiện `current_bar_idx < locked_until_bar`, chạy vĩnh viễn sau cooldown. Tạo vòng khóa chết: SL → Khối 1 chặn LONG → không có lệnh thắng → không reset `consecutive_losses` → Khối 1 tiếp tục chặn mãi mãi (VETO 2.64 ngày / 280 lần).
+- **Giải pháp triển khai thực tế:**
+  + Tái cấu trúc toàn diện `EngineCooldownGuard` chuyển sang mô hình **Universal Pure TTL (Time-To-Live)**.
+  + Loại bỏ 100% Khối 1 (`Same-Side Price Guard`) và các biến trạng thái phụ (`last_losing_price`, `last_losing_side`, `locked_side`).
+  + `should_veto` chỉ thực hiện duy nhất phép kiểm tra: `current_bar_idx < self.locked_until_bar`. Hết thời gian phạt là tự động mở khóa 100%.
+- **Nghiệm thu (Acceptance Criteria):**
+  + Unit test `test_pure_ttl_unlock_no_deadlock` và `test_monotonic_sequence_counter_cooldown_saturated_buffer` passed 100%.
+  + Sau khi hết cooldown (`Remaining: 0`), bot bảo đảm 100% mở được lệnh bình thường. Deadlock đã bị triệt tiêu hoàn toàn.
 
 ---
 

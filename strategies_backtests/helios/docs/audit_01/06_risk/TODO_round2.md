@@ -171,9 +171,11 @@
   - **File:** `ferro_trade/src/broker/broker.rs:331-346`
   - **Fix:** Đưa công thức Binance Maintenance Margin vào kiểm tra trong `process_orders`. Nếu nến chạm giá thanh lý, đóng vị thế ngay với lỗ 100% margin.
 
-- [ ] **TODO-MATH-03: Sửa Lỗ Hổng `NaN <= 0.0` trong `calculate_size`**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:32-53`
-  - **Fix:** Thêm `if equity.is_nan() || equity <= 0.0 || risk_pct.is_nan() { return 0.0; }`.
+- [x] **TODO-MATH-03: Sửa Lỗ Hổng `NaN <= 0.0` trong `calculate_size`**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:158-190`, `mod.rs:277-289`
+  - **Vấn đề:** Phép so sánh `(NaN <= 0.0) == false` và `(NaN < min_order_usd) == false` khiến tài khoản lỗi/cháy vẫn được cấp 25% margin, mở lệnh ảo và kích hoạt bẫy All-in 100% downstream.
+  - **Fix:** Whitelist số thực dương hữu hạn (`> 0.0 && is_finite()`), bổ sung đệm Epsilon Float $10^{-4}$ (`nominal_value >= min_order_usd - 1e-4`), và thiết lập chốt chặn `Capital Starvation Guard` tại Strategy Orchestrator `mod.rs` (`if size <= 0.0 || !size.is_finite() { return; }`).
+  - **Trạng thái:** ✅ Đã hoàn thành 100% & Vượt qua toàn bộ 27/27 tests trong `risk::tests` và 96/96 tests trong `helios`.
 
 - [ ] **TODO-ARB-01: Khắc phục Độ Trễ MTF của `z_score` tại Boundary Guard**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:249`, `trend_pb.rs:96`

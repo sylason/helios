@@ -273,6 +273,20 @@ impl Strategy for HeliosStrategyV3 {
                     leverage,
                     self.config.risk_management.risk_base.max_cap_fraction,
                 );
+
+                // Chốt chặn Capital Starvation Guard (TODO-MATH-03):
+                // Nếu tài khoản không đủ vốn để đạt min_order_usd hoặc size không hợp lệ,
+                // hủy bỏ mở lệnh ngay lập tức để không gửi lệnh ảo tick.buy/sell(Some(0.0))
+                // và triệt tiêu nguy cơ downstream nhầm tưởng size None rồi All-in 100%.
+                if size <= 0.0 || !size.is_finite() {
+                    if self.debug_mode {
+                        warn!(
+                            "🛑 [CAPITAL STARVATION VETO] Bar: {} | Equity: {:.2} | Lev: {:.1}x | Signal: {:?} -> Size <= 0.0 (Order Aborted)",
+                            tick.i, tick.equity, leverage, signal
+                        );
+                    }
+                    return;
+                }
                 
                 let is_long = signal == SignalType::Long;
                 

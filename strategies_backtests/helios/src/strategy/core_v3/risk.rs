@@ -156,26 +156,36 @@ impl RiskManager {
     /// Tính toán Size dựa trên Fixed Percentage (Fraction của Ký quỹ) nhưng đảm bảo Min Order Size.
     /// Trả về một giá trị < 1.0 (ví dụ 0.1 = 10%) để `ferro_trade` dùng làm Initial Margin.
     pub fn calculate_size(equity: f64, risk_pct: f64, min_order_usd: f64, leverage: f64, max_cap_fraction: f64) -> f64 {
-        if equity <= 0.0 || risk_pct <= 0.0 || leverage <= 0.0 {
+        // 🛡️ TIỀN ĐIỀU KIỆN (PRE-CONDITION WHITELIST - TODO-MATH-03):
+        // Bắt buộc 4 biến số cốt lõi phải là số thực dương hữu hạn (> 0.0 và không phải NaN / Inf)
+        if !(equity.is_finite() && equity > 0.0 
+            && risk_pct.is_finite() && risk_pct > 0.0 
+            && leverage.is_finite() && leverage > 0.0 
+            && min_order_usd.is_finite() && min_order_usd > 0.0) 
+        {
             return 0.0;
         }
-        let mut target_margin = equity * risk_pct;
-        let mut order_size_usd = target_margin * leverage;
-        
-        if order_size_usd < min_order_usd {
-            order_size_usd = min_order_usd;
-            target_margin = order_size_usd / leverage;
-        }
-        
-        let size_fraction = target_margin / equity;
-        let cap = if max_cap_fraction <= 0.0 { 0.25 } else { max_cap_fraction };
+
+        // Xử lý cap fraction an toàn: nếu cap lỗi hoặc <= 0.0 thì fallback về mức an toàn 25%
+        let cap = if max_cap_fraction.is_finite() && max_cap_fraction > 0.0 {
+            max_cap_fraction
+        } else {
+            0.25
+        };
+
+        let target_margin = equity * risk_pct;
+        let order_size_usd = (target_margin * leverage).max(min_order_usd);
+        let size_fraction = (order_size_usd / leverage) / equity;
         let final_fraction = size_fraction.min(cap);
 
-        // Futures Min Notional Protection: Nếu sau khi kẹp trần cap mà giá trị danh nghĩa không đủ min_order_usd -> từ chối mở lệnh an toàn
-        if (equity * final_fraction * leverage) < min_order_usd {
-            return 0.0;
+        // 🛡️ HẬU ĐIỀU KIỆN (POST-CONDITION WHITELIST):
+        // Giá trị danh nghĩa thực tế phải đạt sàn min_order_usd kèm đệm epsilon 1e-4 chống sai số làm tròn float
+        let nominal_value = equity * final_fraction * leverage;
+        if nominal_value.is_finite() && nominal_value >= (min_order_usd - 1e-4) {
+            final_fraction
+        } else {
+            0.0
         }
-        final_fraction
     }
 
     /// Hàm khống chế trần SL ban đầu theo % ROE tối đa cho phép và khoảng cách thanh lý an toàn (FLAW-TSL.8 & TODO-RSK-01)
@@ -764,24 +774,48 @@ mod tests {
 
     #[test]
     fn test_calculate_size_nan_resilience_and_cap() {
-        // Trường hợp bình thường
+        // 1. Trường hợp bình thường: vốn $100, risk 20%, đòn bẩy 20x -> order $400 >= $21 -> size = 20%
         let size = RiskManager::calculate_size(100.0, 0.20, 21.0, 20.0, 0.25);
-        assert!(size > 0.0 && size <= 0.25);
+        assert!((size - 0.20).abs() < 1e-9);
 
-        // Trường hợp min order size $21.0 khi vốn nhỏ ($60)
+        // 2. Trường hợp min order size $21.0 khi vốn nhỏ ($60, risk 10% -> margin $6 -> order $120 >= $21)
         let size_small = RiskManager::calculate_size(60.0, 0.10, 21.0, 20.0, 0.25);
         assert_eq!(size_small, 0.10);
 
-        // Trường hợp order size < 21.0 (vốn $10, risk 5%, margin $0.5 -> order $10 < $21)
-        // order_size nâng lên $21 -> margin = 21/20 = 1.05 -> fraction = 1.05/10 = 0.105
+        // 3. Trường hợp order size < $21.0 được nâng lên sàn $21.0 (vốn $10, risk 5%, margin $0.5 -> order $10 < $21)
+        // order_size nâng lên $21 -> margin = 21/20 = 1.05 -> fraction = 1.05/10 = 0.105 <= cap 0.25
         let size_min_bump = RiskManager::calculate_size(10.0, 0.05, 21.0, 20.0, 0.25);
         assert!((size_min_bump - 0.105).abs() < 1e-9);
 
-        // Chốt chặn NaN / Âm vốn / Zero equity
+        // 4. Kiểm chứng Epsilon Float Precision: nominal_value tiệm cận $21.0 từ phía dưới do sai số nhị phân không bị từ chối oan
+        let size_epsilon = RiskManager::calculate_size(60.0, 0.0175, 21.0, 20.0, 0.25);
+        assert!(size_epsilon > 0.0, "Không được từ chối oan lệnh hợp lệ do sai số làm tròn float");
+
+        // 5. 🛡️ BỘ CHỐT CHẶN IEEE 754 TOÀN DIỆN (TODO-MATH-03):
+        // Bắt buộc trả về 0.0 tuyệt đối khi bất kỳ tham số nào là NaN hoặc Inf, triệt tiêu bẫy cấp vốn ma 25%!
+        assert_eq!(RiskManager::calculate_size(f64::NAN, 0.20, 21.0, 20.0, 0.25), 0.0, "equity = NaN phải trả về 0.0");
+        assert_eq!(RiskManager::calculate_size(100.0, f64::NAN, 21.0, 20.0, 0.25), 0.0, "risk_pct = NaN phải trả về 0.0");
+        assert_eq!(RiskManager::calculate_size(100.0, 0.20, f64::NAN, 20.0, 0.25), 0.0, "min_order_usd = NaN phải trả về 0.0");
+        assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, f64::NAN, 0.25), 0.0, "leverage = NaN phải trả về 0.0");
+        
+        // Khi max_cap_fraction = NaN, fallback về trần an toàn 0.25 chứ không crash
+        let size_nan_cap = RiskManager::calculate_size(100.0, 0.30, 21.0, 20.0, f64::NAN);
+        assert_eq!(size_nan_cap, 0.25, "max_cap_fraction = NaN phải fallback về trần an toàn 0.25");
+
+        // Chốt chặn Infinity
+        assert_eq!(RiskManager::calculate_size(f64::INFINITY, 0.20, 21.0, 20.0, 0.25), 0.0, "+Inf equity phải trả về 0.0");
+        assert_eq!(RiskManager::calculate_size(f64::NEG_INFINITY, 0.20, 21.0, 20.0, 0.25), 0.0, "-Inf equity phải trả về 0.0");
+        assert_eq!(RiskManager::calculate_size(100.0, f64::INFINITY, 21.0, 20.0, 0.25), 0.0, "+Inf risk_pct phải trả về 0.0");
+        assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, f64::INFINITY, 0.25), 0.0, "+Inf leverage phải trả về 0.0");
+
+        // Chốt chặn Âm vốn & Zero
         assert_eq!(RiskManager::calculate_size(0.0, 0.20, 21.0, 20.0, 0.25), 0.0);
         assert_eq!(RiskManager::calculate_size(-50.0, 0.20, 21.0, 20.0, 0.25), 0.0);
         assert_eq!(RiskManager::calculate_size(100.0, 0.0, 21.0, 20.0, 0.25), 0.0);
+        assert_eq!(RiskManager::calculate_size(100.0, -0.05, 21.0, 20.0, 0.25), 0.0);
         assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, 0.0, 0.25), 0.0);
+        assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, -20.0, 0.25), 0.0);
+        assert_eq!(RiskManager::calculate_size(100.0, 0.20, 0.0, 20.0, 0.25), 0.0);
     }
 
     #[test]
