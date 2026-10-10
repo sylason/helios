@@ -19,27 +19,21 @@
 
 ## 🔴 ƯU TIÊN P0: LỖ HỔNG CHÍ TỬ & BÃY CRASH HỆ THỐNG
 
-- [ ] **Task 01: Khắc chế bẫy Warmup Z-Score trên khung 4h (SEN-01)**
+- [x] **Task 01: Khắc chế bẫy Warmup Z-Score trên khung 4h (SEN-01 / TODO-SEN-07)**
   - **Tập tin liên quan:**  
-    + [`strategies_backtests/helios/src/strategy/core_v3/config.rs:L66-L69`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L66-L69)  
-    + [`strategies_backtests/helios/src/strategy/core_v3/mod.rs:L216-L217`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L216-L217)  
-    + [`ferro_trade/src/backtest/context.rs:L173-L177`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/context.rs#L173-L177)
+    + [`ferro_trade/src/backtest/manager.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/manager.rs)  
+    + [`ferro_trade/src/backtest/context.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/context.rs)  
+    + [`ferro_trade/src/backtest/engine.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/engine.rs)  
+    + [`ferro_trade/tests/infeasible_warmup_guard_test.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/tests/infeasible_warmup_guard_test.rs)
   - **Vấn đề:**  
-    DNA cho phép `z_score_lookback` lên tới 600. Khi GA chọn `kama.timeframe = 4h`, bộ dữ liệu 63,200 nến 1m chỉ có ~263 nến 4h. Phép tính $600 > 263$ làm hàm `sma` trả về `Err`, toàn bộ mảng Z-Score biến thành `NaN`. Hệ thống đếm NaN và đẩy Warmup lên $63,199$ nến, làm backtest thực thi 0 lệnh.
-  - **Giải pháp triển khai:**
-    1. Trong `core_v3/config.rs`, hạ trần DNA: `#[dna(min = 20.0, max = 200.0, step = 10.0)]` cho `z_score_lookback`.
-    2. Trong `core_v3/mod.rs::init()`, thêm bộ kẹp an toàn:
-       ```rust
-       let resampled_ohlcv = ctx.cache.get_resampled_ohlcv(ind.kama.timeframe);
-       let max_safe_lookback = resampled_ohlcv.map(|df| df.close.len() / 2).unwrap_or(100);
-       let safe_z_lookback = ind.z_score_lookback.min(max_safe_lookback).max(10);
-       s.z_score = ctx.z_score(ind.kama.timeframe, "ZScore", safe_z_lookback);
-       s.vol_z_score = ctx.z_score_volume(ind.kama.timeframe, "VolZScore", safe_z_lookback);
-       ```
-    3. Trong `ferro_trade::IndicatorManager`, nếu một chỉ báo có `actual_warmup >= len`, phát cảnh báo `warn!` và không nâng `self.warmup_period` nuốt trọn dữ liệu.
+    Khi GA chọn lookback lớn trên khung lớn hoặc tập dữ liệu ngắn khiến $P > N_T$, hàm tính toán trả về 100% `NaN`. Động cơ cũ ngây thơ gán `actual_warmup = len - 1` nuốt trọn toàn bộ nến lịch sử, khiến backtest chạy 0 lệnh trong im lặng.
+  - **Giải pháp triển khai (Chuẩn hóa Kiến trúc Động cơ):**
+    1. Thay vì hạ trần cứng cục bộ trong Strategy (gây lỗi Phenotype Mismatch), triển khai cơ chế **Early Infeasible Abort** tại tầng Động cơ `ferro_trade`.
+    2. Trong `IndicatorManager`, chuẩn hóa helper `register_indicator`: Khi gặp chỉ báo 100% NaN, đánh dấu `has_infeasible_indicator = true` và **tuyệt đối không tăng `warmup_period`**.
+    3. Trong `Backtest::run_logic`, ngắt sớm tại bar 0 nếu có chỉ báo 100% NaN hoặc Warmup ngốn $\ge 40\%$ tổng dữ liệu (hoặc nến còn lại $< 50$). GA âm thầm áp điểm phạt di truyền mà không spam log.
   - **Tiêu chí nghiệm thu (Acceptance Criteria):**  
-    + Chạy backtest trên chuỗi nến ngắn 10,000 bars với cấu hình 4h không bao giờ bị dội Warmup kẹp trần.
-    + GA không sinh ra cá thể bị chết vòng lặp.
+    + [x] Test suite `ferro_trade/tests/infeasible_warmup_guard_test.rs` pass 5/5 kịch bản.
+    + [x] Khử hoàn toàn bẫy nuốt 63,199 nến mà không làm méo mó không gian tìm kiếm DNA của GA.
 
 ---
 

@@ -13,11 +13,11 @@ Loại bỏ 100% các lỗ hổng toán học, bẫy nuốt chửng warmup, ng�
 
 ## 📌 BẢNG THEO DÕI TIẾN ĐỘ THỰC THI
 
-- [ ] **TASK-FT-01: Khắc phục bẫy nuốt chửng nến Warmup khi lỗi (`DEFECT-FT-01`)**
+- [x] **TASK-FT-01: Khắc phục bẫy nuốt chửng nến Warmup khi lỗi (`DEFECT-FT-01`)**
   - **Mức độ:** `CRITICAL`
-  - **Vị trí tác động:** [`ferro_trade/src/backtest/context.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/context.rs#L167-L176) & [`ferro_trade/src/indicators/factory/bulk.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/indicators/factory/bulk.rs#L98)
-  - **Nghiệp vụ:** Khi indicator gặp lỗi tham số và trả về toàn bộ mảng `NaN`, không cho phép `actual_warmup` nuốt chửng $100\%$ chiều dài nến (`len - 1`). Giới hạn trần warmup an toàn, ghi nhận cảnh báo `warn!` rõ ràng để báo hiệu cho GA/Strategy.
-  - **Kiểm thử:** Viết unit test xác minh khi indicator trả về toàn `NaN`, hệ thống không gán warmup bằng toàn bộ dữ liệu.
+  - **Vị trí tác động:** [`ferro_trade/src/backtest/manager.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/manager.rs), [`ferro_trade/src/backtest/context.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/context.rs), [`ferro_trade/src/backtest/engine.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/engine.rs)
+  - **Nghiệp vụ:** Khi indicator gặp lỗi tham số và trả về toàn bộ mảng `NaN`, helper `register_indicator` chặn đứng việc tăng `warmup_period`. Kích hoạt cơ chế **Early Infeasible Abort** tại bar 0, trả về điểm phạt di truyền trong im lặng (Zero-Log Spam). Áp dụng trần Warmup 40% và sàn 50 nến giao dịch.
+  - **Kiểm thử:** Đã viết test suite [`ferro_trade/tests/infeasible_warmup_guard_test.rs`](file:///e:/Projects/Automations/trading_backtest/ferro_trade/tests/infeasible_warmup_guard_test.rs) bao phủ 5/5 kịch bản (Pass 100%).
 
 - [ ] **TASK-FT-02: Vá lỗi Z-Score tự sát khi thị trường đi ngang (`DEFECT-FT-02`)**
   - **Mức độ:** `HIGH`
