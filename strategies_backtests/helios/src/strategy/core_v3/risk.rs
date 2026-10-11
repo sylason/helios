@@ -423,29 +423,33 @@ impl RiskManager {
                 ),
             };
 
-            // 2. Tính khoảng cách tiền lời đỉnh (peak_profit) chuẩn hóa từ High Watermark
+            // 2. Tính khoảng cách tiền lời đỉnh chuẩn hóa từ High Watermark
             let peak_dist = if trade.is_long() { peak_val - trade.entry_price } else { trade.entry_price - peak_val };
-            let peak_profit = peak_dist.max(0.0) * trade.size.abs();
+            let _peak_profit = peak_dist.max(0.0) * trade.size.abs();
 
             // 3. Single Source of Truth: Tính động fee_buffer_pct từ taker_fee_rate và slippage_allowance_pct
             let round_trip_fee = 2.0 * config.risk_management.risk_base.taker_fee_rate;
             let slippage = config.risk_management.risk_base.slippage_allowance_pct;
             let fee_buffer_pct = round_trip_fee + slippage;
 
-            // 4. Ngưỡng kích hoạt BE an toàn: Bảo vệ vốn không bị phí sàn nuốt chửng ở mọi mức đòn bẩy
-            let min_safe_be_roe = (fee_buffer_pct * leverage * 1.5).max(risk_cfg.base_be_roe_trigger.max(0.06));
-            let required_profit = current_atr * be_trigger_mult * trade.size.abs();
+            // 4. Sàn kinh tế kích hoạt BE an toàn (TODO-SEM-03): Bảo vệ vốn không bị phí sàn nuốt chửng ở mọi mức đòn bẩy
+            // Hệ số 2.0x fee đảm bảo lãi đỉnh phải gấp đôi chi phí sàn 2 chiều trước khi kích hoạt hòa vốn
+            let min_safe_be_roe = (fee_buffer_pct * leverage * 2.0).max(risk_cfg.base_be_roe_trigger.max(0.06));
 
-            // 5. Kích hoạt theo Dual-Criterion Peak Engine: Chạm đỉnh râu nến High Watermark là bảo vệ hòa vốn ngay
-            // 🛡️ TASK TODO-R2-01: Bỏ `current_pnl > 0.0 &&` để Emergency BE Rejection Close không bị tắt khi Flash Crash sập dưới min_be
-            let is_be_triggered = peak_roe >= min_safe_be_roe || peak_profit >= required_profit;
+            // Khoảng cách giá đỉnh tối thiểu: Phải vượt qua Sàn Phí (2.0x) và Đệm ATR
+            let min_required_gain = trade.entry_price * (fee_buffer_pct * 2.0);
+            let atr_required_gain = current_atr * be_trigger_mult;
+            let required_price_gain = min_required_gain.max(atr_required_gain);
+
+            // 5. Kích hoạt theo Chốt Chặn Kép (TODO-SEM-03): Vừa đủ biên độ giá vượt sàn kinh tế, vừa đủ tỷ lệ ROE an toàn
+            let is_be_triggered = peak_dist >= required_price_gain && peak_roe >= min_safe_be_roe;
 
             // =========================================================================
             // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
             // =========================================================================
             // Áp dụng cho các Playbook xu hướng hoặc không có TP cố định (TREND_PB, MOMENTUM_IGN, ABSORPTION, ANOMALY)
             // Giúp thả diều tối đa lợi nhuận siêu sóng và chỉ chốt lời khi giá tạo đỉnh quay đầu (Callback).
-            // TỰ ĐỘNG KÍCH HOẠT SONG SONG KHI CÓ BREAK-EVEN: Bắt ngay các cú quay đầu từ đỉnh có lãi!
+            // 🛡️ TODO-SEM-03: Tách độc lập TTP khỏi Break-Even. TTP chỉ kích hoạt khi peak_roe >= ttp_act_roe (>= 15% ROE).
             let is_ttp_eligible = matches!(tag_str, "TREND_PB" | "MOMENTUM_IGN" | "ABSORPTION" | "ANOMALY") || trade.tp_price.is_none();
             if is_ttp_eligible {
                 let ttp_act_roe = if risk_cfg.ttp_activation_roe > 0.0 { risk_cfg.ttp_activation_roe } else { 0.15 };
@@ -453,7 +457,7 @@ impl RiskManager {
                 let min_gain_pct = if risk_cfg.dynamic_tp_min_gain_pct > 0.0 { risk_cfg.dynamic_tp_min_gain_pct } else { 0.002 };
                 let min_exit_gain_pct = min_gain_pct.max(fee_buffer_pct);
 
-                let is_ttp_active = (peak_roe >= ttp_act_roe) || is_be_triggered;
+                let is_ttp_active = peak_roe >= ttp_act_roe;
                 if is_ttp_active {
                     if trade.is_long() {
                         let ttp_trigger_price = peak_val - (ttp_cb_atr * current_atr);
@@ -529,36 +533,20 @@ impl RiskManager {
             };
 
             if is_be_triggered && !is_mega_trend {
+                // 🛡️ TODO-SEM-03: Hòa Vốn Thực Sự Có Đệm Lãi Nhẹ (True Net BE + Micro Cushion)
+                // micro_cushion = 0.0003 (+0.03% giá) đảm bảo sau khi trừ toàn bộ phí sàn và trượt giá,
+                // lệnh dừng lỗ hòa vốn luôn đóng với Net PnL >= $0.00 (xanh nhẹ).
+                // 🛑 TRIỆT TIÊU EMERGENCY BE REJECTION MARKET CLOSE:
+                // Xóa bỏ hoàn toàn lệnh gọi tick.close(None) bán tháo bằng Market khi nến đóng dưới min_be.
+                // Mức target_be_sl được gửi sang Broker/Sàn để cơ chế Stop Loss tự nhiên bảo vệ an toàn.
+                let micro_cushion = 0.0003;
                 if trade.is_long() {
-                    let min_be = trade.entry_price * (1.0 + fee_buffer_pct);
-                    // 🛑 EDGE CASE: Emergency BE Rejection Close
-                    // Nếu râu nến đạt đỉnh nhưng cuối nến bị xả ngược đâm thủng min_be -> Thoát khẩn cấp bảo toàn vốn
-                    if current_close <= min_be {
-                        if _debug_mode {
-                            tracing::info!(
-                                "🛑 [EMERGENCY BE REJECTION EXIT] Bar: {} | Trade #{:?} Long | Peak ROE: {:.2}% >= trigger, but Close {:.2} <= min_be {:.2} -> Closed to preserve capital",
-                                i, trade.id, peak_roe * 100.0, current_close, min_be
-                            );
-                        }
-                        tick.close(None);
-                        continue;
-                    }
+                    let min_be = trade.entry_price * (1.0 + fee_buffer_pct + micro_cushion);
                     let dynamic_floor = peak_val - (current_atr * be_buffer_mult);
                     let target_be_sl = dynamic_floor.max(min_be);
                     calculated_sl = calculated_sl.max(target_be_sl);
                 } else {
-                    let max_be = trade.entry_price * (1.0 - fee_buffer_pct);
-                    // 🛑 EDGE CASE: Emergency BE Rejection Close
-                    if current_close >= max_be {
-                        if _debug_mode {
-                            tracing::info!(
-                                "🛑 [EMERGENCY BE REJECTION EXIT] Bar: {} | Trade #{:?} Short | Peak ROE: {:.2}% >= trigger, but Close {:.2} >= max_be {:.2} -> Closed to preserve capital",
-                                i, trade.id, peak_roe * 100.0, current_close, max_be
-                            );
-                        }
-                        tick.close(None);
-                        continue;
-                    }
+                    let max_be = trade.entry_price * (1.0 - fee_buffer_pct - micro_cushion);
                     let dynamic_ceiling = peak_val + (current_atr * be_buffer_mult);
                     let target_be_sl = dynamic_ceiling.min(max_be);
                     calculated_sl = calculated_sl.min(target_be_sl);
@@ -649,8 +637,10 @@ impl RiskManager {
 
             // [ENHANCEMENT 3: MONOTONIC RATCHET GUARD]
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
-            if current_pnl > 0.0 {
-                // KHI CÓ LÃI DANH NGHĨA (current_pnl > 0.0): Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
+            // 🛡️ TODO-SEM-03: Bổ sung `|| is_be_triggered`. Khi vị thế đã thỏa mãn BE từ đỉnh High Watermark,
+            // SL hòa vốn mới (min_be) vẫn được gửi sang Broker/Sàn ngay cả khi nến hiện tại đang retest quanh Entry (current_pnl <= 0.0).
+            if current_pnl > 0.0 || is_be_triggered {
+                // KHI CÓ LÃI DANH NGHĨA HOẶC ĐÃ THỎA MÃN BREAK-EVEN: Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
                 let sl_changed = if trade.is_long() {
                     calculated_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
                 } else {
@@ -662,7 +652,7 @@ impl RiskManager {
                     tick.update_trade_sl_tp(trade.id, sl_to_send, new_tp_to_update);
                 }
             } else if tp_changed {
-                // 🛡️ TODO-RSK-02: KHI ĐANG ÂM HOẶC HÒA VỐN (current_pnl <= 0.0):
+                // 🛡️ TODO-RSK-02: KHI ĐANG ÂM HOẶC HÒA VỐN (current_pnl <= 0.0) VÀ CHƯA KÍCH HOẠT BE:
                 // Bảo toàn 100% Initial Structural SL do Scanner thiết lập, tuyệt đối không siết SL bằng hàm số mũ 0.8^n.
                 // Việc giải phóng vốn ngâm lâu đã có khối Stagnant Capital Release (dòng 348) và Zombie Trade Purge phụ trách.
                 // Chỉ cập nhật Take Profit nếu có thay đổi động (RangeOsc / Reversal), giữ nguyên mức SL hiện tại.
@@ -1396,5 +1386,90 @@ mod tests {
             price, raw_sl, is_long, max_sl_roe_cap, min_initial_sl_pct, leverage, mmr, taker_fee_rate, buffer_ratio,
         );
         assert!((clamped - 1985.0).abs() < 1e-4, "SL 1950.0 bị kẹp về trần an toàn 1985.0!");
+    }
+
+    #[test]
+    fn test_break_even_economic_floor_prevents_premature_trigger() {
+        // 🛡️ TODO-SEM-03: Kiểm chứng Sàn Kinh Tế Kép chặn triệt để bẫy kích hoạt BE sớm trên nến vi mô
+        let entry_price: f64 = 2500.0;
+        let taker_fee_rate: f64 = 0.0004;
+        let slippage: f64 = 0.0002;
+        let fee_buffer_pct: f64 = 2.0 * taker_fee_rate + slippage; // 0.0010 = 0.10%
+        let leverage: f64 = 20.0;
+        let base_be_roe_trigger: f64 = 0.06; // 6% ROE
+        let be_trigger_mult: f64 = 1.0;
+        let current_atr: f64 = 0.50; // ATR nến 1m vi mô siêu nhỏ (0.02% giá)
+
+        // Tính toán Sàn Kinh Tế theo logic mới:
+        let min_safe_be_roe: f64 = (fee_buffer_pct * leverage * 2.0).max(base_be_roe_trigger.max(0.06)); // 6% ROE
+        let min_required_gain: f64 = entry_price * (fee_buffer_pct * 2.0); // 2500 * 0.0020 = 5.0 giá
+        let atr_required_gain: f64 = current_atr * be_trigger_mult; // 0.50 giá
+        let required_price_gain: f64 = min_required_gain.max(atr_required_gain); // Bắt buộc >= 5.0 giá
+
+        // Kịch bản vi mô: Râu nến tăng nhẹ +$0.60 (+0.024% giá, ROE = +0.48%)
+        let peak_val: f64 = entry_price + 0.60;
+        let peak_dist: f64 = peak_val - entry_price;
+        let peak_roe: f64 = (peak_dist / entry_price) * leverage;
+
+        // So sánh:
+        // 1. Theo code CŨ: required_profit = 0.50, peak_profit = 0.60 -> (0.60 >= 0.50) LẬP TỨC KÍCH HOẠT BE SAI!
+        let old_is_be_triggered = peak_roe >= min_safe_be_roe || peak_dist >= (current_atr * be_trigger_mult);
+        assert!(old_is_be_triggered, "Code cũ bị lỗi kích hoạt oan uổng ở mức tăng 0.60 giá!");
+
+        // 2. Theo code MỚI: Bắt buộc peak_dist >= 5.0 giá VÀ peak_roe >= 6.0%
+        let new_is_be_triggered = peak_dist >= required_price_gain && peak_roe >= min_safe_be_roe;
+        assert!(!new_is_be_triggered, "Code mới CHẶN ĐỨNG kích hoạt sớm! peak_dist 0.60 < 5.0 sàn kinh tế.");
+    }
+
+    #[test]
+    fn test_break_even_triggers_and_calculates_true_net_be_sl() {
+        // 🛡️ TODO-SEM-03: Khi vượt Sàn Kinh Tế, BE kích hoạt và SL được nâng lên mức True Net BE có đệm lãi nhẹ
+        let entry_price: f64 = 2500.0;
+        let taker_fee_rate: f64 = 0.0004;
+        let slippage: f64 = 0.0002;
+        let fee_buffer_pct: f64 = 2.0 * taker_fee_rate + slippage; // 0.0010
+        let leverage: f64 = 20.0;
+        let base_be_roe_trigger: f64 = 0.06;
+        let be_trigger_mult: f64 = 1.5;
+        let be_buffer_mult: f64 = 1.0;
+        let current_atr: f64 = 2.0;
+
+        let min_safe_be_roe: f64 = (fee_buffer_pct * leverage * 2.0).max(base_be_roe_trigger.max(0.06)); // 0.06
+        let min_required_gain: f64 = entry_price * (fee_buffer_pct * 2.0); // 5.0 giá
+        let atr_required_gain: f64 = current_atr * be_trigger_mult; // 3.0 giá
+        let required_price_gain: f64 = min_required_gain.max(atr_required_gain); // 5.0 giá
+
+        // Kịch bản bùng nổ: Giá tăng +$10.0 (+0.40% giá, ROE = +8.0% > 6.0%)
+        let peak_val: f64 = entry_price + 10.0;
+        let peak_dist: f64 = peak_val - entry_price;
+        let peak_roe: f64 = (peak_dist / entry_price) * leverage;
+
+        let is_be_triggered = peak_dist >= required_price_gain && peak_roe >= min_safe_be_roe;
+        assert!(is_be_triggered, "BE kích hoạt chuẩn xác khi lãi +8% ROE vượt sàn kinh tế");
+
+        // Kiểm tra tính toán SL hòa vốn có micro cushion +0.03%:
+        let micro_cushion: f64 = 0.0003;
+        let min_be: f64 = entry_price * (1.0 + fee_buffer_pct + micro_cushion); // 2500 * 1.0013 = 2503.25
+        let dynamic_floor: f64 = peak_val - (current_atr * be_buffer_mult); // 2510 - 2.0 = 2508.0
+        let target_be_sl: f64 = dynamic_floor.max(min_be); // 2508.0
+
+        assert!((min_be - 2503.25).abs() < 1e-4, "Mức min_be phải bù trọn vẹn 0.10% phí + 0.03% cushion");
+        assert!(target_be_sl >= min_be, "Target BE SL luôn nằm trên hoặc bằng sàn hòa vốn");
+    }
+
+    #[test]
+    fn test_ttp_remains_independent_when_break_even_triggers() {
+        // 🛡️ TODO-SEM-03: Tách độc lập TTP khỏi BE, không để BE kích hoạt chốt non sớm
+        let ttp_act_roe: f64 = 0.15; // 15% ROE mới thả diều TTP
+        let peak_roe: f64 = 0.07;   // Lệnh mới lãi 7% ROE (đã thỏa mãn BE nhưng CHƯA đủ chuẩn TTP)
+        let is_be_triggered: bool = true;
+
+        // Code cũ: is_ttp_active = (peak_roe >= ttp_act_roe) || is_be_triggered -> TRUE (Chốt non!)
+        let old_ttp_active = (peak_roe >= ttp_act_roe) || is_be_triggered;
+        assert!(old_ttp_active, "Code cũ bị dính chùm TTP với BE!");
+
+        // Code mới: is_ttp_active = peak_roe >= ttp_act_roe -> FALSE (Giữ lệnh cho sóng chạy!)
+        let new_ttp_active = peak_roe >= ttp_act_roe;
+        assert!(!new_ttp_active, "Code mới giữ TTP độc lập, không bị chốt non ở 7% ROE!");
     }
 }

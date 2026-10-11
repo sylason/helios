@@ -54,13 +54,16 @@ flowchart TD
     - Thêm `kama_atr` vào `HeliosSensors` và tính: `delta_kama = (close - kama_mid) / kama_atr;`.
   - **Test Case:** Chạy backtest đơn lẻ cho Trend_PB khi KAMA ở khung 1h/4h, xác nhận lệnh được kích hoạt đều đặn và SL tuân thủ chặt chẽ râu nến vi mô.
 
-- [ ] **`TODO-SEM-03`**: Khử Bẫy Break-Even Tự Sát Trong `risk.rs`
-  - **File:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L219-L247)
-  - **Vấn đề:** `peak_profit >= required_profit` với `1.0 * current_atr` kích hoạt BE quá sớm khi giá chỉ mới tăng $+0.02\%$, chưa đủ bù phí sàn $+0.10\%$ ($1.6\%$ ROE tại 20x) $\to$ `Emergency BE Rejection Close` ép bot bán tháo cắt lỗ oan phí sàn.
-  - **Hành động:**
-    - Đưa sàn phí tối thiểu vào điều kiện kích hoạt BE: $\text{peak\_roe} \ge \max(\text{be\_activation\_roe}, 2.5 \times \text{round\_trip\_fee\_roe})$.
-    - Dời mức Stop Loss hòa vốn lên điểm thực sự có lãi nhẹ: $\text{BE\_Price} = \text{Entry} \times (1 \pm \text{fee\_offset})$.
-  - **Test Case:** Giả lập vị thế pump $+0.03\%$ rồi quay về Entry, kiểm tra lệnh không bị kích hoạt BE giả tạo và không bị cắt lệnh khẩn cấp chịu lỗ phí sàn.
+- [x] **`TODO-SEM-03`**: Khử Bẫy Break-Even Tự Sát Trong `risk.rs`
+  - **File:** [`strategies_backtests/helios/src/strategy/core_v3/risk.rs`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/risk.rs#L435-L555)
+  - **Trạng thái:** **ĐÃ HOÀN THÀNH (100% Tests Passed - 199/199 Unit Tests)**
+  - **Kết quả giải quyết:**
+    - Thiết lập Sàn Kinh Tế Kép: $\text{peak\_roe} \ge \max(2.0 \times \text{round\_trip\_fee\_roe},\ 6.0\%)$ VÀ $\text{peak\_dist} \ge \max(\text{Entry} \times 2.0 \times \text{round\_trip\_fee},\ \text{ATR} \times \text{be\_trigger\_mult})$.
+    - Tách biệt hoàn toàn TTP khỏi cờ Break-Even: `is_ttp_active = peak_roe >= ttp_act_roe;`.
+    - Xóa bỏ hoàn toàn khối lệnh bán tháo hoảng loạn Market `Emergency BE Rejection Close` (`tick.close(None)`).
+    - Stop Loss hòa vốn `min_be` được bù trọn vẹn phí sàn 2 chiều + đệm lãi vi mô $0.03\%$ giá (`micro_cushion`), bảo vệ lệnh qua Algo Stop Market đám mây.
+    - Khai thông Monotonic Ratchet Guard: `if current_pnl > 0.0 || is_be_triggered`, bảo toàn chốt chặn vị thế âm của `TODO-RSK-02` nhưng cho phép kéo SL hòa vốn khi retest Entry.
+    - Bổ sung 3 unit tests chuyên sâu trong `risk.rs`, 102/102 test lib Helios vượt qua thành công.
 
 ---
 

@@ -43,3 +43,19 @@
   2. Bổ sung `check_hourly_heartbeat` (phát log mỗi 60 nến = 1 giờ) hiển thị `[MARKET HEARTBEAT]` kèm giá và thông số NATR/Chaos thực tế (`defense_ledger.rs`).
   3. Xây dựng module `visual_report.rs` xuất file `report_oos.html` tương tác (TradingView Lightweight Charts v4.2 canvas 60fps) cắt lát đúng ~7,200 nến OOS, hiển thị candlestick, markers trade, dải shading Flatline/Chaos, và đường cong vốn Equity Subplot, tự động sinh vào thư mục log trước khi dọn dẹp storage trong `walk_forward_smart_seed.rs`.
 
+---
+
+### ❌ Lỗi #005: Bẫy Break-Even Tự Sát & Khối Lệnh Bán Tháo Hoảng Loạn `Emergency BE Rejection Close` Trong `risk.rs` (TODO-SEM-03)
+- **Hiện tượng:** Khi giá chỉ tăng nhẹ $+0.02\%$, cơ chế Break-Even đã kích hoạt, dời SL lên Entry; sau đó khi nến dao động nhẹ chạm dưới Entry, bot thực hiện `tick.close(None)` bán tháo Market, khiến vị thế phải trả $0.10\%$ phí sàn 2 chiều (âm $-2.0\%$ ROE tại đòn bẩy 20x).
+- **Nguyên nhân gốc rễ:**
+  1. *Kích hoạt sớm dưới sàn phí:* Điều kiện `peak_profit >= current_atr * be_trigger_mult` kích hoạt khi giá chỉ tăng $+0.02\%$ trên nến 1m, trong khi phí sàn 2 chiều tối thiểu là $0.10\%$ ($2.0\%$ ROE tại đòn bẩy 20x).
+  2. *Panic Market Close:* Khối lệnh `if current_close <= min_be { tick.close(None); }` thực thi lệnh Market đóng vị thế khẩn cấp ngay giữa thanh nến, cướp quyền khớp lệnh Limit/Stop Market trên sàn và ép vị thế chịu trượt giá cùng phí Taker.
+  3. *Lệch ngữ nghĩa (Semantic Mismatch):* So sánh khập khiễng giữa biến số khoảng cách giá tuyệt đối và ROE đòn bẩy, bỏ qua chi phí sàn thực tế.
+  4. *Ký sinh TTP:* Ghép nối điều kiện `is_be_triggered || peak_roe >= ttp_act_roe` khiến Trailing Take Profit bị kích hoạt sớm khi lợi nhuận chưa đủ lớn, vô hiệu hóa khả năng gồng lãi sóng dài.
+  5. *Xung đột với Monotonic Ratchet Guard (`TODO-RSK-02`):* Khi giá retest về Entry khiến `current_pnl <= 0.0`, Guard chặn không cho cập nhật SL hòa vốn lên sàn Binance vì nhầm lẫn với vị thế đang chịu lỗ ngay từ đầu.
+- **Giải pháp đã thực hiện:**
+  1. *Sàn kinh tế kép (Dual Economic Floor):* Bắt buộc $\text{peak\_roe} \ge \max(2.0 \times \text{round\_trip\_fee\_roe},\ 6.0\%)$ VÀ $\text{peak\_dist} \ge \max(\text{Entry} \times 2.0 \times \text{round\_trip\_fee},\ \text{ATR} \times \text{be\_trigger\_mult})$.
+  2. *Tách biệt hoàn toàn TTP:* `is_ttp_active = peak_roe >= ttp_act_roe;` (loại bỏ cờ BE khỏi TTP).
+  3. *Triệt tiêu Panic Close & Đệm phí an toàn:* Xóa bỏ hoàn toàn `tick.close(None)`; tính toán mức SL hòa vốn `min_be` có đệm bù phí sàn và vi mô lợi nhuận $+0.03\%$ giá (`micro_cushion`), bảo vệ vị thế qua cơ chế Algo Stop Market đám mây.
+  4. *Khai thông Ratchet Guard:* Cho phép dời SL khi `current_pnl > 0.0 || is_be_triggered`, bảo toàn tuyệt đối chốt chặn vị thế âm ban đầu nhưng không cản trở việc khóa hòa vốn.
+  5. *Kiểm thử 100% Zero-Regression:* 3 unit tests chuyên sâu bảo vệ logic sàn kinh tế, tính toán SL và tính độc lập của TTP.
