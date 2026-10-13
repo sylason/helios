@@ -78,29 +78,39 @@ pub struct FullOptimizerConfig {
     pub cache_config: Option<ferro_trade::data::global_cache::CacheConfig>,
     #[serde(default)]
     pub early_termination: Option<EarlyTerminationConfig>,
+    #[serde(default)]
+    pub fitness: Option<FitnessConfig>,
 }
 
-/// Cấu hình trọng số và biên độ điều chỉnh Win Rate trong Hàm Mục Tiêu Di Truyền (Loại bỏ 100% Magic Numbers)
+fn default_slippage_rate() -> f64 { 0.0002 }
+fn default_min_daily_frequency() -> f64 { 0.40 }
+fn default_max_daily_frequency() -> f64 { 1.50 }
+fn default_dd_smoothing() -> f64 { 2.0 }
+
+/// Cấu hình Hàm Mục Tiêu Di Truyền theo chuẩn t-Statistic & Dynamic Slippage Drag (Loại bỏ 100% Magic Numbers)
 #[derive(Debug, Clone, Copy, Deserialize)]
-pub struct WinRateFitnessConfig {
-    pub neutral_wr: f64,       // Điểm trung hòa: 50.0%
-    pub transition_span: f64,  // Dải chuyển tiếp: 15.0% (bao phủ dải 35% -> 65%)
-    pub amplitude: f64,        // Biên độ tác động: 0.60
-    pub min_multiplier: f64,   // Sàn phạt tối đa: 0.20 (không triệt tiêu cá thể)
-    pub max_multiplier: f64,   // Trần thưởng tối đa: 1.30 (chống bẫy cào scalp)
+pub struct FitnessConfig {
+    #[serde(default = "default_slippage_rate")]
+    pub slippage_rate: f64,       // Mặc định 0.0002 (0.02% giá)
+    #[serde(default = "default_min_daily_frequency")]
+    pub min_daily_frequency: f64, // Mặc định 0.40 lệnh/ngày
+    #[serde(default = "default_max_daily_frequency")]
+    pub max_daily_frequency: f64, // Mặc định 1.50 lệnh/ngày
+    #[serde(default = "default_dd_smoothing")]
+    pub dd_smoothing: f64,        // Mặc định 2.0% (tránh chia cho số quá nhỏ khi DD = 0)
 }
 
-impl Default for WinRateFitnessConfig {
+impl Default for FitnessConfig {
     fn default() -> Self {
         Self {
-            neutral_wr: 50.0,
-            transition_span: 15.0,
-            amplitude: 0.60,
-            min_multiplier: 0.20,
-            max_multiplier: 1.30,
+            slippage_rate: default_slippage_rate(),
+            min_daily_frequency: default_min_daily_frequency(),
+            max_daily_frequency: default_max_daily_frequency(),
+            dd_smoothing: default_dd_smoothing(),
         }
     }
 }
+
 
 /// Số nến kiểm định Out-Of-Sample mặc định: 3 ngày (72 giờ = 4320 nến 1m)
 pub const DEFAULT_VALIDATION_SPAN_BARS: usize = 4320;
@@ -276,6 +286,10 @@ impl ProspectorRunner {
         let reader = BufReader::new(file);
         let full_config: FullOptimizerConfig = serde_json::from_reader(reader).map_err(|e| e.to_string())?;
 
+        let account_cfg = full_config.account.clone().unwrap_or_default();
+        let fitness_cfg = full_config.fitness.unwrap_or_default();
+        let leverage = 1.0 / account_cfg.margin_rate;
+
         // 2. Tách toàn bộ việc dựng DataFrame, Backtest & chạy GA sang luồng Blocking riêng của Tokio (tránh nghẽn Async Event Loop)
         let prospector_db_path_owned = prospector_db_path.to_string();
 
@@ -358,8 +372,9 @@ impl ProspectorRunner {
                 prospector.add_initial_job(flat_search_space);
             }
 
-            let objective = |stats: &ferro_trade::stats::Stats| {
-                Self::calculate_enhanced_fitness(stats)
+            let fitness_cfg_blocking = fitness_cfg;
+            let objective = move |stats: &ferro_trade::stats::Stats| {
+                Self::calculate_enhanced_fitness_with_leverage(stats, leverage, &fitness_cfg_blocking)
             };
 
             info!("🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...");
@@ -396,27 +411,28 @@ impl ProspectorRunner {
 
                             // 🛡️ TIÊU CHUẨN THẨM ĐỊNH OOS KỶ LUẬT THÉP (HARD ZERO-TOLERANCE WFE GATE):
                             // 1. In-Sample bắt buộc phải có lệnh và Return > 0.0%
-                            // 2. Out-Of-Sample Validation: Bắt buộc val_ret > 0.0% và val_dd <= 15.0%
-                            //    (Xóa bỏ vĩnh viễn cửa sau dung thứ OOS âm -1.2% từng đưa cá thể lỗ vào thực tế)
-                            let is_in_sample_invalid = trades == 0 || ret <= 0.0;
+                            // 2. Out-Of-Sample Validation: Bắt buộc val_net_ret > 0.0% (sau khi khấu trừ trượt giá) và val_dd <= 15.0%
+                            let slippage_drag_roe = 2.0 * fitness_cfg.slippage_rate * leverage * 100.0;
+                            let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
 
-                            let is_solid_pass = val_ret > 0.0 && val_dd <= 15.0;
+                            let is_in_sample_invalid = trades == 0 || ret <= 0.0;
+                            let is_solid_pass = val_net_ret > 0.0 && val_dd <= 15.0;
                             let is_oos_invalid = val_trades == 0 || !is_solid_pass;
 
                             if is_in_sample_invalid || is_oos_invalid {
                                 warn!(
                                     "🚨 [WFE GATE: REJECTED - INVALID OR OVERFIT] Symbol: {} | Candidate DNA Rejected! \
-                                    In-Sample Return: {:.2}% (Trades: {}) | OOS Val Return: {:+.2}% (Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
+                                    In-Sample Return: {:.2}% (Trades: {}) | OOS Val Return: {:+.2}% (Net: {:+.2}%, Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
                                     -> REJECTED! Preserving active Champion DNA in DB & Actor to protect capital!",
-                                    symbol, ret, trades, val_ret, val_dd, val_trades, val_win_rate
+                                    symbol, ret, trades, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
                                 );
                                 return Ok(()); // 🛑 DỪNG LẠI, KHÔNG LƯU DB, KHÔNG BROADCAST!
                             }
 
                             info!(
-                                "✨ [WFE GATE: SOLID PASS] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% \
+                                "✨ [WFE GATE: SOLID PASS] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% (Net: {:+.2}%) \
                                 | OOS Max DD: {:.2}% | OOS Trades: {} (Win Rate: {:.1}%) -> Approved for Deployment.",
-                                ret, val_ret, val_dd, val_trades, val_win_rate
+                                ret, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
                             );
                         }
                         Err(e) => {
@@ -424,6 +440,7 @@ impl ProspectorRunner {
                         }
                     }
                 }
+
 
                 use crate::models::models::OptimizedDna;
                 use std::collections::HashMap;
@@ -498,62 +515,50 @@ impl ProspectorRunner {
         ])
     }
 
-    /// Tính toán điểm số Fitness đa tiêu chí (Enhanced Calmar, Profit Factor, SQN, Trade Frequency)
-    pub fn calculate_enhanced_fitness(stats: &ferro_trade::stats::Stats) -> f64 {
+    /// Tính toán điểm số Fitness theo chuẩn Kinh tế lượng Thể chế (t-Statistic trên EV_Net)
+    /// Triệt tiêu 100% bẫy cào lệnh, ép Win Rate ảo, và bù đắp chi phí ma sát thực tế (phí sàn + trượt giá).
+    pub fn calculate_enhanced_fitness_with_leverage(
+        stats: &ferro_trade::stats::Stats,
+        leverage: f64,
+        cfg: &FitnessConfig,
+    ) -> f64 {
         let ret = stats.return_pct;
         let dd = stats.max_drawdown_pct.abs();
         let trades = stats.total_trades;
 
-        // 1. Phòng vệ Edge Cases: Cần ít nhất 2 lệnh độc lập và lợi nhuận dương
-        if ret.is_nan() || ret <= 0.0 || trades < 2 {
+        // 1. Chốt chặn an toàn: Bắt buộc ít nhất 2 lệnh và dữ liệu hợp lệ
+        if ret.is_nan() || dd.is_nan() || trades < 2 {
             return -100.0 - dd;
         }
 
-        // 2. Điểm số nền tảng (Smoothed Calmar)
-        let base_score = ret / (dd + 3.0);
+        // 2. Tính số ngày dữ liệu và biên độ tần suất thích ứng
+        let duration_days = (stats.duration_secs as f64 / 86400.0).max(1.0);
+        let min_trades = (cfg.min_daily_frequency * duration_days).round().max(6.0) as u32;
+        let max_trades = (cfg.max_daily_frequency * duration_days).round().max(min_trades as f64 + 1.0) as u32;
 
-        // 3. Hệ số Profit Factor (PF Multiplier): Thưởng cho hệ thống có biên độ lãi dày
-        let pf = stats.profit_factor;
-        let pf_mult = if pf.is_nan() || pf <= 0.0 {
-            0.20
-        } else if pf < 1.15 {
-            (pf / 1.5).max(0.20)
-        } else if pf < 1.50 {
-            0.80 + (pf - 1.15) * 0.5714
-        } else {
-            (1.0 + (pf - 1.50) * 0.40).min(2.0)
-        };
+        // 3. Khấu trừ Trượt giá Động (Dynamic Slippage Drag theo Leverage)
+        // Broker trong ferro_trade đã tự động trừ Notional commission (0.04% * 2 * L = 1.6% ROE tại 20x).
+        // Ta khấu trừ thêm trượt giá thực tế: 2 * slippage_rate * L
+        let slippage_drag_roe = 2.0 * cfg.slippage_rate * leverage * 100.0; // quy ra %
+        let net_return = ret - (trades as f64 * slippage_drag_roe);
+        let ev_net = net_return / trades as f64;
 
-        // 4. Hệ số Độ Ổn Định Toán Học SQN (System Quality Number Multiplier)
-        let sqn = stats.sqn;
-        let sqn_mult = if sqn.is_nan() || sqn <= 0.0 {
-            1.0
-        } else {
-            1.0 + 0.10 * sqn.clamp(0.0, 5.0)
-        };
+        // 4. Nếu kỳ vọng ròng âm: Trừng phạt thẳng tay
+        if ev_net <= 0.0 {
+            return -100.0 - dd + ev_net;
+        }
 
-        // 5. Trọng Số Tần Suất Giao Dịch (Trade Frequency Weight)
-        let freq_weight = if trades < 8 {
-            let ratio = trades as f64 / 8.0;
-            ratio * ratio
-        } else if trades <= 55 {
-            1.0
-        } else {
-            (1.0 - (trades - 55) as f64 * 0.008).max(0.70)
-        };
+        // 5. Tính t-Statistic chuẩn hóa rủi ro sụt giảm vốn
+        let risk_denominator = dd + cfg.dd_smoothing;
+        let effective_n = (trades.min(max_trades) as f64).sqrt();
+        let sample_gate = ((trades as f64 / min_trades as f64).min(1.0)).powi(2);
 
-        // 6. Hệ số Win Rate Phi Tuyến Tính (Tanh Scaling - Loại bỏ Magic Numbers)
-        let wr = stats.win_rate_pct;
-        let wr_cfg = WinRateFitnessConfig::default();
-        let wr_mult = if wr.is_nan() {
-            0.50
-        } else {
-            let normalized_diff = (wr - wr_cfg.neutral_wr) / wr_cfg.transition_span;
-            let scaled_factor = 1.0 + normalized_diff.tanh() * wr_cfg.amplitude;
-            scaled_factor.clamp(wr_cfg.min_multiplier, wr_cfg.max_multiplier)
-        };
+        (ev_net / risk_denominator) * effective_n * sample_gate
+    }
 
-        base_score * pf_mult * sqn_mult * freq_weight * wr_mult
+    /// Wrapper tương thích ngược cho các unit test và caller mặc định (fallback L = 20.0, default FitnessConfig)
+    pub fn calculate_enhanced_fitness(stats: &ferro_trade::stats::Stats) -> f64 {
+        Self::calculate_enhanced_fitness_with_leverage(stats, 20.0, &FitnessConfig::default())
     }
 }
 
@@ -600,63 +605,63 @@ mod tests {
         let mut stats_few = ferro_trade::stats::Stats::default();
         stats_few.return_pct = 100.0;
         stats_few.max_drawdown_pct = 10.0;
-        stats_few.total_trades = 4; // Quá ít lệnh (< 8)
-        stats_few.profit_factor = 2.0;
-        stats_few.sqn = 3.0;
+        stats_few.total_trades = 3; // Dưới N_min (12 lệnh cho 30 ngày)
+        stats_few.duration_secs = 30 * 86400;
 
         let mut stats_optimal = stats_few.clone();
-        stats_optimal.total_trades = 25; // Số lệnh tối ưu
+        stats_optimal.total_trades = 25; // Số lệnh tối ưu trong dải [12, 45]
 
         let fit_few = ProspectorRunner::calculate_enhanced_fitness(&stats_few);
         let fit_optimal = ProspectorRunner::calculate_enhanced_fitness(&stats_optimal);
 
-        assert!(fit_few < fit_optimal, "Ít lệnh phải bị phạt trọng số tần suất so với số lệnh tối ưu");
+        assert!(fit_few < fit_optimal, "Ít lệnh phải bị phạt qua Adaptive Sample Gate so với số lệnh tối ưu");
     }
 
     #[test]
-    fn test_fitness_high_pf_and_sqn_boost() {
-        let mut stats_solid = ferro_trade::stats::Stats::default();
-        stats_solid.return_pct = 200.0;
-        stats_solid.max_drawdown_pct = 10.0;
-        stats_solid.total_trades = 30;
-        stats_solid.profit_factor = 2.5; // PF rất dày
-        stats_solid.sqn = 3.5;          // SQN rất ổn định
+    fn test_fitness_slippage_friction_elimination() {
+        // Kịch bản A: Cá thể "cào lệnh scalping ảo" 60 lệnh, mỗi lệnh ăn non 0.5% ROE (Return thô = 30.0%)
+        // Nhưng trượt giá ở 20x là 0.8% ROE/lệnh -> Chi phí trượt giá = 60 * 0.8% = 48.0%
+        // -> Net Return = 30.0% - 48.0% = -18.0% (Lỗ ròng)
+        let mut stats_scalp = ferro_trade::stats::Stats::default();
+        stats_scalp.return_pct = 30.0;
+        stats_scalp.max_drawdown_pct = 5.0;
+        stats_scalp.total_trades = 60;
+        stats_scalp.duration_secs = 30 * 86400;
 
-        let mut stats_fragile = stats_solid.clone();
-        stats_fragile.profit_factor = 1.05; // PF mỏng manh
-        stats_fragile.sqn = 0.5;
+        let fit_scalp = ProspectorRunner::calculate_enhanced_fitness(&stats_scalp);
+        assert!(fit_scalp < 0.0, "Cá thể cào lệnh scalping ăn mỏng bị lỗ ròng do trượt giá phải bị điểm phạt âm");
+
+        // Kịch bản B: Cá thể chất lượng cao đánh 15 lệnh, mỗi lệnh ăn đậm 3.0% ROE (Return thô = 45.0%)
+        // Chi phí trượt giá = 15 * 0.8% = 12.0% -> Net Return = 33.0% (Lãi ròng)
+        let mut stats_solid = ferro_trade::stats::Stats::default();
+        stats_solid.return_pct = 45.0;
+        stats_solid.max_drawdown_pct = 5.0;
+        stats_solid.total_trades = 15;
+        stats_solid.duration_secs = 30 * 86400;
 
         let fit_solid = ProspectorRunner::calculate_enhanced_fitness(&stats_solid);
-        let fit_fragile = ProspectorRunner::calculate_enhanced_fitness(&stats_fragile);
-
-        assert!(fit_solid > fit_fragile * 2.0, "Hệ thống có PF dày và SQN cao phải có điểm số vượt trội");
+        assert!(fit_solid > 0.0, "Cá thể có lợi thế thực sự vượt qua ma sát sàn phải có điểm Fitness dương cao");
     }
 
     #[test]
-    fn test_fitness_win_rate_multiplier() {
-        let mut stats_base = ferro_trade::stats::Stats::default();
-        stats_base.return_pct = 100.0;
-        stats_base.max_drawdown_pct = 10.0;
-        stats_base.total_trades = 20;
-        stats_base.profit_factor = 1.5;
-        stats_base.sqn = 2.0;
+    fn test_fitness_dynamic_leverage_scaling() {
+        let mut stats = ferro_trade::stats::Stats::default();
+        stats.return_pct = 50.0;
+        stats.max_drawdown_pct = 8.0;
+        stats.total_trades = 25;
+        stats.duration_secs = 30 * 86400;
 
-        // 1. WR = 50% (Điểm chuẩn trung hòa WR_mult = 1.0)
-        let mut stats_neutral = stats_base.clone();
-        stats_neutral.win_rate_pct = 50.0;
-        let fit_neutral = ProspectorRunner::calculate_enhanced_fitness(&stats_neutral);
+        let cfg = FitnessConfig::default();
 
-        // 2. WR = 20% (Ăn may 1 lệnh to -> Phạt nặng > 50%)
-        let mut stats_lucky = stats_base.clone();
-        stats_lucky.win_rate_pct = 20.0;
-        let fit_lucky = ProspectorRunner::calculate_enhanced_fitness(&stats_lucky);
-        assert!(fit_lucky < fit_neutral * 0.50, "Win Rate 20% phải bị phạt hơn 50% điểm fitness so với Win Rate 50%");
+        // Tại đòn bẩy 10x: trượt giá = 2 * 0.02% * 10 = 0.4% ROE/lệnh -> drag = 10.0% -> Net = 40.0%
+        let fit_10x = ProspectorRunner::calculate_enhanced_fitness_with_leverage(&stats, 10.0, &cfg);
+        // Tại đòn bẩy 20x: trượt giá = 0.8% ROE/lệnh -> drag = 20.0% -> Net = 30.0%
+        let fit_20x = ProspectorRunner::calculate_enhanced_fitness_with_leverage(&stats, 20.0, &cfg);
+        // Tại đòn bẩy 50x: trượt giá = 2.0% ROE/lệnh -> drag = 50.0% -> Net = 0.0%
+        let fit_50x = ProspectorRunner::calculate_enhanced_fitness_with_leverage(&stats, 50.0, &cfg);
 
-        // 3. WR = 65% (Win Rate cao ổn định -> Thưởng ~30%)
-        let mut stats_high_wr = stats_base.clone();
-        stats_high_wr.win_rate_pct = 65.0;
-        let fit_high_wr = ProspectorRunner::calculate_enhanced_fitness(&stats_high_wr);
-        assert!(fit_high_wr > fit_neutral * 1.25, "Win Rate 65% phải được thưởng ít nhất 25% điểm fitness so với Win Rate 50%");
+        assert!(fit_10x > fit_20x, "Đòn bẩy thấp hơn chịu ít ma sát ROE hơn nên phải có điểm cao hơn");
+        assert!(fit_50x < 0.0, "Đòn bẩy 50x bị ma sát nuốt sạch lợi nhuận phải bị phạt âm");
     }
 
     #[test]
@@ -693,24 +698,31 @@ mod tests {
 
     #[test]
     fn test_wfe_gate_hard_zero_tolerance() {
-        // Kịch bản A: OOS Return bị âm (-0.5%), In-Sample lãi khủng 120%, Win Rate 50%
+        let leverage = 20.0;
+        let fitness_cfg = FitnessConfig::default();
+        let slippage_drag_roe = 2.0 * fitness_cfg.slippage_rate * leverage * 100.0; // 0.8%
+
+        // Kịch bản A: OOS Return bị âm (-0.5%), 3 lệnh
         let val_ret_neg = -0.5;
         let val_dd = 8.0;
         let val_trades = 3;
-        let is_solid_pass_neg = val_ret_neg > 0.0 && val_dd <= 15.0;
+        let val_net_ret_neg = val_ret_neg - (val_trades as f64 * slippage_drag_roe);
+        let is_solid_pass_neg = val_net_ret_neg > 0.0 && val_dd <= 15.0;
         let is_oos_invalid_neg = val_trades == 0 || !is_solid_pass_neg;
-        assert!(is_oos_invalid_neg, "OOS Return âm (-0.5%) bắt buộc phải bị WFE Gate REJECT 100%!");
+        assert!(is_oos_invalid_neg, "OOS Return âm bắt buộc phải bị WFE Gate REJECT 100%!");
 
-        // Kịch bản B: OOS Return = 0.0% (không có lãi)
-        let val_ret_zero = 0.0;
-        let is_solid_pass_zero = val_ret_zero > 0.0 && val_dd <= 15.0;
-        let is_oos_invalid_zero = val_trades == 0 || !is_solid_pass_zero;
-        assert!(is_oos_invalid_zero, "OOS Return = 0.0% phải bị WFE Gate REJECT!");
+        // Kịch bản B: OOS Return dương mỏng (+0.5%) với 2 lệnh nhưng bị trượt giá bào mòn (drag = 1.6% -> net = -1.1%)
+        let val_ret_thin = 0.5;
+        let val_net_ret_thin = val_ret_thin - (2.0 * slippage_drag_roe);
+        let is_solid_pass_thin = val_net_ret_thin > 0.0 && val_dd <= 15.0;
+        let is_oos_invalid_thin = !is_solid_pass_thin;
+        assert!(is_oos_invalid_thin, "OOS Return dương nhưng Net âm sau trượt giá phải bị REJECT!");
 
-        // Kịch bản C: OOS Return dương (+2.5%), Drawdown 6.0%, 3 lệnh
-        let val_ret_pos = 2.5;
-        let is_solid_pass_pos = val_ret_pos > 0.0 && val_dd <= 15.0;
+        // Kịch bản C: OOS Return dương đậm (+3.5%), Drawdown 6.0%, 2 lệnh (drag = 1.6% -> net = +1.9%)
+        let val_ret_pos = 3.5;
+        let val_net_ret_pos = val_ret_pos - (2.0 * slippage_drag_roe);
+        let is_solid_pass_pos = val_net_ret_pos > 0.0 && val_dd <= 15.0;
         let is_oos_invalid_pos = val_trades == 0 || !is_solid_pass_pos;
-        assert!(!is_oos_invalid_pos, "OOS Return dương (+2.5%) và DD an toàn phải được APPROVE!");
+        assert!(!is_oos_invalid_pos, "OOS Return Net dương (+1.9%) và DD an toàn phải được APPROVE!");
     }
 }
