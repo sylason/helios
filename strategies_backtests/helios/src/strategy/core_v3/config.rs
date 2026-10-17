@@ -57,6 +57,9 @@ pub struct IndicatorsConfig {
     #[dna(nest)]
     pub natr: NAtrParams,
     #[dna(nest)]
+    #[serde(default)]
+    pub micro_natr: MicroNAtrParams,
+    #[dna(nest)]
     pub mfi: MfiParams,
     #[dna(nest)]
     pub vol_ma: VolMaParams,
@@ -69,7 +72,7 @@ pub struct IndicatorsConfig {
     pub vol_z_score: VolZScoreParams,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct KamaParams {
     #[dna(min = 2.0, max = 18.0, step = 4.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -82,7 +85,17 @@ pub struct KamaParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for KamaParams {
+    fn default() -> Self {
+        Self {
+            short_period: 10,
+            long_period: 30,
+            timeframe: Timeframe::T15m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct AdxParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -91,7 +104,16 @@ pub struct AdxParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for AdxParams {
+    fn default() -> Self {
+        Self {
+            period: 14,
+            timeframe: Timeframe::T15m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct RsiParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -100,7 +122,16 @@ pub struct RsiParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for RsiParams {
+    fn default() -> Self {
+        Self {
+            period: 14,
+            timeframe: Timeframe::T15m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct BbandsParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -111,7 +142,17 @@ pub struct BbandsParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for BbandsParams {
+    fn default() -> Self {
+        Self {
+            period: 20,
+            nbdev: 2.0,
+            timeframe: Timeframe::T15m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct KeltnerParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -123,6 +164,17 @@ pub struct KeltnerParams {
     pub timeframe: Timeframe,
     #[dna(options="SMA,EMA,WMA,HMA,RMA,DMA,DEMA,TMA,TEMA,WSMA,SMM,SWMA,TRIMA,LinReg,Vidya")]
     pub ma_type: MaType,
+}
+
+impl Default for KeltnerParams {
+    fn default() -> Self {
+        Self {
+            period: 20,
+            multiplier: 1.5,
+            timeframe: Timeframe::T15m,
+            ma_type: MaType::EMA,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,7 +216,7 @@ impl DnaMappable for MacdParams {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct StochasticParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -185,7 +237,21 @@ pub struct StochasticParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for StochasticParams {
+    fn default() -> Self {
+        Self {
+            period: 14,
+            k_period: 3,
+            d_period: 3,
+            k_ma_type: MaType::SMA,
+            d_ma_type: MaType::SMA,
+            zone: 0.20,
+            timeframe: Timeframe::T15m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct AtrParams {
     #[dna(min = 5.0, max = 60.0, step = 1.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -194,7 +260,16 @@ pub struct AtrParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for AtrParams {
+    fn default() -> Self {
+        Self {
+            period: 14,
+            timeframe: Timeframe::T5m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct NAtrParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -203,13 +278,49 @@ pub struct NAtrParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for NAtrParams {
+    fn default() -> Self {
+        Self {
+            period: 14,
+            timeframe: Timeframe::T15m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct MicroNAtrParams {
+    #[dna(min = 5.0, max = 30.0, step = 1.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub period: usize,
+    #[dna(subset = "1m, 3m, 5m")]
+    pub timeframe: Timeframe,
+}
+
+impl Default for MicroNAtrParams {
+    fn default() -> Self {
+        Self {
+            period: 14,
+            timeframe: Timeframe::T1m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct MfiParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub period: usize,
     #[dna(subset = "5m, 15m, 1h, 4h")]
     pub timeframe: Timeframe,
+}
+
+impl Default for MfiParams {
+    fn default() -> Self {
+        Self {
+            period: 14,
+            timeframe: Timeframe::T15m,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -243,7 +354,7 @@ impl DnaMappable for VolMaParams {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct VwmaParams {
     #[dna(min = 8.0, max = 80.0, step = 3.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -252,8 +363,17 @@ pub struct VwmaParams {
     pub timeframe: Timeframe,
 }
 
+impl Default for VwmaParams {
+    fn default() -> Self {
+        Self {
+            period: 20,
+            timeframe: Timeframe::T15m,
+        }
+    }
+}
+
 /// Cảm biến Độ lệch chuẩn Giá Vi mô (Dùng cho Boundary Guard & Reversal)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct PriceZScoreParams {
     #[dna(min = 10.0, max = 300.0, step = 5.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -262,8 +382,17 @@ pub struct PriceZScoreParams {
     pub timeframe: Timeframe,
 }
 
+impl Default for PriceZScoreParams {
+    fn default() -> Self {
+        Self {
+            lookback: 50,
+            timeframe: Timeframe::T5m,
+        }
+    }
+}
+
 /// Cảm biến Đột biến Khối lượng Vi mô (Dùng cho Momentum Ignition & Absorption)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct VolZScoreParams {
     #[dna(min = 20.0, max = 400.0, step = 5.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
@@ -272,7 +401,16 @@ pub struct VolZScoreParams {
     pub timeframe: Timeframe,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+impl Default for VolZScoreParams {
+    fn default() -> Self {
+        Self {
+            lookback: 50,
+            timeframe: Timeframe::T5m,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct MatrixConfig {
     /// 1. Chu kỳ quan sát xu hướng vĩ mô (100 -> 1000 nến, Step 30 -> 31 nấc)
     #[dna(min = 100.0, max = 1000.0, step = 30.0)]
@@ -288,6 +426,16 @@ pub struct MatrixConfig {
     #[dna(min = 0.05, max = 0.50, step = 0.01)]
     #[serde(default = "default_kama_slope_scale_atr")]
     pub kama_slope_scale_atr: f64,
+}
+
+impl Default for MatrixConfig {
+    fn default() -> Self {
+        Self {
+            trend_lookback: 300,
+            squeeze_lookback: 300,
+            kama_slope_scale_atr: default_kama_slope_scale_atr(),
+        }
+    }
 }
 
 fn default_kama_slope_scale_atr() -> f64 { 0.20 }
@@ -482,7 +630,7 @@ impl Default for TacticalPullbackParams {
 }
 
 /// ⚡ 2. CHIẾN ĐỘI MOMENTUM IGNITION (Săn các cú bùng nổ xung lực Volume & Momentum)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct TacticalMomentumParams {
     /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 15.0% ROE, Step 1.0% -> 12 nấc)
     #[dna(min = 0.04, max = 0.15, step = 0.01)]
@@ -526,8 +674,24 @@ pub struct TacticalMomentumParams {
     pub w_volume: f64,
 }
 
+impl Default for TacticalMomentumParams {
+    fn default() -> Self {
+        Self {
+            max_initial_sl_pct: 0.15,
+            rsi_threshold: 65.0,
+            vol_z_threshold: 2.0,
+            min_activation_score: default_min_activation_score(),
+            struct_sl_buffer_atr: default_momentum_sl_buffer_atr(),
+            min_clv: default_momentum_min_clv(),
+            max_adverse_slope: default_momentum_max_adverse_slope(),
+            w_breakout: default_momentum_w_breakout(),
+            w_volume: default_momentum_w_volume(),
+        }
+    }
+}
+
 /// 🌊 3. CHIẾN ĐỘI RANGE OSCILLATOR (Bắt đỉnh/đáy biên độ thị trường đi ngang)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct TacticalRangeParams {
     /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 15.0% ROE, Step 1.0% -> 12 nấc)
     #[dna(min = 0.04, max = 0.15, step = 0.01)]
@@ -584,8 +748,27 @@ pub struct TacticalRangeParams {
     pub tp_target_ratio: f64,
 }
 
+impl Default for TacticalRangeParams {
+    fn default() -> Self {
+        Self {
+            max_initial_sl_pct: 0.15,
+            bb_proximity_pct: 0.01,
+            stoch_oversold: 20.0,
+            stoch_overbought: 80.0,
+            min_width_pct: 0.01,
+            volume_max_threshold: 0.50,
+            min_activation_score: 0.05,
+            max_trend_strength: 0.30,
+            max_adverse_slope: 0.15,
+            struct_sl_buffer_atr: default_range_sl_buffer_atr(),
+            max_bb_slope: default_range_max_bb_slope(),
+            tp_target_ratio: default_range_tp_target_ratio(),
+        }
+    }
+}
+
 /// 🔄 4. CHIẾN ĐỘI CLIMAX REVERSAL (Bắt đỉnh/đáy kiệt sức Parabol)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct TacticalReversalParams {
     /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 15.0% ROE, Step 1.0% -> 12 nấc)
     #[dna(min = 0.04, max = 0.15, step = 0.01)]
@@ -633,8 +816,25 @@ pub struct TacticalReversalParams {
     pub w_displacement: f64,
 }
 
+impl Default for TacticalReversalParams {
+    fn default() -> Self {
+        Self {
+            max_initial_sl_pct: 0.15,
+            z_score_threshold: 2.0,
+            min_reversal_displacement: 1.5,
+            exhaustion_vol_drop: 0.30,
+            wick_sl_buffer_atr: 1.0,
+            min_activation_score: default_min_activation_score(),
+            min_reversal_clv: default_reversal_min_clv(),
+            mfi_reversal_thresh: default_reversal_mfi_thresh(),
+            w_z_score: default_reversal_w_z_score(),
+            w_displacement: default_reversal_w_displacement(),
+        }
+    }
+}
+
 /// 💥 5. CHIẾN ĐỘI ANOMALY FADE (Săn các râu nến quét thanh khoản dị thường)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct TacticalAnomalyParams {
     /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 15.0% ROE, Step 1.0% -> 12 nấc)
     #[dna(min = 0.04, max = 0.15, step = 0.01)]
@@ -657,8 +857,20 @@ pub struct TacticalAnomalyParams {
     pub min_activation_score: f64,
 }
 
+impl Default for TacticalAnomalyParams {
+    fn default() -> Self {
+        Self {
+            max_initial_sl_pct: 0.15,
+            wick_atr_threshold: 2.0,
+            z_score_threshold: 2.5,
+            wick_sl_buffer_atr: 1.0,
+            min_activation_score: 0.05,
+        }
+    }
+}
+
 /// 🧲 6. CHIẾN ĐỘI ABSORPTION SCOUT (Phát hiện dòng tiền cá mập gom/xả hàng trong vùng nén)
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct TacticalAbsorptionParams {
     /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 15.0% ROE, Step 1.0% -> 12 nấc)
     #[dna(min = 0.04, max = 0.15, step = 0.01)]
@@ -706,6 +918,23 @@ pub struct TacticalAbsorptionParams {
     #[dna(min = 0.20, max = 0.80, step = 0.10)]
     #[serde(default = "default_absorption_squeeze_weight")]
     pub squeeze_weight: f64,
+}
+
+impl Default for TacticalAbsorptionParams {
+    fn default() -> Self {
+        Self {
+            max_initial_sl_pct: 0.15,
+            squeeze_threshold: 0.50,
+            vol_z_threshold: 2.0,
+            min_activation_score: default_min_activation_score(),
+            struct_sl_buffer_atr: default_absorption_sl_buffer_atr(),
+            max_adverse_slope: default_absorption_max_adverse_slope(),
+            spring_tolerance: default_absorption_spring_tolerance(),
+            min_clv: default_absorption_min_clv(),
+            max_boundary_pct_b: default_absorption_max_boundary_pct_b(),
+            squeeze_weight: default_absorption_squeeze_weight(),
+        }
+    }
 }
 
 /// ============================================================================
@@ -800,7 +1029,7 @@ impl Default for RiskBaseParams {
 }
 
 /// 🛡️ CƠ CHẾ CẮT LỖ & TRAILING STOP THÍCH ỨNG
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct RiskStopParams {
     /// 0. Khoảng Đệm ATR Tối Thiểu Khi Dời TSL Chống Râu Nến Liếm (0.4 -> 2.5 ATR, Step 0.10 -> 22 nấc)
     #[dna(min = 0.4, max = 2.5, step = 0.10)]
@@ -955,6 +1184,45 @@ pub struct RiskStopParams {
     pub dynamic_tp_min_gain_pct: f64,
 }
 
+impl Default for RiskStopParams {
+    fn default() -> Self {
+        Self {
+            tsl_buffer_floor_atr: default_tsl_buffer_floor_atr(),
+            min_initial_sl_pct: 0.01,
+            default_sl_roe_cap: default_sl_roe_cap(),
+            time_countdown_bars: 120,
+            tighten_step_multiplier: 0.80,
+            base_be_roe_trigger: 0.10,
+            be_atr_trigger_trend: 2.0,
+            be_buffer_atr_trend: 1.0,
+            be_atr_trigger_range: 1.5,
+            be_buffer_atr_range: 0.8,
+            be_atr_trigger_volatile: 2.0,
+            be_buffer_atr_volatile: 1.0,
+            tsl_atr_tight: 1.5,
+            tsl_atr_normal: 2.5,
+            tsl_atr_loose: 3.5,
+            mega_trend_pnl_trigger: 0.05,
+            mega_trend_max_cycles: default_mega_trend_max_cycles(),
+            mega_trend_lock_ratio: 0.50,
+            mega_trend_min_lock_roe: 0.20,
+            max_stagnant_hold_bars: 180,
+            stagnant_min_profit_pct: 0.01,
+            base_sl_atr: default_base_sl_atr(),
+            enable_re_entry_cooldown: default_true(),
+            re_entry_cooldown_bars: default_base_cooldown_bars(),
+            max_cooldown_cap_bars: default_max_cooldown_cap_bars(),
+            be_tolerance_cooldown_bars: default_be_tolerance_cooldown_bars(),
+            true_be_roundtrip_fee_pct: default_true_be_roundtrip_fee_pct(),
+            hard_loss_roe_threshold: default_hard_loss_roe_threshold(),
+            cooldown_breakout_atr_mult: default_cooldown_breakout_atr_mult(),
+            ttp_activation_roe: default_ttp_activation_roe(),
+            ttp_callback_atr: default_ttp_callback_atr(),
+            dynamic_tp_min_gain_pct: default_dynamic_tp_min_gain_pct(),
+        }
+    }
+}
+
 fn default_cooldown_breakout_atr_mult() -> f64 {
     1.5
 }
@@ -1087,10 +1355,16 @@ fn default_reversal_w_displacement() -> f64 {
     0.40
 }
 
-#[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct WarmupConfig {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub num: usize,
+}
+
+impl Default for WarmupConfig {
+    fn default() -> Self {
+        Self { num: 50 }
+    }
 }
 
 fn default_base_cooldown_bars() -> usize {
@@ -1121,6 +1395,37 @@ fn default_base_sl_atr() -> f64 {
 mod tests {
     use super::*;
     use ferro_trade::optimizer::DnaMappable;
+
+    #[test]
+    fn test_helios_config_v3_default_has_no_zero_periods() {
+        let config = HeliosConfigV3::default();
+        assert!(config.indicators.kama.short_period > 0);
+        assert!(config.indicators.kama.long_period > 0);
+        assert!(config.indicators.adx.period > 0);
+        assert!(config.indicators.rsi_trend.period > 0);
+        assert!(config.indicators.rsi_reversal.period > 0);
+        assert!(config.indicators.rsi_momentum.period > 0);
+        assert!(config.indicators.bbands.period > 0);
+        assert!(config.indicators.keltner.period > 0);
+        assert!(config.indicators.macd.fast > 0);
+        assert!(config.indicators.macd.slow > 0);
+        assert!(config.indicators.macd.signal > 0);
+        assert!(config.indicators.stoch_trend.period > 0);
+        assert!(config.indicators.atr.period > 0);
+        assert!(config.indicators.natr.period > 0);
+        assert!(config.indicators.mfi.period > 0);
+        assert!(config.indicators.vol_ma.period > 0);
+        assert!(config.indicators.vwma.period > 0);
+        assert!(config.indicators.price_z_score.lookback > 0);
+        assert!(config.indicators.vol_z_score.lookback > 0);
+        assert!(config.matrix.trend_lookback > 0);
+        assert!(config.matrix.squeeze_lookback > 0);
+        assert!(config.tactical_sniper.pullback.max_initial_sl_pct > 0.0);
+        assert!(config.tactical_sniper.momentum.max_initial_sl_pct > 0.0);
+        assert!(config.tactical_sniper.reversal.max_initial_sl_pct > 0.0);
+        assert!(config.tactical_sniper.absorption.max_initial_sl_pct > 0.0);
+        assert!(config.risk_management.stop_management.time_countdown_bars > 0);
+    }
 
     #[test]
     fn test_price_and_vol_zscore_params_dna_independence() {

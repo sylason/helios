@@ -12,6 +12,15 @@ Nâng cấp `RegimeGatekeeper` từ cơ chế dập cầu dao phẳng (Flat Gati
 
 ---
 
+## 📌 CHECKLIST NHIỆM VỤ HIỆN TẠI (ACTIVE SPRINT - PHASE 1)
+
+- [x] **TODO-AUDIT-NEW-24: Cổng Pre-Trade Hợp Nhất & Tách Biệt DNA Vi Mô (`NEW-NATR-4H-BLIND`)**
+  - **Tài liệu đặc tả:** [`02_technical_spec_pretrade_gateway_and_micro_natr.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/03_gatekeeper_and_multi_regime_harmonization/02_technical_spec_pretrade_gateway_and_micro_natr.md)
+  - **Mục tiêu:** Khử triệt để bẫy mù $4\text{h}$ của Cầu Dao Flatline bằng kiến trúc Cổng Pre-Trade 2 tầng (Sàn Vĩ Mô $0.22\%$ + Sàn Vi Mô $0.04\%$), trang bị struct DNA độc lập `MicroNAtrParams` (`[1m, 3m, 5m]`), tách 2 mã Veto riêng biệt `MacroFlatline` và `MicroFlatline`.
+  - **Tệp liên quan:** `config.rs`, `sensors.rs`, `core_v3/mod.rs`, `gatekeeper.rs`, `defense_ledger.rs`.
+
+---
+
 ## 📌 CHECKLIST NHIỆM VỤ DÀI HẠN (FUTURE ACTION ITEMS)
 
 - [ ] **TASK-FUT-GK-01: Triển khai Per-Playbook Adaptive Gating trong Arbiter**

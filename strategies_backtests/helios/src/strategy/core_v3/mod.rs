@@ -100,6 +100,7 @@ impl Strategy for HeliosStrategyV3 {
         s.volumes = ctx.volumes().clone();
 
         s.natr = ctx.natr(ind.natr.timeframe, "NATR", ind.natr.period);
+        s.micro_natr = ctx.natr(ind.micro_natr.timeframe, "NATR_Micro", ind.micro_natr.period);
         s.chaos_ratio = ctx.chaos_ratio(ind.natr.timeframe, "ChaosRatio", ind.natr.period);
         s.efficiency_ratio = ctx.efficiency_ratio(ind.kama.timeframe, "ER", ind.kama.short_period);
 
@@ -959,7 +960,11 @@ mod tests {
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
-        assert_eq!(width, 102, "DNA_WIDTH phải là chính xác 102 chiều sau khi loại bỏ gen ma z_score_sensitivity theo TODO-CFG-05!");
+        assert_eq!(width, 104, "DNA_WIDTH phải là chính xác 104 chiều sau khi bổ sung micro_natr (timeframe, period) theo TODO-AUDIT-NEW-24!");
+        let has_micro_natr_tf = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.timeframe"));
+        let has_micro_natr_period = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.period"));
+        assert!(has_micro_natr_tf, "defs phải chứa indicators.micro_natr.timeframe!");
+        assert!(has_micro_natr_period, "defs phải chứa indicators.micro_natr.period!");
         let has_pb_min_clv = defs.iter().any(|(name, _)| name.contains("pullback.min_clv"));
         assert!(has_pb_min_clv, "defs phải chứa tactical_sniper.pullback.min_clv theo TODO-PB-02!");
         let has_base_sl = defs.iter().any(|(name, _)| name.contains("base_sl_atr"));

@@ -763,6 +763,7 @@ mod tests {
 
         let mut sensors = HeliosSensors::default();
         sensors.natr = std::sync::Arc::new(vec![0.30; len]); // 0.30% NATR > min_natr_threshold (0.0010)
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]); // 0.10% > 0.04% micro floor
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         let mut matrix = MarketMatrixV3::default();
         matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
@@ -831,6 +832,7 @@ mod tests {
 
         let mut sensors = HeliosSensors::default();
         sensors.natr = std::sync::Arc::new(vec![0.30; len]); // 0.30% NATR > min_natr_threshold (0.0010)
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]); // 0.10% > 0.04% micro floor
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         let mut matrix = MarketMatrixV3::default();
         matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);

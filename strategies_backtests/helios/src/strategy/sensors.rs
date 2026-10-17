@@ -15,6 +15,7 @@ pub struct HeliosSensors {
 
     // --- Environment & Chaos ---
     pub natr: Arc<Vec<f64>>,
+    pub micro_natr: Arc<Vec<f64>>,
     pub chaos_ratio: Arc<Vec<f64>>,
     pub efficiency_ratio: Arc<Vec<f64>>,
     pub mfi: Arc<Vec<f64>>,

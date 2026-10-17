@@ -59,3 +59,20 @@
   3. *Triệt tiêu Panic Close & Đệm phí an toàn:* Xóa bỏ hoàn toàn `tick.close(None)`; tính toán mức SL hòa vốn `min_be` có đệm bù phí sàn và vi mô lợi nhuận $+0.03\%$ giá (`micro_cushion`), bảo vệ vị thế qua cơ chế Algo Stop Market đám mây.
   4. *Khai thông Ratchet Guard:* Cho phép dời SL khi `current_pnl > 0.0 || is_be_triggered`, bảo toàn tuyệt đối chốt chặn vị thế âm ban đầu nhưng không cản trở việc khóa hòa vốn.
   5. *Kiểm thử 100% Zero-Regression:* 3 unit tests chuyên sâu bảo vệ logic sàn kinh tế, tính toán SL và tính độc lập của TTP.
+
+---
+
+### ❌ Lỗi #006: Bẫy Mù NATR 4h Của Cầu Dao Flatline & Sự Pha Tạp DNA Vi Mô (TODO-AUDIT-NEW-24 / NEW-NATR-4H-BLIND)
+- **Hiện tượng:** Khi GA Optimizer lựa chọn `ind.natr.timeframe = Timeframe::T4h`, giá trị NATR khung 4h ($\text{NATR}_{4\text{h}} \approx 0.80\% \dots 2.50\%$) luôn vượt xa sàn chi phí sinh tồn ($0.22\%$). Do đó, Cầu Dao Flatline bị **MÙ HOÀN TOÀN** trước các đợt nến vi mô rơi vào trạng thái que tăm / đóng băng thanh khoản ($< 0.02\%$), khiến bot vẫn phê duyệt mở lệnh trong điều kiện thị trường không thể hấp thụ lệnh hoặc spread/slippage bào mòn tài khoản.
+- **Nguyên nhân gốc rễ:**
+  1. *Lệch ngữ nghĩa thang đo (Temporal Scale Mismatch):* Đem chỉ số biến động sóng lớn 4h làm thước đo độ thanh khoản tức thời cho việc khớp lệnh tại nến 1m.
+  2. *Thiếu độc lập dòng dữ liệu (Data Lineage Violation):* Không có cấu hình DNA và cảm biến riêng biệt cho biến động vi mô, phụ thuộc ngầm vào `ind.natr` (vốn được thiết kế để đo biên độ vĩ mô và tính `chaos_ratio`).
+  3. *Bẫy VETO nhầm nến nén tích lũy (TODO-SEM-01):* Nếu dùng sàn $0.22\%$ so với nến vi mô 1m thì lại Veto oan $95\%$ các cây nến bình thường ($0.06\% \dots 0.15\%$) và nến nén tích lũy chuẩn bị bứt phá ($0.05\%$).
+- **Giải pháp đã thực hiện (Phương Án 1 Chốt Chuẩn Quant):**
+  1. *Cổng Pre-Trade Hợp Nhất 2 Tầng (Unified Two-Tier Gateway):*
+     - Tầng 1 (Vĩ mô): $\text{macro\_natr} \ge \text{required\_min\_natr\_pct} = \max(\text{fee\_floor\_pct},\ \text{alpha\_pct})$ (sàn $0.22\%$). Veto lý do: `GateVetoReason::MacroFlatline`.
+     - Tầng 2 (Vi mô cơ học): $\text{micro\_natr} \ge \text{micro\_fee\_floor\_pct} = \text{taker\_fee\_rate} \times 100.0 = 0.04\%$ (phí Taker 1 chiều). Veto lý do: `GateVetoReason::MicroFlatline`.
+     - Tầng 3 (Bão Chaos): $\text{chaos\_index} \le \text{chaos\_veto\_threshold}$ kèm Hysteresis Schmitt Trigger.
+  2. *Struct DNA Vi Mô Độc Lập:* Tạo `MicroNAtrParams` (`timeframe: subset = "1m, 3m, 5m"`, `period: min = 5.0, max = 30.0, step = 1.0`, default: `14, Timeframe::T1m`). Tăng DNA_WIDTH từ 102 lên 104 chiều.
+  3. *Tách bạch Telemetry & Defense Ledger:* Ghi nhận riêng biệt `MacroFlatline` và `MicroFlatline` trong telemetry và hourly heartbeat.
+  4. *Kiểm thử 100% Zero-Regression:* 11/11 tests trong gatekeeper & telemetry pass; 104/104 tests toàn bộ `helios` pass; 50/50 tests `ferro_trade` pass; 46/46 tests `bot_engine` pass.

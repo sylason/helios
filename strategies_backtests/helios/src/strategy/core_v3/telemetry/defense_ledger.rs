@@ -120,7 +120,7 @@ impl DefenseLedger {
                         None
                     }
                 }
-                GateVetoReason::VolatilityFlatline => {
+                GateVetoReason::MacroFlatline => {
                     self.volatility_flatline_bars += 1;
                     if self.prev_gate_veto.is_none() {
                         self.prev_gate_veto = Some(reason);
@@ -128,8 +128,23 @@ impl DefenseLedger {
                         self.veto_start_ts = current_ts;
                         self.gatekeeper_state_transitions += 1;
                         Some(format!(
-                            "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: VolatilityFlatline | NATR: {:.2}% < Req: {:.2}% (FeeFloor: {:.2}% + DNAAlpha: {:.2}%) | Entering Shelter!",
+                            "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: MacroFlatline | Macro NATR: {:.2}% < Req: {:.2}% (FeeFloor: {:.2}% + DNAAlpha: {:.2}%) | Entering Shelter!",
                             current_bar, gate_eval.market_natr_pct, gate_eval.required_min_natr_pct, gate_eval.fee_floor_pct, gate_eval.min_alpha_pct
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                GateVetoReason::MicroFlatline => {
+                    self.volatility_flatline_bars += 1;
+                    if self.prev_gate_veto.is_none() {
+                        self.prev_gate_veto = Some(reason);
+                        self.veto_start_bar = current_bar;
+                        self.veto_start_ts = current_ts;
+                        self.gatekeeper_state_transitions += 1;
+                        Some(format!(
+                            "🛡️ [GATEKEEPER ENGAGED] Bar: {} | Veto: MicroFlatline | Micro NATR: {:.2}% < MicroFeeFloor: {:.2}% | Entering Shelter!",
+                            current_bar, gate_eval.micro_natr_pct, gate_eval.micro_fee_floor_pct
                         ))
                     } else {
                         None
@@ -372,7 +387,7 @@ mod tests {
         let mut ledger = DefenseLedger::new();
         let eval_flatline = GateEvaluation {
             passed: false,
-            veto_reason: Some(GateVetoReason::VolatilityFlatline),
+            veto_reason: Some(GateVetoReason::MacroFlatline),
             current_chaos: 0.10,
             market_natr_pct: 0.15,
             required_min_natr_pct: 0.25,
@@ -392,7 +407,7 @@ mod tests {
         assert!(hb_60.is_some());
         let msg = hb_60.unwrap();
         assert!(msg.contains("[MARKET HEARTBEAT]"));
-        assert!(msg.contains("VOLATILITY_FLATLINE"));
+        assert!(msg.contains("MACRO_FLATLINE"));
         assert!(msg.contains("NATR: 0.15% (Req: 0.25%)"));
     }
 

@@ -1,10 +1,14 @@
 # DANH MỤC CÔNG VIỆC (TODO): TÁI CẤU TRÚC KIẾN TRÚC ĐỊNH LƯỢNG & ỔN ĐỊNH HÓA
 
 > **Thư mục:** [`05_systemic_stability_and_quant_architecture_flaws/`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/)  
-> **Tài liệu tham chiếu:**  
-> - [`01_quant_architecture_flaws_and_stability_blueprint.md`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/notes/01_quant_architecture_flaws_and_stability_blueprint.md)  
-> - [`02_helios_and_trading_bot_architectural_flaws.md`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/notes/02_helios_and_trading_bot_architectural_flaws.md)  
+> **Tài liệu tham chiếu:** Toàn bộ chuỗi 55 Báo cáo Khoa học & Kiểm toán Hạ tầng Hệ thống trong [`notes/`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/notes/) (từ Note 01 đến Note 55).  
 > **Mục tiêu:** Chuyển đổi hệ thống sang "Lỗ ít, lời ổn định, đủ nhiều, lọc sạch trạng thái nguy hiểm và tối đa hóa lợi nhuận".
+
+
+
+
+
+
 
 ---
 
@@ -124,3 +128,1067 @@
   - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs`, `execution/order_executor.rs`
   - **Mô tả:** Gửi lệnh Market Close thật lên sàn Binance khi Panic Close; tách kênh dữ liệu số dư cho từng Actor tương ứng với vốn phân bổ.
 
+---
+
+### PHẦN 8: NHIỆM VỤ CẤP BÁCH TỪ KIỂM TOÁN RỦI RO HỆ THỐNG MỚI (NOTES 12, 13, 14)
+- [ ] **TODO-AUDIT-NEW-01: Vá Lỗ Hổng Phình To Vốn Sàn Trên Live Engine**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:133`
+  - **Mô tả:** Đổi `usable_capital = self.account_state.available_balance.min(self.core.allocated_capital)`. Tuyệt đối không để một cặp tiền dùng toàn bộ số dư ví Binance (\$10,000) thay vì ngân sách được cấp (\$60).
+- [ ] **TODO-AUDIT-NEW-02: Khử Bẫy Silent Failure & Naked SL Gap 150ms**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:190-236`
+  - **Mô tả:** Nếu sau 3 lần retry đặt SL mới thất bại $\to$ kích hoạt Emergency Market Close toàn bộ vị thế (`reduce_only: true`), không bao giờ để vị thế mồ côi không SL ngoài thị trường.
+- [ ] **TODO-AUDIT-NEW-03: Xóa Bỏ Bẫy Clean Slate Bán Tháo Sạch Vị Thế Khi Khởi Động**
+  - **File:** `trading_bot/bot_engine/src/execution/account_manager.rs:175-178`
+  - **Mô tả:** Xóa bỏ `cancel_all_orders` và `force_close_all_positions`. Triển khai True Adopt & Protect query Open Algo Orders để bảo vệ vị thế đang sống.
+- [ ] **TODO-AUDIT-NEW-04: Phá Bẫy Catch-22 VETO Triệt Tiêu Nến Đẹp của Arbiter**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:254-280`
+  - **Mô tả:** Xóa bỏ Binary Veto khi SL $> 15\%$ ROE. Thay bằng tự động gọi `clamp_sl_price` kẹp SL về trần an toàn và co giãn khối lượng (Dynamic Sizing: $\text{scale} = 15\% / \text{suggested\_roe}$).
+- [ ] **TODO-AUDIT-NEW-05: Vá Lỗ Hổng Inverted SL Bằng Tham Số `is_long`**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:84-138`
+  - **Mô tả:** Bổ sung `is_long: bool` vào `validate_structural_sl`. Long bắt buộc $SL < Price$, Short bắt buộc $SL > Price$.
+- [ ] **TODO-AUDIT-NEW-06: Khử Lỗi Mù SL Của Strategy (Phantom SL Desync)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:117-160`
+  - **Mô tả:** Cập nhật ngay `live_position.current_sl_price = Some(new_sl)` khi dời SL để Strategy không bị mù trạng thái sàn và ngừng spam lệnh dời SL mỗi nến.
+- [ ] **TODO-AUDIT-NEW-07: Khai Thông `Trend_PB` & Sửa Hàm Volume Bán Tháo `Reversal`**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:64, 98`, `reversal.rs:105-107`
+  - **Mô tả:** Gỡ bỏ Squeeze ngáng chân trong TrendPB (vì RangeOsc đã tắt); sửa hàm volume Reversal chấp nhận cả bão khối lượng bán tháo ($vol\_ratio > 1.5$) là tín hiệu đảo chiều.
+- [ ] **TODO-AUDIT-NEW-08: Triển Khai Staleness Watchdog Chống Zombie DNA Lock-in**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:423-440`
+  - **Mô tả:** Đếm số lần Reject liên tiếp: sau 3 lần giảm $50\%$ size/leverage; sau 6 lần kích hoạt Defensive Hold (đứng ngoài thị trường bảo toàn vốn).
+- [ ] **TODO-AUDIT-NEW-09: Thống Nhất Mô Hình Cooldown Giữa Backtest và Live**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:272`, `ferro_trade/src/broker/broker.rs`
+  - **Mô tả:** Đưa logic Cooldown vào Backtest Broker để GA tối ưu hóa và đánh giá đường cong vốn khớp 1:1 với thực tế.
+
+---
+
+### PHẦN 9: NHIỆM VỤ CỐT TỬ TỪ KIỂM TOÁN GIAO TIẾP BOT-HELIOS & CONCURRENCY (NOTES 16, 17, 18)
+- [ ] **TODO-AUDIT-NEW-10: Vá Khuyết Tật Bỏ Quên Hard SL Ban Đầu Khi Mở Lệnh Live (`BUG-EXEC-NEW-01`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:249, 261`
+  - **Mô tả:** Bóc tách `sl_price` từ `policy: Some(RiskPolicy::FixedPrice { sl_price, .. })` thay vì chỉ đọc `stop` (vốn là None), đảm bảo vị thế mở trên sàn Binance luôn có lệnh Algo STOP_MARKET bảo vệ ngay lập tức.
+- [ ] **TODO-AUDIT-NEW-11: Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385`
+  - **Mô tả:** Khởi tạo Job mới tăng dần (`new_job_id = max_job + 1`) mỗi chu kỳ Walk-Forward Rolling thay vì bỏ qua tạo Job khi file DB đã tồn tại.
+- [ ] **TODO-AUDIT-NEW-12: Khắc Phục Thảm Họa High Watermark Buffer Bleed Khi Lệnh Trôi Khỏi Buffer (`TODO-BRG-01`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:223-238`, `strategies_backtests/helios/src/strategy/core_v3/risk.rs:310-330`
+  - **Mô tả:** Bổ sung `highest_favorable_price` vào `LivePositionState` và `Trade`, cập nhật đơn điệu qua từng nến, xóa bỏ hoàn toàn vòng lặp quét lại toàn bộ nến quá khứ từ index 1 khi `mapped_entry_bar == 0`.
+- [ ] **TODO-AUDIT-NEW-13: Sửa Lỗ Hổng Same-Bar Re-entry Guard Bị Bypassed Khi Đóng Lệnh Giữa Nến (`BUG-ACT-NEW-02`)**
+  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:373-378, 637-644`
+  - **Mô tả:** Bổ sung `last_exit_bar_idx: Option<usize>` vào `AssetActor`, khóa cứng cấm mở lệnh lại trên cùng cây nến vừa thoát lệnh, bất kể lệnh đóng giữa nến qua WS hay tại nến đóng.
+- [ ] **TODO-AUDIT-NEW-14: Khôi Phục Tag Playbook & Đồng Bộ SL Sàn Vào Live Position (`TODO-BRG-03`)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:197-207`
+  - **Mô tả:** Lưu và chuyển tiếp `opening_playbook_tag` sang vị thế để kích hoạt Dynamic TP của Range/Reversal; đồng bộ `current_sl_price` từ `OrderExecutor` để Strategy không bị mù trạng thái sàn.
+- [ ] **TODO-AUDIT-NEW-15: Căn Chỉnh Lát Cắt Buffer Chia Hết 4h UTC & Nâng Buffer 30,000 Nến (`TODO-ACT-04`)**
+  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:604`, `models/config.rs:79`
+  - **Mô tả:** Tăng buffer lên 30,000 nến 1m và căn chỉnh `slice_start` lùi về mốc 4h UTC tròn để cây nến 4h đầu tiên không bị cắt cụt, bảo toàn hội tụ chỉ báo MTF.
+- [ ] **TODO-AUDIT-NEW-16: Chuẩn Hóa `apply_dna` Cho Toàn Bộ Điểm Cập Nhật DNA Nóng (`TODO-ACT-05`)**
+  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:338, 515`
+  - **Mô tả:** Thay thế các lệnh gọi trực tiếp `update_from_dna` bằng `self.apply_dna(...)` để kiểm tra kích thước DNA (103 chiều) và chặn triệt để `NaN`/`Inf`.
+- [ ] **TODO-AUDIT-NEW-17: Khử Bom Nổ Chậm Panic Crash Trong `RangeOsc` & Dọn Cảm Biến Rỗng (`TODO-SEN-08`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs:77-78`, `core_v3/mod.rs:148-173`
+  - **Mô tả:** Thêm guard kiểm tra độ dài vector trước khi index `sensors.stoch_range_k[i]`, tránh crash ứng dụng khi tái kích hoạt Scanner.
+- [ ] **TODO-AUDIT-NEW-18: Thẩm Định Ngoài Mẫu OOS Thuần Khiết Cắt Bỏ Nhiễm Bẩn Warmup (`TODO-PROS-02`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:410-435`
+  - **Mô tả:** Chỉ tính toán thống kê WFE Gate trên các lệnh có `entry_bar >= warmup_offset`, loại bỏ hoàn toàn 5,760 nến In-Sample gối đầu.
+---
+
+### PHẦN 10: NHIỆM VỤ CỐT TỬ TỪ KIỂM TOÁN MARKET MATRIX & REGIME GATEKEEPER (NOTES 19, 20)
+- [ ] **TODO-AUDIT-NEW-19: Khử Triệt Để Bẫy Tụt Về 0.50 Của Squeeze Intensity (`TODO-MAT-01`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:55-63, 81`
+  - **Mô tả:** Loại bỏ hoàn toàn bước bọc qua `rolling_percentile`. Gán trực tiếp giá trị thực phi thứ nguyên $\text{sqz\_raw} = \frac{1}{1 + (BB/KC)^2} \in [0.0, 1.0]$, bảo toàn độ nén thực khi thị trường tích lũy kéo dài.
+- [ ] **TODO-AUDIT-NEW-20: Triển Khai Tanh Scaling Cho KAMA Slope Chuẩn Hóa Theo ATR (`TODO-MAT-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:87-90`
+  - **Mô tả:** Thay thế phép kẹp cứng `.clamp(-1.0, 1.0)` bằng hàm hyperbol trơn $\tanh(s / \text{scale\_atr})$, giữ nguyên gradient nhạy cảm khi trend mở rộng mạnh.
+- [ ] **TODO-AUDIT-NEW-21: Đồng Bộ Float Comparator Trong Chuẩn Hóa Phân Vị (`TODO-SEN-11`)**
+  - **File:** `strategies_backtests/helios/src/utils/normalization.rs:77, 88, 98`
+  - **Mô tả:** Thống nhất cách so sánh float giữa `dedup_by` và `binary_search_by` với cùng dung sai $\epsilon = 10^{-7}$, triệt tiêu hoàn toàn lỗi trả về `NaN` cho các nến hợp lệ.
+- [ ] **TODO-AUDIT-NEW-22: Sửa Fallback Z-Score Thành 0.0 Khi Thị Trường Đứng Im (`TODO-FT-02`)**
+  - **File:** `ferro_trade/src/indicators/calculate/bulk.rs:128`, `helios/src/utils/normalization.rs:236`
+  - **Mô tả:** Khi $\sigma \le 10^{-9}$ và $|X - \mu| \le 10^{-9}$, trả về $Z = 0.0$ thay vì `NaN`, ngăn ngừa lây nhiễm `NaN` toàn hệ thống khi thị trường flat.
+- [ ] **TODO-AUDIT-NEW-23: Chuyển Đổi Veto Structural SL Sang Cơ Chế Auto-Clamping (`CATCH-22-STRUCTURAL-SL`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:254-280`
+  - **Mô tả:** Xóa bỏ lệnh Hard Veto hủy tín hiệu khi SL vượt trần; tự động kẹp SL về `max_allowed_roe` và bảo toàn rủi ro bằng cách giảm quy mô vị thế, kích hoạt lại khối mã `clamp_sl_price`.
+- [x] **TODO-AUDIT-NEW-24: Tách Bạch Micro NATR vs Macro NATR Cho Cầu Dao Flatline (`NEW-NATR-4H-BLIND`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:24-32`
+  - **Mô tả:** Sử dụng nến vi mô 1m/5m cho chốt chặn Flatline thay vì dùng NATR khung 4h, khắc phục triệt để bẫy mù thanh khoản khi thị trường đứng im.
+- [ ] **TODO-AUDIT-NEW-25: Gỡ Bỏ Lệnh Đánh Giá Lặp Lại Gatekeeper Trong Arbiter (`NEW-DOUBLE-EVAL`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:168-173`
+  - **Mô tả:** Loại bỏ lệnh gọi `gatekeeper.evaluate` lần 2 trong `process_tick()`, thống nhất quyền kiểm soát cửa ngõ duy nhất tại `core_v3/mod.rs:241`.
+- [ ] **TODO-AUDIT-NEW-26: Dọn Cảm Biến Mồ Côi & Gỡ Ô Nhiễm Tham Số ATR Khỏi Độ Dốc KAMA (`ORPHAN-SENS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:114-120`
+  - **Mô tả:** Xóa bỏ `sensors.kama_slope` không sử dụng; thay `ind.atr.period` bằng `ind.kama.short_period` trong hàm gọi `ctx.kama_slope` để tránh ô nhiễm tham số SL vào KAMA.
+
+---
+
+### PHẦN 11: NHIỆM VỤ CỐT TỬ TỪ KIỂM TOÁN ARBITER & RÀO CẢN TIỀN KHỚP LỆNH (NOTES 21, 22)
+- [ ] **TODO-AUDIT-NEW-27: Xóa Bỏ Nhánh Đối Kháng Nến Đơn Là Mã Chết 100% Trong Arbiter (`TODO-ARB-01`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:521-538`
+  - **Mô tả:** Do $CLV$ chỉ có 1 dấu trên mỗi cây nến $i$, nhánh đối đầu liên chiều Long vs Short không bao giờ xuất hiện. Đơn giản hóa `resolve_conflicts` về một chuỗi tìm kiếm cực đại đơn giản `proposals.into_iter().max_by(...)`.
+- [ ] **TODO-AUDIT-NEW-28: Triển Khai Inter-Bar Flip-Flop Guard Chống Bẫy Vả 2 Đầu (`TODO-ARB-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:111-158`, `core_v3/mod.rs`
+  - **Mô tả:** Bổ sung bộ nhớ liên nến: Cấm mở lệnh đảo chiều ngược lại trong vòng $K=2$ nến ngay sau khi vừa bị cắt lỗ Stop Loss, trừ khi có nến xung lực bứt phá cực đại $> 2.0\text{ ATR}$.
+- [ ] **TODO-AUDIT-NEW-29: Chuyển Đổi Sniper Veto Sang Dynamic De-leverage & Size Scaling (`TODO-ARB-03`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:223-289`, `risk.rs:84-138`
+  - **Mô tả:** Khi SL cấu trúc $> 15\%$ ROE (nhưng $\le 35\%$ ROE), tự động co giảm kích thước vị thế tỷ lệ nghịch với khoảng cách SL để bảo toàn \$ USD Risk cố định thay vì VETO hủy lệnh, tái kích hoạt khối code `clamp_sl_price`.
+- [ ] **TODO-AUDIT-NEW-30: Bổ Sung EV Hurdle Gate Nhận Thức Chi Phí Ma Sát Sàn 2.6% ROE (`TODO-ARB-05`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:290-302`
+  - **Mô tả:** Bắt buộc biên độ kỳ vọng tối thiểu của lệnh phải thỏa mãn $\ge 2.5 \times \text{Friction Cost} \ge 6.5\%$ ROE (tại 20x) trước khi phê duyệt mở lệnh, loại bỏ các lệnh scalp mỏng bị âm sau phí.
+- [ ] **TODO-AUDIT-NEW-31: Dọn Dẹp Triệt Để 8 Biến Ma & Trường Rác Khỏi `ArbiterConfig` (`ZOMBIE-ARBITER-CFG`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:450-478`
+  - **Mô tả:** Xóa bỏ 6 dead fields cũ và 2 trường bù nhìn (`max_chaos_penalty`, `conflict_confidence_margin`), tách các trường thuộc Cầu Dao sang `GatekeeperConfig`.
+- [ ] **TODO-AUDIT-NEW-32: Vá Lỗ Hổng Inverted SL & Động Hóa MMR Theo Tier Sàn (`TODO-ARB-02-R2`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:84-138`
+  - **Mô tả:** Bổ sung `is_long: bool` vào `validate_structural_sl` (Long bắt buộc $SL < P$, Short $SL > P$); nạp MMR động theo Tier sàn thay vì áp đặt cứng $1.0\%$ làm tê liệt đòn bẩy cao $\ge 100\text{x}$.
+- [ ] **TODO-AUDIT-NEW-33: Triển Khai Post-Storm Ramp-up Filter Sau Bão (`POST-STORM-BLINDNESS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `gatekeeper.rs:177-206`
+  - **Mô tả:** Trong $M=3$ nến đầu tiên sau khi Gatekeeper mở khóa sau bão, tự động giảm $50\%$ Position Size và yêu cầu ngưỡng tự tin cao hơn $+0.15$ để phòng ngừa trượt giá và râu nến dư chấn khi sổ lệnh mỏng.
+
+---
+
+### PHẦN 12: KIỂM TOÁN TỪNG CHIẾN ĐỘI SCANNER (SCANNER AUDIT & QUANT METHODOLOGY)
+
+- [ ] **TODO-AUDIT-NEW-34: Tháo Gỡ Nghịch Lý Hình Học Nến (%B vs CLV) Trong Absorption Scanner (`ABS-GEOM-PARADOX`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-101`
+  - **Mô tả:** Tách bạch điều kiện quét râu (`Low <= BB_Lower` hoặc Swing Low) với điều kiện rút chân (`CLV >= min_clv`), loại bỏ việc ép `Close` phải đóng sát đáy `%B <= max_bound` đang tự triệt tiêu các nến Spring kinh điển.
+
+- [ ] **TODO-AUDIT-NEW-35: Khắc Phục Lệch Pha MTF Giữa Nến Vi Mô 1m & Dải Bollinger MTF 15m (`ABS-MTF-SCALE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-85`
+  - **Mô tả:** Thay vì so sánh giá đóng cửa nến 1m với dải Bollinger 15m khổng lồ khiến nến 1m không bao giờ chạm tới biên dưới trừ khi xả lũ, chuyển sang so sánh vị trí tương đối theo Swing Low vi mô hoặc dải nén vi mô tương thích.
+
+- [ ] **TODO-AUDIT-NEW-36: Hiệu Chuẩn Điểm Tự Tin Anti-Inflation & Loại Bỏ VWMA Trễ Pha (`ABS-SCORE-INFLATION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:67-76`, `normalization.rs:25-37`
+  - **Mô tả:** Hiệu chuẩn lại hàm `sat_ratio_damped` để điểm tự tin `raw_score` không bị thổi phồng lên $0.90 \sim 0.98$ mỗi khi thân nến hẹp; loại bỏ điều kiện `vwma < bb_middle` gây nhiễu loạn 50/50 trong vùng nén.
+
+- [ ] **TODO-AUDIT-NEW-37: Nâng Cấp Kiến Trúc Tách Bạch 3 Tầng & Bộ Nhớ Sự Kiện Vi Mô (`ARCH-DECOUPLED-TIERS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/` (`matrix.rs`, `gatekeeper.rs`, `arbiter.rs`, `risk.rs`, `scanners/`)
+  - **Mô tả:** Tách bạch 3 ranh giới trách nhiệm: (1) Context Tracker theo dõi bối cảnh và bộ nhớ sự kiện vi mô (Spring tại bar $i$, xác nhận tại bar $i+1$); (2) Scanners chỉ phát hiện xác suất hiện tượng và điểm neo cấu trúc; (3) Arbiter & Risk độc quyền phân bổ vốn và co size động theo SL (`Dynamic De-leverage`) thay vì VETO hủy lệnh.
+
+- [ ] **TODO-AUDIT-NEW-38: Khôi Phục Neo Khoảng Cách KAMA Trong Trend_PB (`GHOST-PULLBACK`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:47-75`
+  - **Mô tả:** Khôi phục biến `delta_kama = (close - kama_mid) / ATR` và điều kiện kiểm tra khoảng cách an toàn, chấm dứt tình trạng Trend_PB biến thành Dip Buying vu vơ không có điểm tựa hồi quy.
+
+- [ ] **TODO-AUDIT-NEW-39: Khắc Phục Lỗi Tê Liệt Stochastic Hook Guard Do Forward-Fill 15m (`STOCH-15M-BLIND`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:81-85, 109-111`
+  - **Mô tả:** Sửa lỗi `stoch_k < prev_stoch_k` bị mù trong 93.3% số nến 1m do chỉ báo 15m dạng bậc thang phẳng; chuyển sang kiểm tra độ dốc nến vi mô hoặc Stoch vi mô tương thích.
+
+- [ ] **TODO-AUDIT-NEW-40: Ngăn Chặn Đu Đỉnh Kiệt Sức Buying Climax Trong Momentum Ignition (`MOM-CLIMAX-SPAM`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:53-57, 108-126`
+  - **Mô tả:** Bắt buộc có giai đoạn nén biến động trước đó (`prior_squeeze`), khử bẫy thưởng điểm cao nhất tại nến kiệt sức ngoài dải BB.
+
+- [ ] **TODO-AUDIT-NEW-41: Sửa Nghịch Lý Volume Trong Reversal Scanner (`REVERSAL-VOL-PARADOX`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:105-106`
+  - **Mô tả:** Thay thế hàm `sat_proximity` đang phạt 0 điểm khi volume bán tháo cực đại; đưa điều kiện volume cao trào $Z_{\text{vol}} \ge 2.0$ vào đúng bản chất của Selling Climax.
+
+- [ ] **TODO-AUDIT-NEW-42: Khắc Phục Các Tử Huyệt Trên Live Engine (`LIVE-SAFETY-PACK`)**
+  - **File:** `trading_bot/bot_engine/src/execution/` (`live_engine.rs:133, 206`, `order_executor.rs:249`, `account_manager.rs:175`)
+  - **Mô tả:** Kẹp `usable_capital = balance.min(allocated_capital)`, bóc tách `policy.sl_price` để đặt ngay Algo SL khi mở lệnh, xóa bỏ lệnh bán tháo vị thế khi khởi động bot, và đồng bộ `opening_playbook_tag` tránh rỗng tag.
+
+- [ ] **TODO-AUDIT-NEW-43: Bổ Sung Tiền Đề Prior Squeeze & Khử Bẫy Buying Climax Trong Momentum Ignition (`MOM-PRIOR-SQUEEZE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:40-60`
+  - **Mô tả:** Bắt buộc có giai đoạn nén biến động `squeeze_intensity >= 0.50` trong $5 \sim 10$ nến trước đó mới cho phép kích hỏa; khử $100\%$ các lệnh mua đuổi khi thị trường đã tăng dốc từ lâu.
+
+- [ ] **TODO-AUDIT-NEW-44: Nhận Diện Cú Bung Đầu Tiên (Breakout Cross-over) & Khử Spam Nến Đa Thanh (`MOM-FIRST-IGNITION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:53-57`
+  - **Mô tả:** Chuyển từ kiểm tra tĩnh `close > bb_u` sang phát hiện nến giao cắt bứt phá đầu tiên `close[i] > bb_u[i] && close[i-1] <= bb_u[i-1]`, cấm spam mở lệnh khi giá đã trôi ngoài dải quá 3 nến.
+
+- [ ] **TODO-AUDIT-NEW-45: Hiệu Chuẩn Thang Điểm Gia Tốc & Khử Mẫu Số Cố Định RSI 15.0 (`MOM-SCORE-CALIBRATION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:107-126`
+  - **Mô tả:** Thay thế hàm `sat_penetration` (càng bay xa điểm càng cao) bằng hàm đo gia tốc bứt phá ban đầu; hiệu chuẩn lại hàm RSI để không dìm điểm ở chân sóng và không thưởng điểm tối đa ở đỉnh kiệt sức.
+
+- [ ] **TODO-AUDIT-NEW-46: Bổ Sung Tầng Đạo Hàm Động Lực Học (Velocity & Acceleration) Trong Matrix (`MAT-KINEMATICS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs`, `sensors.rs`
+  - **Mô tả:** Tính toán vận tốc bung dải biến động $d(\text{BB}_{\text{Width}})/dt$ và gia tốc giá $d^2P/dt^2$ để cung cấp dữ liệu vi cấu trúc động lực học thực sự cho Scanner thay vì dựa vào các chỉ báo vị trí tĩnh.
+
+- [ ] **TODO-AUDIT-NEW-47: Triển Khai Cơ Chế Thoát Lệnh Khi Bứt Phá Xịt (Impulse Stagnation Exit & Decaying TTL) Trong Risk Manager (`MOM-STAGNATION-EXIT`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `mod.rs`
+  - **Mô tả:** Nếu sau $N \le 4$ nến kể từ khi kích hoạt Momentum Ignition mà giá không tiếp tục tạo đỉnh cao hơn (Higher High), tự động kích hoạt Stagnation Exit để cắt lỗ vi mô ($1\% \sim 2\%$ ROE) thay vì thả trôi cho dính full Stop Loss cấu trúc.
+
+- [ ] **TODO-AUDIT-NEW-48: Thiết Lập Máy Trạng Thái Giám Sát Sau Kích Hỏa (Post-Trigger State Machine) (`POST-TRIGGER-FSM`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `mod.rs`, `risk.rs`
+  - **Mô tả:** Chuyển hệ thống sang chế độ giám sát nến xác nhận $t+1$ ngay sau khi kích hỏa: Nếu có Follow-through bar thì kéo ngay SL về hòa vốn; nếu bị từ chối đóng ngược vào dải BB thì kích hoạt Emergency Fade Exit.
+
+- [ ] **TODO-AUDIT-NEW-49: Triển Khai Bộ Nhớ Sự Kiện Chuỗi Hấp Thụ Đa Nến (Multi-bar Absorption Sequence) (`ABS-SEQUENCE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `arbiter.rs`
+  - **Mô tả:** Tách bạch tiến trình hấp thụ thành chuỗi 3 nến: Nến $t-1$ quét râu (Sweep), Nến $t$ hấp thụ rút chân (Rejection), và Nến $t+1$ kiểm định cạn cung (No-Supply Test). Chấm dứt việc ép toàn bộ chu trình Wyckoff vào đúng 1 cây nến đơn lẻ.
+
+- [ ] **TODO-AUDIT-NEW-50: Khắc Phục Bẫy Vỡ Tường Limit & Nhận Diện Ngưỡng Cản Cấu Trúc Thực Sự (`ABS-STRUCTURAL-WALL`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `sensors.rs`
+  - **Mô tả:** Nhận diện vùng hấp thụ tại các ngưỡng hỗ trợ/kháng cự cấu trúc thực sự (Prior Swing Lows / Value Area) thay vì dải Bollinger trôi nổi; bổ sung chốt chặn vỡ tường Limit khi lực xả phá vỡ đáy hấp thụ.
+
+- [ ] **TODO-AUDIT-NEW-51: Triển Khai Chuỗi Xác Nhận Đảo Chiều Đa Nến & Cổng Kiểm Tra R:R Tối Thiểu (`REV-SEQUENCE-RR`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `arbiter.rs`
+  - **Mô tả:** Kết nối lại `_matrix` để đọc độ dốc KAMA và Chaos Index (chống bắt dao rơi xả lũ); bổ sung nến xác nhận phủ nhận $t+1$ (Engulfing / Higher Low); bắt buộc kiểm tra tỷ lệ kỳ vọng $\frac{\text{TP Dist}}{\text{SL Dist}} \ge 1.2$ trước khi phát tín hiệu Proposal.
+
+- [ ] **TODO-AUDIT-NEW-52: Triển Khai Bộ Nhận Diện Cấu Trúc Đỉnh/Đáy Bậc Thang Dow & Bảo Vệ Đáy Sóng Cũ (`TREND-DOW-STRUCTURE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `sensors.rs`
+  - **Mô tả:** Bổ sung cơ chế theo dõi cấu trúc đỉnh/đáy bậc thang (HH/HL cho Uptrend, LH/LL cho Downtrend); cấm mở lệnh nếu nhịp hồi đã đâm thủng đáy Swing Low trước đó; bổ sung nến xác nhận tiếp diễn $t+1$.
+
+---
+
+### PHẦN 13: KIỂM TOÁN HẠ TẦNG CỐT LÕI (CORE_V3/MOD, CONFIG & DNA MAPPING - NOTES 47, 48)
+
+- [ ] **TODO-AUDIT-NEW-53: Đồng Bộ Tái Tính Toán Sensors Khi Nhận DNA Hot-Swap (`H-MOD-01`, `H-CFG-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:67-79`, `config.rs:24-70`
+  - **Mô tả:** Sửa lỗi `update_from_dna` chỉ cập nhật config/matrix mà bỏ rơi sensors, biến 34 gen indicators thành gen ma bù nhìn trong thực chiến; đồng bộ luồng tính lại chỉ báo kỹ thuật trong Live/Paper.
+
+- [ ] **TODO-AUDIT-NEW-54: Loại Bỏ Lệnh Gọi Cầu Dao Đánh Giá Lặp Lại Tại `mod.rs` (`H-MOD-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:241`, `arbiter.rs:168-173`
+  - **Mô tả:** Xóa bỏ lệnh gọi `RegimeGatekeeper::evaluate` thừa thãi tại `mod.rs:241` khi có defense_ledger, thống nhất quyền đánh giá duy nhất bên trong `arbiter.process_tick()`.
+
+- [ ] **TODO-AUDIT-NEW-55: Chuyển Đổi Veto Structural SL Sang Dynamic De-leverage Co Size Động (`H-MOD-03`, `H-MOD-04`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:277-283, 332-370`, `risk.rs:156-189`
+  - **Mô tả:** Thay thế công thức tính size cố định theo vốn $\text{Size} = \frac{\text{Margin} \times L}{P}$ bằng công thức chuẩn quant $\text{Size} = \frac{\text{Risk USD}}{\text{Distance SL}}$; loại bỏ mã chết kẹp SL 15% ROE và kích hoạt lại khối lệnh an toàn.
+
+- [ ] **TODO-AUDIT-NEW-56: Chuẩn Hóa Lát Cắt Tính Slope BB Middle Trong `init()` (`H-MOD-05`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:181-200`
+  - **Mô tả:** Chuyển phép tính `bb_middle_slope_adj` sang sử dụng ATR cùng khung thời gian MTF của dải Bollinger (15m/1h) thay vì dùng 1m ATR tạo bậc thang giả.
+
+- [ ] **TODO-AUDIT-NEW-57: Dọn Dẹp Biến Ma & Khử Lỗi Silent Abort Trong `mod.rs` (`H-MOD-06`, `H-MOD-07`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:59, 87-94, 226, 232`
+  - **Mô tả:** Xóa biến `prev_open_trade` ghi không đọc; chuyển `println!` silent abort khi period = 0 thành `panic!` hoặc gán fallback an toàn tránh bot chạy 0 lệnh trong im lặng.
+
+- [ ] **TODO-AUDIT-NEW-58: Sửa Lỗi Toán Học Discrete Binning Lệch Xác Suất Trong `derive_dna_mappable` (`H-CFG-03`)**
+  - **File:** `ferro_trade/ferro_trade_derive/src/lib.rs:172, 181, 187`
+  - **Mô tả:** Sửa phép tính `.round() as usize` đang làm hai lựa chọn đầu mút chỉ có 50% xác suất so với phần tử ở giữa; chuyển sang phân phối rời rạc đều `Uniform Discrete Binning`.
+
+- [ ] **TODO-AUDIT-NEW-59: Bổ Sung `#[serde(default)]` Cấp Struct Con Cho Toàn Bộ Config (`H-CFG-04`, `TODO-CFG-08`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:23, 392, 537, 612, 750, 852, 924, 1011`
+  - **Mô tả:** Bổ sung `#[serde(default)]` cho tất cả struct con để chống lỗi parse JSON hoặc panic crash khi nhận cấu hình thiếu trường từ UI client.
+
+- [ ] **TODO-AUDIT-NEW-60: Thiết Lập Dải Phân Tầng Trailing Stop Thứ Bậc Bất Biến (`H-CFG-05`, `TODO-CFG-03`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:1071-1080`
+  - **Mô tả:** Tách dải tìm kiếm 3 tầng độc lập tăng dần: $tsl\_tight \in [0.4, 1.8] < tsl\_normal \in [1.2, 3.2] < tsl\_loose \in [2.5, 6.0]$, chấm dứt nghịch lý GA siết chặt siêu sóng và thả rông thị trường range.
+
+- [ ] **TODO-AUDIT-NEW-61: Mở Rộng Dải Sàn Biến Động `min_natr_threshold` Cho Đa Tài Sản (`H-CFG-06`, `TODO-CFG-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:441`
+  - **Mô tả:** Mở rộng dải DNA $[0.0001, 0.0100]$ (step 0.0002) để không VETO oan các cặp Forex biến động thấp và lọc sạch nhiễu của Altcoins/Memecoins biến động cao.
+
+- [ ] **TODO-AUDIT-NEW-62: Dọn Dẹp Dead Fields, Biến Bù Nhìn & Struct Mồ Côi Trong `config.rs` (`H-CFG-07`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:461-477, 1090, 1338-1347`
+  - **Mô tả:** Xóa 7 dead fields trong `ArbiterConfig`, xóa struct mồ côi `WarmupConfig`, và nối dây logic thực thi cho `mega_trend_max_cycles` trong `risk.rs`.
+
+- [ ] **TODO-AUDIT-NEW-63: Tinh Giản Không Gian DNA Về 2 Scanners Cốt Lõi (~36 Chiều) (`H-CFG-01`, `H-CFG-09`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** Tắt gen DNA của Momentum và Reversal (chỉ để lại Trend_PB và Absorption); loại bỏ các gen cảm biến dư thừa, hạ số chiều DNA từ 102 về ~36 chiều để GA hội tụ siêu tốc và chống overfitting.
+
+---
+
+### PHẦN 14: KIỂM TOÁN ĐỘNG CƠ BACKTEST FERRO_TRADE (BROKER & ENGINE - NOTE 49)
+
+- [ ] **TODO-AUDIT-NEW-64: Triển Khai Type-Safe `OrderSize` Enum Thay Thế Ép Kiểu Ngầm `(-1.0..1.0)` (`FT-BRK-01`, `TODO-MOD-04`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:477-494`, `order.rs`, `actions.rs`
+  - **Mô tả:** Thay thế số `f64` trần trụi và bẫy khoảng ma thuật `size \in (-1.0, 1.0)` bằng enum `OrderSize { MarginFraction(f64), BaseUnits(f64), NotionalUsd(f64) }`, triệt tiêu hoàn toàn lỗi nhầm lẫn giữa % vốn và khối lượng coin khi giao dịch Bitcoin/Altcoin.
+
+- [ ] **TODO-AUDIT-NEW-65: Sửa Lỗi Đóng Lệnh Cuối Kỳ Finalize Trades Tại Giá `Close` Thay Vì `Open` (`FT-ENG-01`)**
+  - **File:** `ferro_trade/src/backtest/engine.rs:378-386`
+  - **Mô tả:** Đóng trực tiếp các vị thế mở cuối kỳ tại giá `close_at(final_bar_index)` thay vì gọi lại `broker.next()` khớp tại `Open`, bảo toàn trọn vẹn PnL của cây nến kết thúc và không ghi đè méo mó `equity_curve`.
+
+- [ ] **TODO-AUDIT-NEW-66: Dự Phòng Phí Sàn 2 Chiều Trong Tính Toán Ký Quỹ Khả Dụng (`FT-BRK-02`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:474-477, 517-523`
+  - **Mô tả:** Trích lập dự phòng cả phí mở lệnh (Entry) và phí đóng lệnh tiềm năng (Exit Taker Fee) khi kiểm tra `required_margin <= available_margin`, ngăn chặn tài khoản bị âm vốn ký quỹ tức thì sau khi mở vị thế ở đòn bẩy cao.
+
+- [ ] **TODO-AUDIT-NEW-67: Chuẩn Hóa Khớp Lệnh Đảo Chiều Vị Thế (Flip Orders Dưới `hedging = false`) (`FT-BRK-04`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:497-515`
+  - **Mô tả:** Hợp nhất mức giá thực thi và spread cho cả phần đóng vị thế cũ và phần mở vị thế mới ngược chiều, đảm bảo tính nhất quán $1:1$ với hành vi khớp lệnh Market Flip trên sàn Binance Futures.
+
+- [ ] **TODO-AUDIT-NEW-68: Tích Hợp Early Termination Penalty Vào Báo Cáo Hiệu Suất `Stats` (`FT-ENG-03`)**
+  - **File:** `ferro_trade/src/backtest/engine.rs:275-279, 345-356`
+  - **Mô tả:** Tự động trừ điểm phạt rủi ro vào `stats` khi vòng lặp bị ngắt sớm (Early Termination), giúp backtest đơn lẻ phản ánh trung thực mức độ vi phạm sụt giảm vốn thay vì chỉ có tác dụng trong GA Optimizer.
+
+- [ ] **TODO-AUDIT-NEW-69: Bổ Sung Guard `margin_rate <= 0.0` Chống Tràn Vô Hạn Leverage (`FT-BRK-05`)**
+  - **File:** `ferro_trade/src/backtest/engine.rs:216`, `broker.rs:66`
+  - **Mô tả:** Thêm guard kẹp sàn an toàn nếu `margin_rate <= 0.0` thì fallback về `margin_rate = 1.0` (tài khoản Spot không đòn bẩy), ngăn ngừa `leverage = f64::INFINITY` làm tê liệt logic kiểm tra ký quỹ.
+
+- [ ] **TODO-AUDIT-NEW-70: Kẹp Trần `size_to_close` Chống Panic Crash Trong `close_trade` (`FT-BRK-06`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:236-240, 674`
+  - **Mô tả:** Thêm `.min(self.trades[idx].size.abs())` khi tính `size_to_close` để ngăn ngừa trường hợp `portion_size.max(min_unit)` vượt quá khối lượng vị thế thực tế, gây `assert!` fail và panic crash toàn bộ tiến trình tối ưu hóa GA.
+
+- [ ] **TODO-AUDIT-NEW-71: Chuyển Tiếp Tham Số `portion` Trong `Action::CloseLongs` và `CloseShorts` (`FT-BRK-07`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:771-782`
+  - **Mô tả:** Sửa lỗi bỏ qua `portion` (luôn đóng 1.0), cho phép chiến lược thực hiện chốt lời từng phần (Partial Take Profit / Scale-out) chính xác theo tỷ lệ phần trăm được cấu hình.
+
+---
+
+### PHẦN 15: KIỂM TOÁN TẦNG THỰC THI SÀN THẬT (LIVE ENGINE & ORDER EXECUTOR - NOTE 50)
+
+- [ ] **TODO-AUDIT-NEW-72: Khắc Phục Bẫy Tràn Vốn Thảm Họa `usable_capital` Lấy Nhầm `available_balance` (`TB-LIVE-01`)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:133-143`, `order_executor.rs:284-285`
+  - **Mô tả:** Khóa cứng trần vốn `usable_capital = self.core.allocated_capital.min(self.account_state.available_balance)`, chấm dứt việc nuốt trọn 100% số dư toàn bộ tài khoản ví Binance khi mở lệnh trên 1 cặp tiền duy nhất.
+
+- [ ] **TODO-AUDIT-NEW-73: Đồng Bộ Trạng Thái SL/TP Lên `LivePositionState` Chống Spam Lệnh Dời SL (`TB-LIVE-02`)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:198-207`, `order_executor.rs:58-65`
+  - **Mô tả:** Nối dây đồng bộ `current_sl_price` từ `OrderExecutor::active_sl_prices` và `OrderTradeUpdate` vào `live_position`, ngăn ngừa Strategy bị mù SL sàn và phát tín hiệu dời SL liên tục mỗi phút.
+
+- [ ] **TODO-AUDIT-NEW-74: Bảo Toàn Tag Playbook Khi Khởi Tạo Vị Thế Sàn (`TB-LIVE-03`)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:206`, `order_executor.rs:340-350`
+  - **Mô tả:** Lưu trữ và phục hồi `opening_playbook_tag` (TrendPB vs Absorption) vào SQLite khi mở lệnh, đảm bảo RiskManager áp dụng đúng quy tắc Trailing SL riêng của từng playbook.
+
+- [ ] **TODO-AUDIT-NEW-75: Đồng Bộ `live_entry_bar` Khớp Đúng Bar Index Của Nến Mở Lệnh (`TB-LIVE-04`)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:203`, `controller/asset_actor.rs:280-310`
+  - **Mô tả:** Ghi nhận chính xác `live_entry_bar` theo `current_bar_idx` thực tế thay vì gán cứng 0, triệt tiêu lỗi `bars_held = 43,100` kích hoạt Time-based Exit sớm vô lý.
+
+- [ ] **TODO-AUDIT-NEW-76: Timeout Watchdog Cho Cờ Lệnh `is_submitting_order` Chống Deadlock Khi WS Trễ (`TB-LIVE-05`)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:140-160`
+  - **Mô tả:** Bổ sung cơ chế Timeout Watchdog 5,000ms: Tự động giải phóng cờ `is_submitting_order = false` và thực hiện REST reconciliation nếu kết nối WebSocket bị rớt hoặc chậm trễ bản tin.
+
+- [ ] **TODO-AUDIT-NEW-77: Triển Khai Atomic SL Replacement Triệt Tiêu Naked SL Gap 150ms (`TB-ORD-01`, `TODO-RSK-05`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:190-235`
+  - **Mô tả:** Chuyển sang cơ chế đặt lệnh SL mới thành công trước, sau đó mới hủy SL cũ theo `algo_id` cụ thể, loại bỏ hoàn toàn khoảng trống 150-250ms vị thế bị mồ côi không có SL trên sàn Binance.
+
+- [ ] **TODO-AUDIT-NEW-78: Tự Động Đặt Lệnh Algo Take Profit Lên Binance Futures (`TB-ORD-02`, `TODO-EXEC-04`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:243-260`
+  - **Mô tả:** Hiện thực hóa việc gửi lệnh Algo `TAKE_PROFIT_MARKET` (`close_position: true`) lên sàn Binance Futures ngay khi vào lệnh hoặc khi Strategy cập nhật TP, chốt lời kịp thời các cú giật râu nến chớp nhoáng.
+
+- [ ] **TODO-AUDIT-NEW-79: Hủy Algo Order Theo ID Cụ Thể Thay Vì Hủy Toàn Bộ Symbol (`TB-ORD-03`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:192, 398`
+  - **Mô tả:** Thay thế `cancel_all_algo_open_orders` bằng `cancel_algo_order` theo `algo_id` cụ thể, tránh xóa nhầm các lệnh chờ độc lập khác trên cùng cặp tiền.
+
+- [ ] **TODO-AUDIT-NEW-80: Đọc Min Notional Động Từ `MarketFilter` Thay Vì Gán Cứng 5.0 USDT (`TB-ORD-04`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:141`
+  - **Mô tả:** Sử dụng `self.market_filter.min_notional` thay cho con số ma thuật 5.0 USDT, đảm bảo thích ứng với mọi quy định ký quỹ tối thiểu của từng cặp tiền.
+
+- [ ] **TODO-AUDIT-NEW-81: Chống Nhân Đôi Khối Lượng Khi Đảo Chiều Vị Thế (Flip Order Under Stale State) (`TB-ORD-05`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:288-305`
+  - **Mô tả:** Kiểm tra đối soát lại vị thế thực tế trước khi gửi lệnh Flip tổng hợp, ngăn ngừa việc gửi lệnh gấp đôi khối lượng nếu vị thế cũ đã bị thanh lý/cắt lỗ ngoài sàn.
+
+- [ ] **TODO-AUDIT-NEW-82: Lưu Trữ `active_sl_prices` Xuống SQLite Chống Mất Dữ Liệu Khi Restart Bot (`TB-ORD-06`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:31, 58-70`, `data_engine/sqlite_impl.rs`
+  - **Mô tả:** Đồng bộ `active_sl_prices` vào bảng SQLite để khi bot restart, Monotonic Ratchet Guard có thể khôi phục ngay mức SL đang chạy trên sàn, chống việc kéo lùi SL sau khởi động lại.
+
+- [ ] **TODO-AUDIT-NEW-83: Cô Lập Đường Cong Vốn Đa Cặp Tiền Trong `get_equity()` & Validate Float (`TB-LIVE-07`, `TB-ORD-07`)**
+  - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:169-173`, `order_executor.rs:149-160`
+  - **Mô tả:** Tách bạch vốn `equity` theo từng cặp tiền thay vì lấy chung `wallet_balance` toàn ví; xử lý an toàn `price.is_finite()` thay vì gọi `.unwrap()` gây panic crash trong `format_price_decimal`.
+
+---
+
+### PHẦN 16: KIỂM TOÁN TẦNG CƠ SỞ DỮ LIỆU SQLITE & DATA ENGINE (NOTE 51)
+
+- [ ] **TODO-AUDIT-NEW-84: Tái Cấu Trúc `SqliteStore` Sang Asynchronous Connection Pool (`TB-DB-01`, `TODO-AUDIT-TB-01`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:10-28`
+  - **Mô tả:** Thay thế `Arc<Mutex<Connection>>` đơn bằng mô hình Connection Pool (1 Writer Connection + N Reader Connections), giải phóng hoàn toàn tiềm năng đọc đồng thời của SQLite WAL Mode.
+
+- [ ] **TODO-AUDIT-NEW-85: Bọc Toàn Bộ Thao Tác Disk I/O Trong `spawn_blocking` Chống Treo Worker Tokio (`TB-DB-02`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:94-238`
+  - **Mô tả:** Chuyển toàn bộ các lệnh gọi blocking I/O (query nến, commit transaction) vào `tokio::task::spawn_blocking`, bảo vệ luồng worker của Tokio không bị nghẽn làm rớt mạng WebSocket.
+
+- [ ] **TODO-AUDIT-NEW-86: Bổ Sung B-Tree Index Trên `open_time` và `trade_history` Triệt Tiêu Full Table Scan (`TB-DB-03`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:31-43, 62-71`
+  - **Mô tả:** Thêm index `idx_candles_open_time` trên bảng `candles_1m` để tối ưu hóa `cleanup_old_data` từ $O(N)$ về $O(\log N)$; thêm index `idx_trade_history_symbol_time` cho bảng lịch sử lệnh.
+
+- [ ] **TODO-AUDIT-NEW-87: Xóa Bỏ `unwrap_or_default()` Trong `get_best_dna`, Chống Trả Về DNA Rỗng (`TB-DB-04`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:278-286`
+  - **Mô tả:** Thay thế `.unwrap_or_default()` bằng việc trả về `Err(BotError::DatabaseError)` rõ ràng khi parse JSON thất bại, ngăn chặn việc nạp vector DNA rỗng `[]` làm sập chiến lược Helios.
+
+- [ ] **TODO-AUDIT-NEW-88: Triển Khai Bảng `schema_version` & Migration Tự Động (`TB-DB-05`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:30-71`
+  - **Mô tả:** Bổ sung cơ chế kiểm soát phiên bản schema và chạy script migration tự động khi nâng cấp cấu trúc bảng CSDL, chống lỗi runtime `no such column`.
+
+- [ ] **TODO-AUDIT-NEW-89: Dọn Dẹp Mã Mồ Côi `duckdb_impl.rs` Khỏi Codebase (`TB-DB-06`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/duckdb_impl.rs`
+  - **Mô tả:** Xóa bỏ file `duckdb_impl.rs` không sử dụng và loại bỏ dependency `duckdb` khỏi `Cargo.toml` để tối ưu hóa kích thước binary và giảm thời gian biên dịch.
+
+- [ ] **TODO-AUDIT-NEW-90: Tách CSDL Theo Cặp Tiền Hoặc Kênh MPSC Writer Riêng Biệt (`TB-DB-07`)**
+  - **File:** `trading_bot/bot_engine/src/main.rs:55`, `sqlite_impl.rs`
+  - **Mô tả:** Tách file lưu trữ nến theo từng symbol (`storage/candles_{symbol}.db`) hoặc thiết lập kênh MPSC chuyên dụng để ghi nến bất đồng bộ, triệt tiêu tranh chấp khóa giữa các Actor.
+
+- [ ] **TODO-AUDIT-NEW-91: Mở Rộng Bảng `trade_history` Đầy Đủ PnL, Phí Sàn, Playbook Tag và Exit Reason (`TB-DB-08`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:62-71`
+  - **Mô tả:** Bổ sung các cột `realized_pnl`, `commission`, `opening_playbook_tag`, `exit_reason` vào bảng `trade_history` để cung cấp dữ liệu toàn diện cho giao diện Desktop UI.
+
+- [ ] **TODO-AUDIT-NEW-92: Nâng Cấp Bộ Kiểm Tra Tính Toàn Vẹn Chuỗi Thời Gian Chống Khoảng Trống Nến (`TB-DB-09`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:212-227`, `initial_sync.rs`
+  - **Mô tả:** Thay thế phép đếm thô `SELECT COUNT(*)` bằng thuật toán quét khoảng trống liên tục (Continuity Gap Check), ngăn ngừa bot giao dịch trên chuỗi nến bị đứt gãy.
+
+- [ ] **TODO-AUDIT-NEW-93: Tự Động Tạo Thư Mục Cha Trong `SqliteStore::new` Chống Lỗi CantOpen (`TB-DB-10`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:16-28`
+  - **Mô tả:** Tự động gọi `std::fs::create_dir_all(parent)` trước khi mở file CSDL SQLite, tránh lỗi IO crash khi đường dẫn thư mục tùy biến chưa được tạo trước.
+
+---
+
+## 🏛️ PHẦN 17: KIỂM TOÁN HẠ TẦNG THỐNG ĐỐC QUẢN TRỊ RỦI RO DANH MỤC (`portfolio_guardian.rs`)
+> *Nguồn tài liệu:* [`52_missing_portfolio_guardian_and_multi_asset_risk_flaws.md`](notes/52_missing_portfolio_guardian_and_multi_asset_risk_flaws.md)
+
+- [ ] **TODO-AUDIT-NEW-94: Kiến Thiết Module `portfolio_guardian.rs` Và Giao Thức Handshake Xin Phép Mở Lệnh (`TB-PORT-01`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs` (Tạo mới), `asset_actor.rs:630-672`
+  - **Mô tả:** Xây dựng module Thống Đốc Quản Trị Danh Mục trung tâm (`PortfolioGuardian`) với giao thức Two-Way Handshake (`request_order_permit`), khống chế tổng đòn bẩy danh mục không vượt quá ngưỡng an toàn (ví dụ tối đa $3.0\text{x}$ vốn tổng thay vì bùng nổ $80\text{x} - 200\text{x}$).
+
+- [ ] **TODO-AUDIT-NEW-95: Khống Chế Giới Hạn Số Vị Thế Mở Đồng Thời Toàn Hệ Thống (`TB-PORT-02`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`, `asset_actor.rs`
+  - **Mô tả:** Thiết lập chốt chặn `max_concurrent_positions` (ví dụ tối đa 2 hoặc 3 vị thế mở song song), từ chối cấp phép khi các Actor khác đã chiếm dụng hết hạn ngạch vị thế, tránh dàn mỏng vốn trên nhiều cặp Altcoins.
+
+- [ ] **TODO-AUDIT-NEW-96: Tích Hợp Bộ Lọc Tương Quan Xu Hướng Vĩ Mô BTC (`TB-PORT-03`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`
+  - **Mô tả:** Giám sát trạng thái xu hướng và biến động vĩ mô của Bitcoin (`BTCUSDT` 4h/1D); tự động VETO các yêu cầu mở vị thế Long trên Altcoins khi Bitcoin đang sập mạnh hoặc bước vào vùng hỗn loạn cực đoan.
+
+- [ ] **TODO-AUDIT-NEW-97: Triển Khai Cầu Dao Ngắt Mạch Danh Mục Toàn Cục Hàng Ngày (`TB-PORT-04`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`
+  - **Mô tả:** Theo dõi tỷ lệ sụt giảm vốn tổng thể tài khoản trong ngày (`Daily Portfolio Drawdown`); tự động kích hoạt `EmergencyCmd::PanicCloseAll` và phong tỏa mở lệnh mới 24h nếu tổng tài khoản bị lỗ vượt trần cho phép (ví dụ $-5.0\%$).
+
+- [ ] **TODO-AUDIT-NEW-98: Hàng Đợi Ký Quỹ & Điều Phối Lệnh Chống Tranh Chấp Ví Sàn (`TB-PORT-05`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`
+  - **Mô tả:** Quản lý hạn ngạch ký quỹ khả dụng tập trung, xếp hàng điều phối tuần tự các yêu cầu mở lệnh vào giây $00$ của nến đóng, triệt tiêu lỗi sàn Binance `-2019 Margin Insufficient`.
+
+- [ ] **TODO-AUDIT-NEW-99: Cơ Chế Cấp Vốn & Tái Cân Bằng Động Dựa Trên Hiệu Suất (`TB-PORT-06`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`, `asset_actor.rs`
+  - **Mô tả:** Thay thế mức vốn phân bổ tĩnh ($60) bằng mô hình phân bổ vốn động: Tăng tỷ trọng vốn cho các cặp tiền đang có Profit Factor cao / xu hướng mạnh và giảm thiểu vốn ở các cặp tiền đang chịu chuỗi thua liên tiếp.
+
+- [ ] **TODO-AUDIT-NEW-100: Bộ Giám Sát Sức Khỏe Toàn Diện & Phản Xạ Thiên Nga Đen Tự Động (`TB-PORT-07`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`
+  - **Mô tả:** Tự động giám sát độ trễ mạng API, trạng thái tài khoản sàn và độ biến động đột biến toàn thị trường; tự động đưa hệ thống về trạng thái phòng thủ (Flat All & Exit) khi xảy ra sự cố thiên nga đen hoặc sàn ngắt kết nối.
+
+- [ ] **TODO-AUDIT-NEW-101: Lưu Trữ Bền Vững Trạng Thái PnL Trong Ngày Tránh Mất Bộ Nhớ Sau Restart (`TB-PORT-08`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`, `sqlite_impl.rs`
+  - **Mô tả:** Lưu trạng thái vốn đầu ngày (`day_start_equity`) và khoản lỗ đã chốt (`daily_realized_loss`) theo ngày UTC vào bảng CSDL `portfolio_daily_stats`, chống hiện tượng reset hạn mức lỗ sau khi bot restart.
+
+- [ ] **TODO-AUDIT-NEW-102: Cơ Chế Check-And-Reserve Ký Quỹ Nguyên Tử Chống TOC/TOU (`TB-PORT-09`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`
+  - **Mô tả:** Triển khai cơ chế khóa nguyên tử (Atomic Check-and-Reserve) khi cấp hạn mức ký quỹ, đảm bảo số dư khả dụng bị trừ ngay khi cấp phép, ngăn chặn các Actor cùng lúc chiếm dụng vượt trần đòn bẩy.
+
+- [ ] **TODO-AUDIT-NEW-103: Chốt Chặn Khống Chế Lệch Pha Định Hướng Toàn Danh Mục (`TB-PORT-10`)**
+  - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs`
+  - **Mô tả:** Theo dõi Net Notional Delta danh mục; tự động từ chối các lệnh cùng chiều khi tỷ lệ thiên lệch Long/Short vượt quá ngưỡng an toàn (ví dụ: $|\text{Net Delta}| > 60\%$), chống biến danh mục thành 1 vị thế cược thị trường khổng lồ.
+
+---
+
+## 🏛️ PHẦN 18: KIỂM TOÁN HẠ TẦNG ĐỘNG CƠ KHỚP LỆNH GIẢ LẬP (`paper_engine.rs` & `paper_trader.rs`)
+> *Nguồn tài liệu:* [`53_paper_execution_engine_and_paper_trader_flaws.md`](notes/53_paper_execution_engine_and_paper_trader_flaws.md)
+
+- [ ] **TODO-AUDIT-NEW-104: Đồng Bộ Hóa PnL Thả Nổi Vào `PaperExecutionEngine::get_equity()` (`TB-PPR-01`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_engine.rs:113-115`
+  - **Mô tả:** Lưu trữ `last_close` trong `on_candle_ctx` và tính toán vốn Marked-to-Market (`get_total_equity(last_close)`) khi có vị thế đang mở, giải phóng hệ thống khỏi bẫy "mù" PnL thả nổi.
+
+- [ ] **TODO-AUDIT-NEW-105: Triển Khai Liquidation Watchdog Mô Phỏng Cháy Tài Khoản (`TB-PPR-02`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:477-575`
+  - **Mô tả:** Tự động kích hoạt cơ chế cưỡng bức thanh lý khi khoản lỗ thả nổi chạm trần $\ge 90\%$ tiền ký quỹ, loại bỏ ảo tưởng số dư vốn âm không thực tế trong Paper Trading.
+
+- [ ] **TODO-AUDIT-NEW-106: Tích Hợp `MarketFilter` Làm Tròn Step Size & Kiểm Tra Min Notional (`TB-PPR-03`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:440-450`, `paper_engine.rs:42-60`
+  - **Mô tả:** Làm tròn khối lượng vị thế theo `step_size` chuẩn sàn và từ chối các lệnh có giá trị danh nghĩa dưới \$21 (`min_notional`), đảm bảo 100% lệnh Paper tương thích hoàn hảo với Binance API.
+
+- [ ] **TODO-AUDIT-NEW-107: Bổ Sung Mô Hình Trượt Giá & Chênh Lệch Spread Cho Lệnh Market (`TB-PPR-04`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:450`
+  - **Mô tả:** Trừ hao trượt giá thực tế ($0.05\% - 0.10\%$ giá vào lệnh) đối với lệnh Market, loại bỏ ảo tưởng hiệu suất màu hồng do khớp lệnh không ma sát tạo ra.
+
+- [ ] **TODO-AUDIT-NEW-108: Sửa Sai Lệch Telemetry EventBus: Cập Nhật `available_balance` & `unrealized_profit` (`TB-PPR-05`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:179-188`
+  - **Mô tả:** Khấu trừ tiền ký quỹ chiếm dụng khỏi `available_balance` và cập nhật đúng `unrealized_profit` khi phát `AccountEvent`, cung cấp dữ liệu trung thực cho Desktop UI Dashboard.
+
+- [ ] **TODO-AUDIT-NEW-109: Mô Phỏng Khấu Trừ Phí Funding Rate Chu Kỳ 8 Giờ UTC (`TB-PPR-06`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:477-575`
+  - **Mô tả:** Khấu trừ phí Funding Rate danh nghĩa ($0.01\%$) khi vị thế giữ lệnh bước qua các mốc 00:00, 08:00, 16:00 UTC, phản ánh chính xác chi phí giữ lệnh dài hạn của Perpetual Futures.
+
+- [ ] **TODO-AUDIT-NEW-110: Khắc Phục Lỗi Gán Cứng `bar_idx = 0` Trong `execute_action()` (`TB-PPR-07`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_engine.rs:94-97`
+  - **Mô tả:** Truyền đúng chỉ số nến hiện tại hoặc đồng bộ từ `last_candle_idx` thay vì gán cứng 0, bảo đảm tính toán chính xác chỉ số số nến giữ lệnh (`bars_held`).
+
+- [ ] **TODO-AUDIT-NEW-111: Giới Hạn Bộ Nhớ Đệm Lịch Sử Lệnh Qua RingBuffer Chống Rò Rỉ Heap (`TB-PPR-08`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:85`, `paper_engine.rs:152-154`
+  - **Mô tả:** Giới hạn `closed_trades` trong RAM (ví dụ tối đa 500 lệnh gần nhất) và tránh clone toàn bộ vector trên heap khi truy vấn, bảo vệ bot vận hành bền bỉ 24/7.
+
+- [ ] **TODO-AUDIT-NEW-112: Cơ Chế Khống Chế Trần Lãi Kép Bảo Vệ Vốn Sàn (`TB-PPR-09`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:441`
+  - **Mô tả:** Thiết lập trần lãi kép (Compounding Ceiling Cap) để bảo vệ lợi nhuận tích lũy của các chuỗi thắng, ngăn chặn việc 2 lệnh thua cuốn bay sạch toàn bộ thành quả.
+
+- [ ] **TODO-AUDIT-NEW-113: Tương Thích Hóa `on_account_event` Tiếp Nhận Lệnh Điều Phối Danh Mục (`TB-PPR-10`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_engine.rs:132-134`
+  - **Mô tả:** Cho phép PaperEngine tiếp nhận các tín hiệu tái cân bằng vốn và lệnh ngắt mạch khẩn cấp từ Portfolio Guardian thay vì cô lập hoàn toàn.
+
+---
+
+## 🏛️ PHẦN 19: KIỂM TOÁN HẠ TẦNG CỔNG VÀO GATEKEEPER & QUẢN TRỊ RỦI RO CHIẾN THUẬT (`gatekeeper.rs` & `risk.rs`)
+> *Nguồn tài liệu:* [`54_risk_and_gatekeeper_architectural_flaws.md`](notes/54_risk_and_gatekeeper_architectural_flaws.md)
+
+- [ ] **TODO-AUDIT-NEW-114: Nâng Cấp Phân Luồng Gatekeeper Cho Phép RangeOsc/Absorption Hoạt Động Khi Nén Biến Động (`H-GATE-01`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:140-152`
+  - **Mô tả:** Thay thế cơ chế VETO cào bằng toàn bộ Playbook khi `VolatilityFlatline` bằng cơ chế phân luồng chọn lọc: Chỉ tạm khóa các Playbook theo đà (`Trend_PB`, `Momentum_Ign`), đồng thời giải phóng quyền giao dịch cho `Range_Osc` và `Absorption` trong vùng tích lũy.
+
+- [ ] **TODO-AUDIT-NEW-115: Kiến Thiết Bộ Phân Loại Chế Độ Thị Trường Vĩ Mô Macro Regime Classifier (`H-GATE-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:48-67`
+  - **Mô tả:** Nâng cấp `GateEvaluation` trả về enum `MarketRegime` (Trending, RangeBound, Breakout, Chaos) dựa trên sự kết hợp giữa ADX, KAMA slope, Kaufman ER và NATR để điều phối trọng số đấu thầu trong Arbiter.
+
+- [ ] **TODO-AUDIT-NEW-116: Triệt Tiêu Đánh Giá Lặp Lại `RegimeGatekeeper::evaluate` Tại Arbiter (`H-GATE-03`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:169`, `mod.rs:163`
+  - **Mô tả:** Tái cấu trúc truyền kết quả `gate_eval` từ `mod.rs` vào `arbiter.process_tick()`, xóa bỏ lệnh gọi lặp lại Gatekeeper trong Arbiter, tối ưu hóa tốc độ tick.
+
+- [ ] **TODO-AUDIT-NEW-117: Chuyển Đổi Sniper VETO Sang Dynamic De-leverage Trong Thẩm Định SL Cấu Trúc (`H-RSK-01`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:123-138`, `arbiter.rs`
+  - **Mô tả:** Thay vì VETO nhị phân hủy bỏ setup đẹp khi SL cấu trúc vượt nhẹ 15% ROE, tự động kẹp SL về trần an toàn và co tỷ lệ ký quỹ vị thế tương ứng để bảo toàn $Risk USD mục tiêu.
+
+- [ ] **TODO-AUDIT-NEW-118: Tái Cấu Trúc Định Cỡ Vị Thế Cố Định Rủi Ro Dollar ($Fixed Risk USD Sizing) (`H-RSK-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:158-189`
+  - **Mô tả:** Thay thế công thức tính Notional cố định theo `equity * risk_pct * leverage` bằng mô hình định cỡ Quant chuẩn mực $\text{Size} = \frac{\text{Target Risk USD}}{|\text{Entry} - \text{SL}|}$, đảm bảo số tiền mất USD đồng nhất giữa các lệnh SL hẹp và SL rộng.
+
+- [ ] **TODO-AUDIT-NEW-119: Tách Biệt Nhóm Kích Hoạt Break-Even Cho Absorption Khỏi TrendPB (`H-RSK-03`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:407-411`
+  - **Mô tả:** Tách `ABSORPTION` thành nhóm tham số Break-Even độc lập với ngưỡng kích hoạt $1.2 - 1.5\ \text{ATR}$ thay vì ép chung mốc $2.5\ \text{ATR}$ của TrendPB, bảo toàn lợi nhuận săn nén vi mô.
+
+- [ ] **TODO-AUDIT-NEW-120: Đồng Bộ Khép Kín Trạng Thái Stop Loss Sàn Giữa RAM Và Cloud Binance (`H-RSK-04`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:650-653`, `trading_bot/bot_engine/src/execution/order_executor.rs`
+  - **Mô tả:** Thiết lập cơ chế Closed-Loop Sync xác nhận mức SL sàn đã khớp lệnh trước khi Strategy dời SL tiếp theo, xóa bỏ hoàn toàn hiện tượng spam lệnh và Naked SL Gap 150ms.
+
+- [ ] **TODO-AUDIT-NEW-121: Thích Ứng Hóa Thời Gian Giải Phóng Vốn Ngâm Theo Độ Nén Biến Động Squeeze (`H-RSK-05`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:358-371`
+  - **Mô tả:** Kết hợp chỉ số `squeeze_intensity` vào logic `Stagnant Capital Release`, tự động gia hạn thời gian giữ lệnh khi thị trường đang tích lũy nén cực đại, tránh cắt lỗ non trước sóng bùng nổ.
+
+---
+
+## 🏛️ PHẦN 20: KIỂM TOÁN HẠ TẦNG TẦNG NẠP DỮ LIỆU MẠNG SÀN BINANCE (`binance_rest.rs`, `ws_manager.rs`, `weight_monitor.rs`)
+> *Nguồn tài liệu:* [`55_binance_network_data_engine_and_ws_manager_flaws.md`](notes/55_binance_network_data_engine_and_ws_manager_flaws.md)
+
+- [ ] **TODO-AUDIT-NEW-122: Tối Ưu Hóa Backward Sync Đa Luồng Với Rate Throttling Tránh Nghẽn Weight (`TB-NET-01`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/binance_rest.rs:61-145, 178-261`
+  - **Mô tả:** Thiết kế hàng đợi fetch nến có điều tiết hạn mức (Rate Throttler), khống chế tổng weight nạp lịch sử không vượt quá 1,200/phút khi khởi chạy đồng thời nhiều cặp tiền, chống bão hòa weight sàn.
+
+- [ ] **TODO-AUDIT-NEW-123: Xóa Bỏ Bẫy Break Sớm Khi Gặp Khoảng Trống Dữ Liệu Nến (Gap Skip Trap) (`TB-NET-02`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/binance_rest.rs:85-87, 209-210`
+  - **Mô tả:** Thay thế lệnh `break` khi `data.is_empty()` bằng thuật toán nhảy cóc thời gian (`current_start += 1000 * 60000`), bảo đảm quá trình đồng bộ lấp đầy khoảng trống nến tiếp tục chạy tới mốc thời gian hiện tại.
+
+- [ ] **TODO-AUDIT-NEW-124: Cơ Chế Cầu Dao Khẩn Cấp Emergency Backoff Khi Gặp HTTP 429/418 (`TB-NET-03`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/binance_rest.rs:73, 198`, `models/weight_monitor.rs`
+  - **Mô tả:** Tự động phát hiện mã lỗi 429 (Too Many Requests) hoặc 418 (IP Ban) từ Binance REST API, phong tỏa toàn bộ request mạng trong 5 phút để bảo vệ địa chỉ IP không bị đưa vào danh sách đen vĩnh viễn.
+
+- [ ] **TODO-AUDIT-NEW-125: Chuyển Đổi Kênh Phân Phối Nến Sang Bảng Băm O(1) MPSC Độc Lập Chống Mất Nến (`TB-NET-04`)**
+  - **File:** `trading_bot/bot_engine/src/execution/ws_manager.rs:48, 134`, `controller/asset_actor.rs`
+  - **Mô tả:** Xóa bỏ kênh `broadcast::Sender` dùng chung (vốn gây mất nến âm thầm khi Actor lag CPU dính lỗi `Lagged`), chuyển sang bảng băm `Arc<RwLock<HashMap<String, mpsc::Sender<Candle>>>>` phân luồng độc lập từng cặp tiền.
+
+- [ ] **TODO-AUDIT-NEW-126: Triển Khai Heartbeat Liveness Watchdog Chống Chết Lâm Sàng WebSocket (`TB-NET-05`)**
+  - **File:** `trading_bot/bot_engine/src/execution/ws_manager.rs:139-142`
+  - **Mô tả:** Giám sát thời gian trôi qua kể từ nến cuối cùng; nếu quá 120 giây không nhận được nến mới từ WebSocket (Half-open TCP silent disconnect), tự động hủy kết nối cũ và tái kết nối lập tức.
+
+- [ ] **TODO-AUDIT-NEW-127: Tự Động Reconnect Stream User Data Khi Tái Cấp listenKey Sau 24 Giờ (`TB-NET-06`)**
+  - **File:** `trading_bot/bot_engine/src/execution/ws_manager.rs:207-217`
+  - **Mô tả:** Khi vòng lặp keepalive phát hiện listenKey cũ hết hạn hoặc bị hủy, tự động ngắt kết nối WebSocket User Data cũ và mở kết nối mới với listenKey vừa cấp, duy trì thông suốt kênh sự kiện vị thế.
+
+- [ ] **TODO-AUDIT-NEW-128: Dọn Dẹp Mã Mồ Côi `binance_stream.rs` Khỏi Codebase (`TB-NET-07`)**
+  - **File:** `trading_bot/bot_engine/src/data_engine/binance_stream.rs`
+  - **Mô tả:** Xóa bỏ hoàn toàn file mã cũ `binance_stream.rs` 74 dòng, hợp nhất $100\%$ logic luồng dữ liệu WebSocket về `ws_manager.rs`.
+
+- [ ] **TODO-AUDIT-NEW-129: Chuẩn Hóa Bộ Nhớ Đa Luồng SeqCst & Đệm Thời Gian Trừ Hao Trong WeightMonitor (`TB-NET-08`)**
+  - **File:** `trading_bot/bot_engine/src/models/weight_monitor.rs:53-63`
+  - **Mô tả:** Chuyển `Ordering::Relaxed` sang `Ordering::SeqCst` và thêm đệm an toàn 500ms khi bước sang phút mới UTC, chống hiện tượng đồng hồ máy tính chạy nhanh hơn Binance làm bùng nổ request.
+
+
+
+---
+
+## 🏛️ PHẦN 21: KIỂM TOÁN & GIA CỐ ĐỘNG CƠ BACKTEST & GA OPTIMIZER (`ferro_trade` - NOTES 03, 04, 10, 11, 48, 49)
+
+- [ ] **TODO-AUDIT-NEW-130: Khử Lỗi Trôi Dạt Sai Số Float Trong Cửa Sổ Trượt `efficiency_ratio` (`FT-FLOAT-DRIFT-ER`)**
+  - **File:** `ferro_trade/src/indicators/bulk.rs:157-175`
+  - **Mô tả:** Thuật toán rolling sum `sum += diff - old_diff` bị trôi dạt dấu phẩy động tích lũy (Catastrophic cancellation). Khi thị trường đi ngang, mẫu số có thể bị âm nhẹ hoặc bằng 0.0, thiếu phép kẹp an toàn `.clamp(0.0, 1.0)`. Hệ quả là $ER$ nổ tung $> 1.0$ hoặc rơi về số âm, làm biến dạng hoàn toàn KAMA và chỉ số nhiễu động.
+  - **Unit Tests:**
+    - [ ] `test_efficiency_ratio_float_drift_resistance`
+
+- [ ] **TODO-AUDIT-NEW-131: Khử Race Condition Trong `GlobalCache` Bằng Upgradable Lock (`FT-CACHE-THUNDERING`)**
+  - **File:** `ferro_trade/src/data/global_cache.rs:164-182`
+  - **Mô tả:** Hàm `get_or_compute` nhả `read_lock` rồi mới xin `write_lock`. Khi hàng chục luồng Rayon cùng chạy GA song song, hiện tượng Thundering Herd xảy ra khiến cùng một chỉ báo kỹ thuật bị tính toán trùng lặp hàng chục lần, gây nghẽn CPU. Chuyển sang `parking_lot::RwLock` với cơ chế upgradable lock.
+  - **Unit Tests:**
+    - [ ] `test_global_cache_concurrent_compute_no_duplicate`
+
+- [ ] **TODO-AUDIT-NEW-132: Triển Khai Cơ Chế Đào Thải LRU Cho Fitness Cache Chống Cache Thrashing (`FT-CACHE-THRASHING`)**
+  - **File:** `ferro_trade/src/optimizer/fitness_cache.rs:102-115`
+  - **Mô tả:** Khi cache chạm ngưỡng `MAX_CACHE_ENTRIES` (50,000 entries), code gọi thẳng `self.cache.clear()`, xóa sạch 100% dữ liệu đã tính, làm tỷ lệ Hit-Rate rớt về 0%, gây sốc tải CPU đột ngột giữa các thế hệ GA. Thay thế bằng cấu trúc `lru::LruCache` hoặc đào thải 25% cá thể cũ nhất.
+  - **Unit Tests:**
+    - [ ] `test_fitness_cache_lru_eviction`
+
+- [ ] **TODO-AUDIT-NEW-133: Định Danh Cache Key Theo Khung Thời Gian Trong `IndicatorManager` (`FT-TIMEFRAME-POLLUTE`)**
+  - **File:** `ferro_trade/src/backtest/manager.rs:106-115`
+  - **Mô tả:** `add_raw_cached` hardcode cứng chuỗi `"T1m"` và cột `"Close"` trong cache key. Khi nạp dữ liệu MTF (5m, 15m, 1h) vào cùng cache, các mảng nến khung khác nhau sẽ ghi đè lên nhau, gây sai lệch nghiêm trọng chỉ báo MTF. Bổ sung `timeframe.as_str()` và `column_name` vào cache key.
+  - **Unit Tests:**
+    - [ ] `test_manager_cache_isolation_across_timeframes`
+
+- [ ] **TODO-AUDIT-NEW-134: Khắc Phục Over-subscription CPU Bằng Nested Rayon ThreadPool Guard (`FT-CPU-OVERSUBSCRIBE`)**
+  - **File:** `ferro_trade/src/optimizer/prospector.rs:898-903`
+  - **Mô tả:** Worker GA bên trong lại tiếp tục gọi song song Rayon ngầm, sinh ra $N \times M$ luồng tranh chấp nhân CPU, gây quá tải Context Switching làm giảm 40% tốc độ tiến hóa. Khởi tạo ThreadPool đơn tập trung ở cấp `Prospector` và chia sẻ `&ThreadPool` cho các worker.
+  - **Unit Tests:**
+    - [ ] `test_prospector_cpu_threads_bounded`
+
+- [ ] **TODO-AUDIT-NEW-135: Thay Thế `isize::MIN` Bằng Điểm Phạt Hữu Hạn Trong Đánh Giá GA (`FT-VAR-EXPLOSION-MIN`)**
+  - **File:** `ferro_trade/src/optimizer/ga_worker.rs:345-350`
+  - **Mô tả:** Khi cá thể vi phạm điều kiện hoặc bị panic, fitness được gán `isize::MIN` ($\approx -9.22 \times 10^{18}$). Khi tính phương sai quần thể để kiểm tra hội tụ, số này bị bình phương làm phương sai nổ tung lên $10^{36}$, vô hiệu hóa hoàn toàn cơ chế Stagnation Pruning. Thay bằng giá trị sàn hữu hạn `-100_000.0`.
+  - **Unit Tests:**
+    - [ ] `test_population_variance_stability_with_failed_individuals`
+
+- [ ] **TODO-AUDIT-NEW-136: Khử Deadlock Đệ Quy Trong `IndicatorManager::get_indicator_slice` (`FT-RECURSIVE-DEADLOCK`)**
+  - **File:** `ferro_trade/src/backtest/manager.rs:271-285`
+  - **Mô tả:** `get_indicator_slice` nắm giữ `RwLockReadGuard` trên toàn bộ bảng băm HashMap. Nếu một chỉ báo phụ thuộc gọi đệ quy một chỉ báo khác chưa tính toán và yêu cầu `write_lock`, hệ thống rơi vào deadlock vĩnh viễn. Sao chép `Arc<Vec<f64>>` và nhả ngay `read_lock` trước khi tính toán phụ thuộc.
+  - **Unit Tests:**
+    - [ ] `test_manager_recursive_indicator_resolution`
+
+- [ ] **TODO-AUDIT-NEW-137: Chia Sẻ Dữ Liệu `Arc<DataView>` Cho GA Workers Thay Vì Deep Clone (`FT-DEEP-CLONE-DATAVIEW`)**
+  - **File:** `ferro_trade/src/optimizer/ga_worker.rs:194-205`
+  - **Mô tả:** Mỗi cá thể GA khi gọi `evaluate_dna` đều nhân bản (deep clone) cấu trúc `DataView` chứa hàng trăm nghìn nến, ngốn RAM và tốn thời gian cấp phát bộ nhớ heap. Bọc mảng nến trong `Arc<RawDataCache>` hoặc `Arc<DataView>`, truyền tham chiếu read-only cho các worker (Zero-copy).
+  - **Unit Tests:**
+    - [ ] `test_ga_worker_zero_copy_dataview`
+
+- [ ] **TODO-AUDIT-NEW-138: Thêm Chốt Chặn `max_position_size` Khi Nhồi Vị Thế Pyramiding (`FT-PYRAMID-UNCHECKED`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:324-335`
+  - **Mô tả:** Khi lệnh Buy/Sell được khớp để nhồi thêm khối lượng vào vị thế đang mở, broker chỉ kiểm tra số dư ký quỹ tức thời mà không kiểm tra giới hạn `max_position_size`, cho phép tích lũy vị thế khổng lồ phá vỡ quy chuẩn rủi ro. Bổ sung kiểm tra trần khối lượng tối đa.
+  - **Unit Tests:**
+    - [ ] `test_broker_rejects_pyramiding_exceeding_max_size`
+
+- [ ] **TODO-AUDIT-NEW-139: Bảo Toàn Nến Khung Lớn Dở Dang Ở Cuối Dữ Liệu Resample (`FT-MTF-CUTOFF-LOSS`)**
+  - **File:** `ferro_trade/src/utils/resample.rs:112-125`
+  - **Mô tả:** Khi chuỗi nến 1m không tròn khung 4h (ví dụ dư 140 nến 1m ở cuối), hàm resample cắt bỏ hoàn toàn các nến dư thừa này thay vì tổng hợp thành một nến 4h dở dang, gây mất mát dữ liệu những giờ giao dịch quan trọng nhất ngay sát thời điểm hiện tại.
+  - **Unit Tests:**
+    - [ ] `test_resample_preserves_incomplete_trailing_candles`
+
+- [ ] **TODO-AUDIT-NEW-140: Chuẩn Hóa Timestamp Milliseconds & Guard Assertion (`FT-TIMESTAMP-MISMATCH`)**
+  - **File:** `ferro_trade/src/data/raw_data.rs:88-100`
+  - **Mô tả:** Trường `timestamp` nhận số `i64` trần trụi, trộn lẫn giữa giây ($10^9$) và mili-giây ($10^{12}$) khi import dữ liệu từ các sàn khác nhau mà không có assertion kiểm tra. Tự động phát hiện nếu `timestamp < 10_000_000_000` $\implies$ nhân 1,000 quy đổi về milliseconds và kiểm tra bước nhảy nến 60,000ms.
+  - **Unit Tests:**
+    - [ ] `test_raw_data_auto_converts_seconds_to_milliseconds`
+
+- [ ] **TODO-AUDIT-NEW-141: Khắc Phục Thiên Kiến Khớp Lệnh Khi Nến Chạm Cả TP và SL (Dual Trigger Priority Tới Open) (`FT-BRK-03`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:137-142`
+  - **Mô tả:** Broker luôn đưa Stop Loss vào đầu hàng đợi và Take Profit vào cuối. Khi gặp nến quét 2 đầu bao trùm cả TP và SL, Broker luôn ép dính SL làm thổi phồng Drawdown giả tạo. Cải tiến mô hình khớp lệnh: So sánh khoảng cách từ giá `Open` của nến tới TP và SL để xác định thứ tự chạm giá hợp lý hơn.
+  - **Unit Tests:**
+    - [ ] `test_broker_dual_hit_order_priority_proximity_to_open`
+
+- [ ] **TODO-AUDIT-NEW-142: Đồng Bộ Hóa Equity Curve Khi Khớp Lệnh `trade_on_close = true` (`FT-ENG-02`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:413-417`, `engine.rs:298-329`
+  - **Mô tả:** Khi bật `trade_on_close = true`, lệnh được khớp tại giá Close nến trước nhưng `equity()` nến trước đã bị ghi đè vào `equity_curve` từ vòng lặp trước. Cần đồng bộ thời gian vào lệnh và đường cong vốn để tránh lookahead bias.
+  - **Unit Tests:**
+    - [ ] `test_broker_trade_on_close_equity_curve_alignment`
+
+- [ ] **TODO-AUDIT-NEW-143: Nâng Cấp Macro `dna_signature()` Băm Cả Dải Min/Max/Step & Triệt Tiêu Lỗi XOR Collision (`H-CFG-10`)**
+  - **File:** `ferro_trade/ferro_trade_derive/src/lib.rs:100-132, 260-273`
+  - **Mô tả:** Macro hiện tại chỉ băm tên trường và kiểu dữ liệu, mù hoàn toàn trước thay đổi `min`, `max`, `step`, `options`, khiến SQLite Storage nhầm tưởng cấu trúc cũ vẫn hợp lệ và đọc lại các cá thể Champion cũ không tương thích. Thay thế phép toán XOR (`^=`) tự triệt tiêu bằng thuật toán băm tuần tự an toàn (Hasher / FNV-1a).
+  - **Unit Tests:**
+    - [ ] `test_dna_signature_changes_when_min_max_step_modified`
+    - [ ] `test_dna_signature_no_xor_cancellation_collision`
+
+- [ ] **TODO-AUDIT-NEW-144: Bật Mô Hình Trượt Giá & Spread Tối Thiểu Trong `ferro_trade::Broker` Khi Chạy GA (`FT-GA-SPREAD-SIMULATION`)**
+  - **File:** `ferro_trade/src/broker/broker.rs:80`, `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:524`
+  - **Mô tả:** `BacktestBuilder` khi chạy GA đang để `spread = 0.0`. GA trong phòng thí nghiệm hoàn toàn bị "mù" trượt giá, sinh ra các cá thể cào lệnh vi mô tưởng như có lãi nhưng vừa bước ra cửa WFE Gate ngoài OOS là bị reject $46.7\%$. Nạp tham số `slippage` tối thiểu $0.02\%$ vào `BacktestBuilder` trong mỗi vòng đánh giá cá thể GA.
+  - **Unit Tests:**
+    - [ ] `test_ga_evaluation_penalizes_zero_spread_scalping`
+
+---
+
+## 🏛️ PHẦN 22: KIỂM TOÁN & GIA CỐ NỀN TẢNG THỰC THI & CONCURRENCY (`trading_bot` - NOTES 03, 14, 16, 17, 18, 29, 30, 40)
+
+- [ ] **TODO-AUDIT-NEW-145: Khử Deadlock Bounded Channel Trên `status_tx` Bằng Non-blocking Try-Send / Watch Channel (`TB-UI-BACKPRESSURE-LOCK`)**
+  - **File:** `trading_bot/bot_engine/src/bus.rs:28`, `src/controller/asset_actor.rs:484`
+  - **Mô tả:** Kênh `status_tx` đẩy trạng thái sang giao diện Desktop UI bị giới hạn dung lượng cứng là 100 gói tin và gọi lệnh `send().await`. Khi UI bị đơ hoặc lag không đọc kịp, lệnh này chặn đứng hoàn toàn Actor loop, khiến bot ngừng quét Trailing Stop và rớt mạng WebSocket. Chuyển sang `try_send()` hoặc kênh `tokio::sync::watch`.
+  - **Unit Tests:**
+    - [ ] `test_asset_actor_loop_survives_ui_channel_overflow`
+
+- [ ] **TODO-AUDIT-NEW-146: Triển Khai Atomic Quota Pre-Reservation Trong `WeightMonitor` Chống Ban IP (`TB-WEIGHT-BURST-BAN`)**
+  - **File:** `trading_bot/bot_engine/src/models/weight_monitor.rs:41-65`
+  - **Mô tả:** Cơ chế kiểm tra trọng số API bị lỗi Check-then-act: Nhiều Actor cùng kiểm tra thấy trọng số khả dụng, sau đó đồng loạt bắn request REST API lên Binance, vượt ngưỡng 2400 weight/phút và bị phạt HTTP 429/418. Triển khai hàm `reserve_weight(estimated_cost) -> Result<ReservationTicket, BotError>` trừ hạn mức ngay lập tức trước khi gửi HTTP request.
+  - **Unit Tests:**
+    - [ ] `test_weight_monitor_atomic_reservation_blocks_concurrent_burst`
+
+- [ ] **TODO-AUDIT-NEW-147: Sửa Lỗi Triệt Tiêu Nến Bù Gap Filler Trong `AssetActor::push_candle` (`TB-GAP-FILLER-BUFFER-MERGE`)**
+  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:409`, `src/models/candle.rs:92`
+  - **Mô tả:** Khi kết nối bị trễ, gói tin nến bị mất. Khi Gap Filler kéo nến bù về, hàm `push_candle` lại thẳng tay vứt bỏ với điều kiện `if candle.timestamp <= last.timestamp { return; }`. Hậu quả là bộ đệm nến trượt bị thủng lỗ vĩnh viễn, làm sai lệch chỉ báo MTF. Triển khai phương thức `insert_or_replace_candle` vào đúng vị trí timestamp trong Rolling Buffer.
+  - **Unit Tests:**
+    - [ ] `test_rolling_buffer_gap_fill_recovers_missing_candle`
+
+- [ ] **TODO-AUDIT-NEW-148: Chuẩn Hóa State Machine & Ngưỡng Co Size Trong Staleness Watchdog (`TB-ZOMBIE-DNA-STALENESS-WATCHDOG`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:412-440`
+  - **Mô tả:** Bổ sung trường `consecutive_rejects: u32` vào `ProspectorRunnerState` trong SQLite. Triển khai enum `SystemDefenseMode { Normal, HalfSize, DefensiveHold }`: Giảm 50% size sau 3 lần reject liên tiếp và kích hoạt DefensiveHold (đứng ngoài thị trường bảo toàn vốn) sau 6 lần reject liên tiếp.
+  - **Unit Tests:**
+    - [ ] `test_staleness_watchdog_triggers_half_size_at_3_rejects`
+    - [ ] `test_staleness_watchdog_triggers_defensive_hold_at_6_rejects`
+
+- [ ] **TODO-AUDIT-NEW-149: Chuyển Đổi MTF Resampling Sang Rust Thuần (`fast_resample_ohlcv`), Triệt Tiêu Polars DataFrame Trong Live Tick Engine (`TODO-BRG-06`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:105-180`, `ferro_trade/src/utils/resample.rs`
+  - **Mô tả:** Mỗi phút trôi qua `evaluate_live_tick` khởi tạo mới một Polars DataFrame từ bộ đệm nến 1m để chạy resampling đa khung (15m, 1h, 4h), ngốn 11.2MB RAM/phút/cặp tiền và mất 80–120ms CPU blocking. Thay thế bằng hàm gom nến $O(N)$ single-pass iterator viết bằng Rust thuần (`fast_resample_ohlcv`), triệt tiêu hoàn toàn runtime Polars trên đường thực thi live.
+  - **Unit Tests:**
+    - [ ] `test_fast_resample_ohlcv_matches_polars_resample_15m_1h_4h`
+    - [ ] `test_fast_resample_handles_empty_and_single_candle`
+    - [ ] `test_fast_resample_benchmark_sub_millisecond_latency`
+
+- [ ] **TODO-AUDIT-NEW-150: Bổ Sung Snapshot PnL Thả Nổi (`pnl`, `pnl_pct`) Vào `TickContext` Của `HeliosBridge` (`TODO-BRG-05`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:240-255`
+  - **Mô tả:** Khi tạo `TickContext` để truyền vào `HeliosStrategyV3::next()`, trường `pnl` và `pnl_pct` của `Position` bị gán cứng `0.0`. Hệ quả là các logic tính toán trong Strategy dựa trên vị thế mở (đòn bẩy động, drawdown thả nổi nội nến, bảo hiểm lợi nhuận MFE) bị mù thông tin. Bóc tách `unrealized_pnl` từ `LivePositionState` hoặc tính toán trực tiếp và truyền vào `TickContext`.
+  - **Unit Tests:**
+    - [ ] `test_helios_bridge_transfers_real_unrealized_pnl_to_tick_context`
+    - [ ] `test_tick_context_pnl_pct_matches_direction_and_leverage`
+
+- [ ] **TODO-AUDIT-NEW-151: Khắc Phục Lỗi Gán Cứng Size Vị Thế `1.0/-1.0` Trong `last_closed_trade` Của `HeliosBridge` (`TODO-BRG-02`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:258-270`
+  - **Mô tả:** `HeliosBridge` khi dựng `last_closed_trade` để Strategy đánh giá chuỗi lệnh thắng/thua đã gán cứng `size = 1.0` (Long) hoặc `-1.0` (Short). Nạp đúng khối lượng thực tế `trade.size` từ `ClosedTradeState` hoặc bảng CSDL `trade_history`.
+  - **Unit Tests:**
+    - [ ] `test_bridge_populates_exact_closed_trade_size`
+
+- [ ] **TODO-AUDIT-NEW-152: Triển Khai Baseline Fallback Seed Chống Bẫy Khởi Động Lạnh (Cold Start Starvation) Cho `ProspectorRunner` (`TODO-PROS-01`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:450-475`
+  - **Mô tả:** Khi bot mới triển khai trên một cặp tiền mới với database rỗng, chu kỳ GA đầu tiên nếu bị WFE Gate từ chối (`REJECT`), Runner thoát ra và không nạp bất kỳ DNA nào vào SQLite, khiến bot rơi vào bẫy "đói hạt giống" suốt 20–40 giờ. Tự động nạp cá thể chuẩn từ file `helios_baseline_dna.json` vào bảng `champion_dnas` làm hạt giống an toàn cấp cứu.
+  - **Unit Tests:**
+    - [ ] `test_cold_start_fallback_to_baseline_seed_on_wfe_reject`
+    - [ ] `test_existing_champion_not_overwritten_by_baseline`
+
+- [ ] **TODO-AUDIT-NEW-153: Triển Khai Bộ Đệm Top-K Candidates Waterfall ($K=5$) Vượt Cửa Ải WFE Gate Trong `ProspectorRunner` (`TODO-PROS-08`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:395-408`
+  - **Mô tả:** Runner hiện chỉ trích xuất duy nhất 1 cá thể Rank 1 In-Sample đi thẩm định OOS. Trích xuất Top 5 cá thể In-Sample tốt nhất từ quần thể GA và chạy thẩm định OOS tuần tự theo cơ chế Waterfall: Cá thể đầu tiên vượt qua tiêu chuẩn Do-No-Harm sẽ được chọn làm Champion triển khai ra Live; nếu cả 5 đều rớt mới kích hoạt Defensive Hold.
+  - **Unit Tests:**
+    - [ ] `test_top_k_waterfall_picks_first_passing_candidate`
+    - [ ] `test_top_k_waterfall_all_reject_triggers_defensive_hold`
+
+- [ ] **TODO-AUDIT-NEW-154: Giải Phóng Khóa Tĩnh Toàn Cục `DIAGNOSTIC_LOCK` Cho Phép Đa Cặp Tiền Backtest Đồng Thời (`TODO-TB-05`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:335`, `controller/asset_actor.rs:360`
+  - **Mô tả:** Biến `static DIAGNOSTIC_LOCK: Lazy<Mutex<()>>` khóa tuần tự toàn bộ các symbol khi nhận DNA mới, làm các Actor phải xếp hàng chờ nhau mất tới 50 giây, gây lag nghẽn kênh WebSocket và rớt nến. Xóa bỏ hoàn toàn khóa tĩnh này và bọc `diagnostic_backtest` trong `tokio::task::spawn_blocking`.
+  - **Unit Tests:**
+    - [ ] `test_concurrent_diagnostic_backtests_no_deadlock`
+
+- [ ] **TODO-AUDIT-NEW-155: Đổi Làm Tròn Khối Lượng Vị Thế Từ `.round()` Sang `Floor` Trong `OrderExecutor` Và `LiveEngine` (`TODO-EXEC-03`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:145-165`, `live_engine.rs`
+  - **Mô tả:** Hàm làm tròn khối lượng theo `step_size` sàn Binance sử dụng phép làm tròn thông thường (`.round()`). Khi số dư ký quỹ vừa khít, việc làm tròn lên sẽ khiến tổng giá trị ký quỹ vượt quá số dư khả dụng, sàn Binance trả về mã lỗi `-2019 Margin Insufficient`. Thay thế toàn bộ bằng phép làm tròn xuống (`floor`).
+  - **Unit Tests:**
+    - [ ] `test_order_executor_qty_always_floored_to_step_size`
+    - [ ] `test_order_executor_never_exceeds_available_margin_due_to_rounding`
+
+- [ ] **TODO-AUDIT-NEW-156: Chốt Chặn Kiểm Soát Độ Giãn Spread Thời Gian Thực Trước Khi Gửi Lệnh (`EXEC-BID-ASK-SPREAD-GATE`)**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs`, `live_engine.rs`, `models/market_filter.rs`
+  - **Mô tả:** Khi nến bùng nổ kích hoạt, các Market Maker rút lệnh (Quote Pulling) làm chênh lệch Bid-Ask (Spread) dãn to đột ngột từ 0.01% lên 0.20%–0.50%, nuốt chửng 4%–10% ROE ngay khi vào lệnh. Đọc BookTicker thời gian thực từ Binance WebSocket: Nếu $\text{Spread} = \frac{Ask - Bid}{Mid} > \text{max\_allowed\_spread}$ (mặc định 0.08%) $\implies$ Hoãn gửi lệnh hoặc từ chối thực thi.
+  - **Unit Tests:**
+    - [ ] `test_order_executor_blocks_market_order_when_spread_blows_out`
+    - [ ] `test_order_executor_allows_execution_when_spread_is_tight`
+
+---
+
+## 🏛️ PHẦN 23: TÁI CẤU TRÚC HẠ TẦNG MA TRẬN & CỔNG VÀO GATEWAY (NOTES 08, 09, 19, 20, 23, 35, 36, 40)
+
+- [ ] **TODO-AUDIT-NEW-157: Sửa Dị Tật Forward-Fill Percentile Của `chaos_ratio` & `entropy` Trong `matrix.rs` (`H-FORWARD-FILL-MTF-PERCENTILE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:82-85`
+  - **Mô tả:** `sensors.chaos_ratio` và `sensors.efficiency_ratio` được tính từ khung 15m/1h và đã bị rải phẳng thành mảng 1m (15 giá trị giống hệt nhau). `matrix.rs` lại gọi `rolling_percentile` chạy trên mảng 1m này, khiến CDF bị méo mó và điểm số giật cục từng nấc thang 15 phút. Tính `rolling_percentile` trực tiếp trên mảng nến khung 15m/1h gốc trước khi map về 1m, hoặc chuyển sang hàm chuẩn hóa liên tục $\tanh(\dots)$.
+  - **Unit Tests:**
+    - [ ] `test_matrix_percentiles_smooth_no_staircase_artifacts`
+
+- [ ] **TODO-AUDIT-NEW-158: Khử Nhiễu Sàn 0.25 Của Chaos Index & Ràng Buộc Đồng Bộ Timeframe Giữa NATR Và KAMA ER (`TODO-MAT-04`, `FLAW-MTF-FF`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:98-104`, `config.rs`
+  - **Mô tả:** Công thức $\text{chaos\_index} = c\_r \times (1.0 - \text{entropy})$ bị bẫy nhiễu sàn 0.25 khi thị trường phẳng lì (do rolling percentile của chuỗi flatline bằng 0.50). Đồng thời, $\text{chaos\_ratio}$ tính theo NATR 4h trong khi Kaufman ER tính theo KAMA 15m. Ràng buộc đồng bộ Timeframe giữa NATR và KAMA ER và chuẩn hóa công thức trả về 0.0 khi thị trường flatline.
+  - **Unit Tests:**
+    - [ ] `test_chaos_index_zero_when_market_flat`
+    - [ ] `test_chaos_index_timeframe_coherence`
+
+- [ ] **TODO-AUDIT-NEW-159: Thiết Lập Kiến Trúc Độc Lập Khung Thời Gian Động ($T_{micro}, T_{meso}, T_{macro}$) Và Ràng Buộc Phổ Biến Động $\ge 3.0$ (`H-TIMEFRAME-AGNOSTIC-SPECTRUM`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs`, `mod.rs`
+  - **Mô tả:** Code hiện tại hardcode cứng các mốc 15m, 1h, 4h trong logic chiến lược. Toàn bộ các mốc tham chiếu phải được cấu hình động qua $T_{micro}, T_{meso}, T_{macro}$ và bắt buộc thỏa mãn tỷ số phổ biến động $\ge 3.0$ để tránh tự tương quan âm và nhiễu vi cấu trúc.
+  - **Unit Tests:**
+    - [ ] `test_spectral_separation_constraint_enforcement`
+
+- [ ] **TODO-AUDIT-NEW-160: Chính Thức Khai Tử Vai Trò Tactical Scanner Của `anomaly.rs` Khỏi Arbiter Loop (`ANO-DECOMMISSION-SCANNER`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/anomaly.rs`, `core_v3/mod.rs`, `arbiter.rs`, `config.rs`
+  - **Mô tả:** Xóa bỏ hoàn toàn việc đăng ký `anomaly.rs` trong sàn đấu Arbiter, xóa các gen DNA liên quan, giải phóng tài nguyên CPU và làm sạch kiến trúc. Chuyển hóa toàn bộ giá trị phòng vệ của Anomaly sang Cầu Dao Ngắt Mạch Khẩn Cấp tại Gateway.
+  - **Unit Tests:**
+    - [ ] `test_arbiter_runs_cleanly_without_anomaly_scanner_proposals`
+
+- [ ] **TODO-AUDIT-NEW-161: Kiến Thiết Cầu Dao Khẩn Cấp Flash Crash & Liquidity Shock Circuit Breaker Tại Gateway (`GATE-FLASH-CRASH-BREAKER`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `matrix.rs`
+  - **Mô tả:** Khi phát hiện các cú sốc cực đoan: Nến rơi/giật $> 3.5\text{ ATR}$ trong 1 nến, $Z_{\text{vol}} \ge 4.5$, hoặc trượt giá rỗng thanh khoản $\implies$ Gateway lập tức kích hoạt trạng thái `EmergencyFreeze` phong tỏa mở vị thế mới trên toàn bộ các scanner trong 15–30 phút, bảo toàn 100% vốn an toàn qua cơn bão.
+  - **Unit Tests:**
+    - [ ] `test_gatekeeper_triggers_emergency_freeze_on_flash_crash_candle`
+    - [ ] `test_gatekeeper_cools_down_and_resumes_cleanly_after_shock`
+
+- [ ] **TODO-AUDIT-NEW-162: Bộ Lọc Khử Ô Nhiễm Phương Sai Z-Score Bằng Robust Dispersion / Winsorization / MAD (`SENS-ROBUST-ZSCORE`)**
+  - **File:** `strategies_backtests/helios/src/utils/normalization.rs`, `sensors.rs`, `matrix.rs`
+  - **Mô tả:** Khi xuất hiện 1 cây nến dị thường khổng lồ (Flash Crash / Anomaly), phương sai mẫu $\sigma$ bị thổi phồng lên gấp 5–8 lần, làm đè bẹp Z-Score của 30 cây nến tiếp theo tiệm cận 0 và gây mù hệ thống. Áp dụng kỹ thuật Robust Statistics: Kẹp ngoại lai Winsorization tại $\pm 3.5\sigma$ hoặc sử dụng Median Absolute Deviation (MAD): $\sigma_{\text{robust}} = 1.4826 \times \text{MAD}(X)$.
+  - **Unit Tests:**
+    - [ ] `test_robust_zscore_resists_single_extreme_outlier_candle`
+    - [ ] `test_robust_zscore_matches_standard_zscore_in_normal_distribution`
+
+- [ ] **TODO-AUDIT-NEW-163: Bộ Lọc Cửa Sổ Giờ Chốt Phí Funding Rate (Funding Settlement Spike Blackout Filter) Tại Gateway (`GATE-FUNDING-BLACKOUT`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `scanners/`
+  - **Mô tả:** Tại các mốc 00:00, 08:00, 16:00 UTC ($\pm 2$ phút), các quỹ Basis Arbitrage và Market Maker đóng/mở vị thế hedging làm giật râu volume khổng lồ ảo. Gatekeeper tự động phát hiện cửa sổ Funding Settlement: $t \pmod{8\text{h}} \in [00:00 - 2\text{m}, 00:00 + 1\text{m}]$ và phong tỏa mở lệnh mới trong 3 phút nhạy cảm này.
+  - **Unit Tests:**
+    - [ ] `test_funding_settlement_blackout_blocks_entries`
+
+- [ ] **TODO-AUDIT-NEW-164: Bộ Lọc Cú Sốc Mở Phiên Lớn London / New York Cho Hệ Thống Giao Dịch (`GATE-SESSION-OPEN-SHOCK`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `arbiter.rs`
+  - **Mô tả:** Tại thời điểm giao phiên London (14:00 VN) và New York (20:30 VN), thanh khoản bùng nổ quét râu 2 đầu làm gãy các mô hình vi mô. Tạm ngừng mở lệnh mới hoặc nới rộng đệm SL trong 5–15 phút đầu mở phiên lớn.
+  - **Unit Tests:**
+    - [ ] `test_session_open_volatility_buffer_cooldown`
+
+---
+
+## 🏛️ PHẦN 24: TÁI CẤU TRÚC SÀN ĐẤU THẦU ARBITER & RỦI RO CHIẾN THUẬT (NOTES 05, 12, 14, 15, 21, 22)
+
+- [ ] **TODO-AUDIT-NEW-165: Xây Dựng Module Quantile Normalization & Đấu Thầu EV Kỳ Vọng Toán Học Thuần Khiết Trong Arbiter (`H-QUANTILE-FAIR-ARBITER`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:150-185`
+  - **Mô tả:** Chuẩn hóa điểm số thô của từng scanner theo phân phối lịch sử của chính nó thành điểm phân vị $Z$-Score $\in [0.0, 1.0]$. Đấu thầu dựa trên điểm kỳ vọng toán học chuẩn hóa: $EV = \text{Score}_{\text{norm}} \times \frac{\text{TP Dist}}{\text{SL Dist}} - \text{Friction}$, triệt tiêu hoàn toàn tình trạng Absorption cướp quyền vô lý của Momentum và Reversal.
+  - **Unit Tests:**
+    - [ ] `test_fair_arbiter_momentum_wins_when_stronger_ev_despite_lower_raw_score`
+
+- [ ] **TODO-AUDIT-NEW-166: Điều Chỉnh `min_lock_roe` Khử Vùng Chân Không Trailing SL Từ $+6\%$ Đến $+20\%$ ROE (`H-TSL-VACUUM-RECONCILIATION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:1187`, `risk.rs:431-445`
+  - **Mô tả:** `min_lock_roe` đang bị hardcode cứng ở mức $+20.0\%$ ROE, tạo ra vùng chân không bảo vệ khiến lệnh lãi $+16.5\%$ ROE rơi thẳng về mức hòa vốn $+2.6\%$ ROE khi đảo chiều. Cài đặt 3 nấc khóa lãi bậc thang trong `risk.rs`: $+6\% \to +2.5\%$, $+10\% \to +5.0\%$, $+15\% \to +9.0\%$ ROE.
+  - **Unit Tests:**
+    - [ ] `test_tiered_profit_lock_locks_9_pct_at_15_pct_roe`
+
+- [ ] **TODO-AUDIT-NEW-167: Thêm Chốt Chặn Lợi Nhuận Bỏ Qua Stagnant Hold Exit Khi Vị Thế Đang Có Lãi Lớn (`H-RSK-STAGNANT-PROFIT-BYPASS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:358-364`
+  - **Mô tả:** Logic giải phóng vốn ngâm cưỡng bức đóng lệnh Market sau $N$ nến mà không kiểm tra vị thế đang lãi hay lỗ. Bổ sung điều kiện: Nếu `unrealized_roe >= min_profitable_roe` (ví dụ $+5.0\%$ ROE), **CẤM KÍCH HOẠT STAGNANT EXIT**, tiếp tục để Trailing SL gồng lãi theo xu hướng.
+  - **Unit Tests:**
+    - [ ] `test_stagnant_exit_bypassed_when_position_in_strong_profit`
+
+- [ ] **TODO-AUDIT-NEW-168: Cơ Chế Đệm Chuyển Tiếp Trạng Thái 1-Bar Tránh Sốc Tín Hiệu Sau Khi DNA Hot-Swap (`HOTSWAP-STATE-INVALIDATION`)**
+  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:338-345`, `strategies_backtests/helios/src/strategy/core_v3/mod.rs`
+  - **Mô tả:** Khi nhận DNA mới ở trạng thái Flat, các ngưỡng kích hoạt của Scanner và Gatekeeper thay đổi tức thì, trong khi bộ đệm trượt lịch sử chưa có giai đoạn chuyển tiếp, dễ tạo ra các cú sốc tín hiệu ảo (Spurious Signal Spikes). Áp dụng 1-bar Transition Guard: Sau khi nạp DNA mới, bỏ qua việc mở lệnh tại đúng cây nến hiện tại, chỉ bắt đầu quét mở lệnh từ cây nến đóng tiếp theo.
+  - **Unit Tests:**
+    - [ ] `test_dna_hotswap_transition_guard_prevents_immediate_spike`
+
+---
+
+## 🏛️ PHẦN 25: GIA CỐ TOÀN DIỆN CHIẾN ĐỘI MOMENTUM IGNITION (NOTES 28, 29, 30, 31)
+
+- [ ] **TODO-AUDIT-NEW-169: Khắc Phục Lệch Pha Thang Đo MTF Giữa Nến Vi Mô 1m & Dải Bollinger 15m (`MOM-MTF-SCALE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:51-57`, `matrix.rs`
+  - **Mô tả:** Scanner so sánh `close` 1m với dải Bollinger 15m (`bb_upper`, `bb_lower`). Khi nến 1m đầu tiên bùng nổ thoát hộp nén vi mô, giá vẫn nằm trọn trong dải BB 15m $\implies$ Bỏ lỡ 100% điểm vào chân sóng, chỉ phát hiện khi nến đã chạy đến cây thứ 8–10 (sát đỉnh Climax). Chuyển sang so sánh với dải bứt phá vi mô tương thích (1m/5m Bollinger/Keltner Bands hoặc Micro Donchian Channel).
+  - **Unit Tests:**
+    - [ ] `test_momentum_ignition_detects_first_micro_breakout_before_15m_expansion`
+    - [ ] `test_momentum_ignition_ignores_subthreshold_micro_noise`
+
+- [ ] **TODO-AUDIT-NEW-170: Chốt Chặn Trần Quá Độ Biến Động & Bão Thanh Lý Dây Chuyền $|Z| \le 3.0$ (`MOM-MAX-PRICE-Z-CAP`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `config.rs`
+  - **Mô tả:** Khi bão thanh lý Short xảy ra, giá bị giật bay 5–10 ATR vào "túi khí" sổ lệnh mỏng. Mua tại đây là mua ngay trước cú sụp đổ hồi quy. Thiết lập trần quá độ $|Price\_Z| \le \text{max\_price\_z}$ (mặc định $3.0\sigma$) và cự ly bứt phá không vượt quá $1.5\text{ ATR}$ tính từ đường trung bình, tự động VETO các cú kích hỏa đã bị kéo dãn quá đà.
+  - **Unit Tests:**
+    - [ ] `test_momentum_ignition_vetoes_blown_out_liquidation_cascade`
+    - [ ] `test_momentum_ignition_accepts_healthy_early_breakout`
+
+- [ ] **TODO-AUDIT-NEW-171: Chốt Chặn Kiểm Tra Khoảng Trống Cản Vĩ Mô MTF Headroom $\ge 1.5\text{ ATR}$ (`MOM-MTF-HEADROOM`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `arbiter.rs`
+  - **Mô tả:** Khi nến 1m bùng nổ nhưng ngay phía trên đầu ($< 0.5\text{ ATR}$) là đỉnh Swing High 4h hoặc dải BB Upper 1h/4h, giá sẽ đâm sầm vào tường cản cứng và dội ngược lại tạo Bull Trap. Bắt buộc kiểm tra khoảng trống dư địa (Headroom): $\text{Distance to MTF Resistance} \ge 1.5\text{ ATR}$; nếu không thỏa mãn tự động hủy Proposal.
+  - **Unit Tests:**
+    - [ ] `test_momentum_ignition_rejects_breakout_directly_into_4h_resistance`
+    - [ ] `test_momentum_ignition_allows_breakout_with_wide_headroom`
+
+- [ ] **TODO-AUDIT-NEW-172: Chốt Chặn Lọc Vi Bứt Phá Giả Trong Dải Nén Quá Hẹp (`MOM-MIN-EXPANSION-SPAN`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `matrix.rs`
+  - **Mô tả:** Khi dải BB co thắt cực hẹp ($< 0.10\%$), chỉ vài bước giá nhảy ngẫu nhiên của 1 lệnh nhỏ cũng làm nến đóng ngoài dải BB Upper dù không có dòng tiền thật. Yêu cầu nến kích hỏa phải có chiều dài thực tế tối thiểu $\text{Range} \ge 0.70 \times ATR$ và độ mở dải biến động $\Delta(\text{Band Width}) > 0$.
+  - **Unit Tests:**
+    - [ ] `test_momentum_ignition_rejects_micro_burst_in_dead_band`
+    - [ ] `test_momentum_ignition_fires_on_genuine_range_expansion`
+
+- [ ] **TODO-AUDIT-NEW-173: Cơ Chế Chốt Lời Co Giãn Xung Lực Nhanh (Impulse Profit Expansion Lock) Và Partial TP Cho Momentum (`MOM-IMPULSE-PROFIT-LOCK`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `config.rs`
+  - **Mô tả:** Momentum Ignition là chiến thuật xung lực có thời gian suy hao năng lượng cực nhanh. Ép lệnh Momentum dùng chung logic Trailing Stop chậm của TrendPB khiến 80% lệnh đang lãi $+20\% \sim +30\%$ ROE bị tuột về hòa vốn. Triển khai nhánh riêng cho `Playbook::MomentumIgnition`: Khi đạt $\text{MFE} \ge +1.5\text{ ATR}$ $\to$ dời ngay SL lên $+1.0\text{ ATR}$; khi đạt $+2.5\text{ ATR}$ $\to$ chốt lời chủ động 50% vị thế (Partial Take Profit).
+  - **Unit Tests:**
+    - [ ] `test_momentum_impulse_locks_profit_at_1_5_atr`
+    - [ ] `test_momentum_partial_tp_at_2_5_atr`
+
+---
+
+## 🏛️ PHẦN 26: GIA CỐ TOÀN DIỆN CHIẾN ĐỘI ABSORPTION (NOTES 24, 25, 32)
+
+- [ ] **TODO-AUDIT-NEW-174: Chốt Chặn Sàn Khối Lượng Tuyệt Đối Chống Khối Lượng Ma Giờ Thanh Khoản Mỏng Trong Absorption (`ABS-PHANTOM-VOL-FLOOR`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:60-70`, `config.rs`
+  - **Mô tả:** Vào đêm khuya hoặc cuối tuần, thanh khoản mỏng, chỉ cần một vài lệnh nhỏ khớp giá đã đẩy $Z_{\text{vol}}$ vọt lên $+4.0\sigma$ do khối lượng trung bình $\mu_{\text{vol}}$ quá nhỏ, bẫy scanner vào lệnh cản tàu. Bổ sung ngưỡng sàn khối lượng danh nghĩa tối thiểu: `quote_volume >= min_quote_volume_usd` và từ chối phát tín hiệu nếu không đạt sàn.
+  - **Unit Tests:**
+    - [ ] `test_absorption_rejects_phantom_volume_in_illiquid_periods`
+
+- [ ] **TODO-AUDIT-NEW-175: Chốt Chặn Vùng Nén Bị "Hóa Đá" Kéo Dài (Frozen Squeeze Stagnation Watchdog) Trong Absorption (`ABS-FROZEN-SQUEEZE-WATCHDOG`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `matrix.rs`
+  - **Mô tả:** Khi dải Bollinger Bands nằm lọt thỏm trong Keltner Channel suốt hàng trăm nến liên tiếp, `squeeze_intensity` bão hòa ở mức 1.0 nhưng thị trường hoàn toàn cạn kiệt động năng (Zero Kinetic Energy). Theo dõi biến đếm `continuous_squeeze_bars`: Nếu độ nén kéo dài quá 80 nến 1m mà không có đột phá volume, hạ điểm tự tin hoặc tạm khóa mở lệnh mới.
+  - **Unit Tests:**
+    - [ ] `test_absorption_rejects_frozen_squeeze_prolonged`
+
+- [ ] **TODO-AUDIT-NEW-176: Chốt Chặn Biên Độ Nén Nhỏ Hơn Chi Phí Sàn 2 Chiều (Sub-Frictional Compression Filter) Trong Absorption (`ABS-SUB-FRICTIONAL-FILTER`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-90`
+  - **Mô tả:** Khi dải nén quá hẹp, độ rộng dải Bollinger $\text{BB}_{\text{Width}} < 0.20\%$ giá. Trong khi đó, phí sàn 2 chiều + trượt giá ngốn mất $0.13\%$ giá ($2.60\%$ ROE tại 20x). Tiềm năng hồi quy về trục giữa KAMA chỉ đạt $0.10\%$ giá $\implies$ Lệnh chắc chắn bị lỗ ròng sau phí. Kiểm tra điều kiện biên độ tối thiểu: $\text{BB}_{\text{Width}} \ge 2.5 \times \text{Roundtrip Friction} \approx 0.35\%$.
+  - **Unit Tests:**
+    - [ ] `test_absorption_rejects_sub_frictional_bandwidth`
+
+- [ ] **TODO-AUDIT-NEW-177: Chốt Chặn Xung Đột Đa Khung Thời Gian (15m Squeeze vs 1h/4h Macro Expansion Contradiction) Trong Absorption (`ABS-MACRO-EXPANSION-VETO`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `matrix.rs`
+  - **Mô tả:** Khung 15m đang nén Squeeze nhưng khung 1h hoặc 4h đang trong pha Mở rộng Bùng nổ (Macro Expansion) theo chiều đối nghịch. Cú nén vi mô chỉ là nhịp dừng tạm thời trước khi sóng thần vĩ mô cuốn phăng toàn bộ vùng hỗ trợ. Nếu khung 1h/4h đang có $KER > 0.60$ và độ dốc KAMA mạnh ngược chiều đề xuất $\implies$ VETO tín hiệu Absorption.
+  - **Unit Tests:**
+    - [ ] `test_absorption_blocks_during_macro_expansion_counter_trend`
+
+---
+
+## 🏛️ PHẦN 27: GIA CỐ TOÀN DIỆN CHIẾN ĐỘI TREND PULLBACK (NOTES 34, 39, 43, 44)
+
+- [ ] **TODO-AUDIT-NEW-178: Thay Thế Boundary Guard 5m Bằng Dải Vi Mô 1m Trong `Trend_PB` (`H-TREND-PB-BOUNDARY-5M`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:98-105`
+  - **Mô tả:** Điều kiện `if z_score > pb_cfg.max_boundary_z { return None; }` (mặc định 0.50) được tính trên khung 5m lookback 50 bars (~4 tiếng). Trong một con sóng Uptrend 4h mạnh mẽ, giá liên tục bám biên trên nên Z-Score 5m hầu như luôn $> +0.50\sigma$, cấm Long suốt toàn bộ con sóng tăng mạnh nhất. Thay thế bằng điều kiện nến vi mô 1m: `current_close < bb_upper_1m` để chống mua ngay đỉnh râu phân phối mà không làm nghẽn trend lớn.
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_allows_entry_in_strong_macro_uptrend`
+
+- [ ] **TODO-AUDIT-NEW-179: Xác Thực Bất Đối Xứng Khối Lượng & Chốt Chặn Cạn Cung No-Supply Trong Nhịp Hồi (`TREND-VOL-ASYMMETRY`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:60-80`
+  - **Mô tả:** Bản chất của một nhịp hồi lành mạnh là khối lượng phải cạn kiệt ($Vol_{\text{pullback}} \le 0.80 \times SMA_{\text{vol}}$) để chứng minh phe bán không có nguồn cung để xả lũ (No-Supply). Nếu giá rơi về KAMA với volume bùng nổ ($Vol \ge 1.5 \times SMA_{\text{vol}}$) $\implies$ VETO hủy lệnh Long ngay lập tức để phòng ngừa phân phối đỉnh và gãy xu hướng.
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_rejects_high_volume_distribution_retrace`
+    - [ ] `test_trend_pb_accepts_volume_dry_up`
+
+- [ ] **TODO-AUDIT-NEW-180: Chốt Chặn Giới Hạn Biên Độ Thoái Lui ($L_{retrace} \le 0.618 \times L_{impulse}$) & So Sánh Vận Tốc ($v_{retrace} < v_{impulse}$) (`TREND-MAX-RETRACEMENT-RATIO`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`
+  - **Mô tả:** Sóng hồi không được xâm thực quá 61.8% chiều dài bước sóng đẩy trước đó ($L_{\text{retrace}} \le 0.618 \times L_{\text{impulse}}$). Đồng thời, vận tốc rơi của nhịp hồi ($\frac{\Delta P}{\Delta t}$) bắt buộc phải nhỏ hơn vận tốc của sóng đẩy ($v_{\text{retrace}} < v_{\text{impulse}}$). Nếu giá sập hình chữ V với vận tốc cực lớn $\implies$ Hủy bỏ trạng thái Pullback.
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_rejects_deep_retracement_exceeding_618`
+    - [ ] `test_trend_pb_rejects_flash_velocity_inversion`
+
+- [ ] **TODO-AUDIT-NEW-181: Độ Sâu Nhịp Hồi Thích Ứng Cho Supertrend Dốc Đứng (`TREND-ADAPTIVE-DEPTH`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `matrix.rs`
+  - **Mô tả:** Khi thị trường bước vào Supertrend dốc đứng ($|KAMA\_Slope| \ge 0.60$, $ADX > 35$), giá chỉ thoái lui nông (20%–38.2% Fibo, bám dải ngoài BB/EMA9) mà KHÔNG BAO GIỜ chạm tới KAMA Midline. Bổ sung cơ chế Adaptive Retracement: Khi Trend cực mạnh, cho phép kích hoạt điểm vào tại mốc thoái lui nông ($EMA_{\text{fast}}$ / Swing Support vi mô) với đệm SL co hẹp.
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_adapts_to_shallow_supertrend_pullback`
+    - [ ] `test_trend_pb_requires_deep_kama_touch_in_moderate_trend`
+
+- [ ] **TODO-AUDIT-NEW-182: Chốt Chặn Đâm Thủng KAMA $> -0.5\text{ ATR}$ & Phòng Thủ Breakeven Khi Gặp Từ Chối Tại Đỉnh Cũ (`TREND-PIERCING-AND-OVERHEAD-DEFENSE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `risk.rs`
+  - **Mô tả:** Nếu nhịp hồi đóng cửa bên dưới đường KAMA Midline quá $-0.5\text{ ATR}$, hủy bỏ trạng thái Pullback. Khi giá sau nhịp hồi tăng trở lại tiếp cận đỉnh cũ mà xuất hiện nến bị từ chối mạnh ($CLV \le -0.40$), tự động kích hoạt dời Stop Loss về hòa vốn ngay lập tức (Breakeven Defense).
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_rejects_kama_piercing_below_half_atr`
+    - [ ] `test_trend_pb_be_defense_on_overhead_rejection`
+
+- [ ] **TODO-AUDIT-NEW-183: Giới Hạn Thời Gian Nhịp Hồi ($T_{retrace} \le 3 \times T_{impulse}$) & TrendPB Stagnation Exit TTL 6 Nến (`TREND-TEMPORAL-STAGNATION-EXIT`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `risk.rs`
+  - **Mô tả:** Số lượng nến của nhịp hồi không được vượt quá gấp 3 lần số lượng nến của bước sóng đẩy ($T_{\text{retrace}} \le 3 \times T_{\text{impulse}}$). Nếu sau $N \le 6$ nến kể từ khi khớp lệnh mà giá không tạo được đỉnh cao hơn (Higher High), tự động kích hoạt Stagnation Exit đóng lệnh tại hòa vốn.
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_temporal_ratio_guard_rejects_dragged_pullback`
+    - [ ] `test_trend_pb_stagnation_exit_6_bars`
+
+- [ ] **TODO-AUDIT-NEW-184: Cơ Chế Cắt Lỗ Cấu Trúc Khi Gãy Cấu Trúc Thị Trường (Market Structure Break - MSB Exit Thủng Higher Low) (`TREND-MSB-EXIT`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `arbiter.rs`
+  - **Mô tả:** Khi đang nắm giữ vị thế thuận xu hướng, nếu nến đóng cửa xuyên thủng đáy sóng hồi gần nhất ($Higher\ Low$ - MSB / CHoCH), xu hướng đã chính thức tử trận. Thay vì thụ động chờ giá rơi tiếp để quét dính Trailing Stop ATR cách xa, Risk Manager kích hoạt Structural Invalidation Exit đóng vị thế ngay lập tức tại giá đóng nến $Close[i]$ để bảo toàn phần lớn vốn.
+  - **Unit Tests:**
+    - [ ] `test_risk_manager_triggers_msb_exit_on_higher_low_breach`
+    - [ ] `test_risk_manager_holds_trend_position_while_higher_low_intact`
+
+- [ ] **TODO-AUDIT-NEW-185: Chốt Chặn R:R Kỳ Vọng TrendPB $\ge 1.5$ & Ngoại Lệ Squeeze Cho Mô Hình Cờ Tăng Bull Flag (`TREND-RR-HURDLE-AND-FLAG-EXCEPTION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`
+  - **Mô tả:** Bắt buộc tỷ lệ kỳ vọng $\frac{\text{Distance to Prior High}}{\text{Distance to SL}} \ge 1.5$. Đồng thời, mở khóa ngoại lệ cho phép mở lệnh trong vùng Squeeze nếu KAMA slope vẫn dương mạnh và giá nằm ở nửa trên dải nén (Mô hình cờ tiếp diễn Bull Flag).
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_objective_rr_hurdle_ge_1_5`
+    - [ ] `test_trend_pb_allows_bull_flag_continuation_squeeze`
+
+- [ ] **TODO-AUDIT-NEW-186: Triển Khai Kiểm Tra Nhịp Hồi Phức Tạp Đa Sóng ABC (Two-Leg Retracement Structure) Cho TrendPB (`TREND-ABC-STRUCTURE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`
+  - **Mô tả:** Nhịp hiệu chỉnh thường có cấu trúc $A-B-C$. Sóng $B$ tạo bẫy tăng giả (Headfake). Nhận diện cấu trúc 2 nhịp thoái lui để chỉ kích hoạt lệnh khi sóng $C$ đã hoàn tất kiểm định hoặc có nến bứt phá qua đỉnh sóng $B$.
+  - **Unit Tests:**
+    - [ ] `test_trend_pb_two_leg_retracement_abc_awareness`
+
+- [ ] **TODO-AUDIT-NEW-187: Thiết Kế Playbook Tiếp Diễn Xu Hướng Động Năng Runaway Supertrend Continuation (`TREND-RUNAWAY-CONTINUATION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/`, `arbiter.rs`
+  - **Mô tả:** Lấp đầy khoảng trống lớn nhất của hệ thống: Khi giá bơm/xả 10–20 ATR dốc đứng mà không hồi về KAMA và không có Squeeze trước đó. Nhận diện trạng thái Runaway qua Kaufman $ER \ge 0.75$, $ADX \ge 35$ và $Close$ bám dải ngoài; kích hoạt lệnh tiếp diễn vi mô khi có nến tích lũy cạn volume 1m (Micro Consolidation Breakout) với Trailing SL siết chặt 1.0 ATR.
+  - **Unit Tests:**
+    - [ ] `test_runaway_continuation_captures_parabolic_surge`
+    - [ ] `test_runaway_continuation_refuses_choppy_market`
+
+---
+
+## 🏛️ PHẦN 28: GIA CỐ TOÀN DIỆN CHIẾN ĐỘI REVERSAL (NOTES 33, 41, 42)
+
+- [ ] **TODO-AUDIT-NEW-188: Triển Khai Monotonic TP Floor Guard Khóa Sàn Lợi Nhuận Reversal Chống KAMA Trôi Dốc Đè Bẹp TP (`REV-MONOTONIC-TP-FLOOR`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `scanners/reversal.rs`
+  - **Mô tả:** Khi bắt đáy đảo chiều, KAMA Midline phản ứng trễ nên tiếp tục cắm dốc xuống trong 5–10 nến tiếp theo. Đặt TP bám theo KAMA Midline động sẽ khiến mức TP bị kéo tụt xuống sát Entry, biến một vị thế lãi lớn thành hòa vốn hoặc lỗ phí sàn. Khóa sàn mức TP tối thiểu không được phép tụt lùi quá 30% so với mức TP ban đầu được xác lập tại nến Entry.
+  - **Unit Tests:**
+    - [ ] `test_reversal_monotonic_tp_floor_prevents_midline_collapse`
+    - [ ] `test_reversal_tp_locks_initial_target_within_30_pct_tolerance`
+
+- [ ] **TODO-AUDIT-NEW-189: Triển Khai Chốt Chặn Phá Vỡ Cấu Trúc Secondary Test (Structural Invalidation Guard Cắt Lỗ Khi Thủng $Low_{SC}$) (`REV-STRUCTURAL-INVALIDATION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `risk.rs`
+  - **Mô tả:** Trong cấu trúc Wyckoff, đáy thấp nhất của nhịp cao trào bán tháo ($Low_{SC}$) là mốc bất khả xâm phạm. Nếu nến sau đóng cửa đâm thủng mốc này ($Close < Low_{SC}$), toàn bộ tiền đề đảo chiều bị hủy bỏ hoàn toàn; hệ thống kích hoạt Emergency Exit cắt lỗ ngay lập tức, cấm tuyệt đối việc gồng lỗ hoặc nhồi lệnh bắt đáy trung bình giá.
+  - **Unit Tests:**
+    - [ ] `test_reversal_structural_invalidation_on_sc_breakdown`
+    - [ ] `test_reversal_aborts_on_failed_secondary_test`
+
+- [ ] **TODO-AUDIT-NEW-190: Bổ Sung Tiêu Chuẩn Râu Nến Từ Chối Giá Cực Trị (Excess Wick Requirement $CLV \ge 0.50$, Cấm Bắt Đáy Poor Low) (`REV-EXCESS-WICK-GATE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`
+  - **Mô tả:** Cấm bắt đáy khi nhịp chạm biên cực trị tạo thành một đáy phẳng lì không có râu nến từ chối ($Poor\ Low / Zero\ Excess$). Bắt buộc nến chạm biên phải có râu dưới rút chân tối thiểu $CLV \ge 0.50$ và chiều dài râu dưới $\ge 0.25 \times \text{Body}$ để chứng minh phiên đấu giá tại đáy đã hoàn tất.
+  - **Unit Tests:**
+    - [ ] `test_reversal_rejects_poor_low_without_excess_wick`
+    - [ ] `test_reversal_approves_when_clv_ge_0_50_with_strong_wick`
+
+- [ ] **TODO-AUDIT-NEW-191: Cổng Chặn Sức Mạnh Xu Hướng Vĩ Mô (Macro Trend Invalidation Gate Cho Reversal: Cấm Long Khi KAMA 1h Dốc Mạnh Và ADX 1h > 35) (`REV-MACRO-GATE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:85-102`
+  - **Mô tả:** `reversal.rs` hiện tại để trống `_matrix`, hoàn toàn mù độ dốc KAMA và Chaos vĩ mô. Khi thị trường đang rơi tự do theo tin tức xả lũ, Reversal liên tục bắt đáy và bị xe tăng nghiền nát. Bổ sung Macro Veto: Cấm bắt Long Reversal nếu $KAMA\_Slope_{1h} \le -\text{slope\_panic}$ hoặc $ADX_{1h} \ge 35$; chỉ cho phép bắt Reversal khi xu hướng vĩ mô đã có dấu hiệu giảm tốc (Deceleration).
+  - **Unit Tests:**
+    - [ ] `test_reversal_vetoed_when_1h_kama_slope_is_steeply_dumping`
+    - [ ] `test_reversal_allowed_when_macro_trend_shows_momentum_exhaustion`
+
+- [ ] **TODO-AUDIT-NEW-192: Cơ Chế Thoát Lệnh Khi Hồi Quy Đàn Hồi Thất Bại (Elastic Snap-back Stagnation Exit TTL 5 Nến) & Cầu Dao Cooldown 2 Lệnh Thua Liên Tiếp (`REV-ELASTIC-STAGNATION-AND-COOLDOWN`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `reversal.rs`, `arbiter.rs`
+  - **Mô tả:** Bản chất của Reversal là cú giật đàn hồi nhanh như sợi dây chun về trục KAMA Midline. Nếu sau khi mở vị thế mà 5 cây nến tiếp theo giá không giật mạnh về phía KAMA mà nằm bẹp đi ngang tại đáy (Stagnation Drift), kích hoạt Elastic Stagnation Exit đóng lệnh ở mức lỗ vi mô ($0.2R$). Sau 2 lệnh Reversal thua liên tiếp, tự động đóng băng mở lệnh Reversal trong 15 nến tiếp theo để né bão phân kỳ kéo dài.
+  - **Unit Tests:**
+    - [ ] `test_reversal_stagnation_exit_ttl_5_bars`
+    - [ ] `test_reversal_consecutive_losses_circuit_breaker`
+
+- [ ] **TODO-AUDIT-NEW-193: Triệt Tiêu Bộ Lọc MFI Nhị Phân Trễ Pha, Chuyển Sang Hàm Làm Mềm Điểm Tự Tin Liên Tục (`REV-SOFT-MFI-WEIGHT`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:60-65`
+  - **Mô tả:** Điều kiện nhị phân `mfi > mfi_thresh` loại bỏ oan uổng nhiều nến rút chân hoàn hảo chỉ vì MFI trễ pha 1–2 nến. Chuyển MFI từ chốt chặn nhị phân sang trọng số làm mềm điểm tự tin liên tục.
+  - **Unit Tests:**
+    - [ ] `test_reversal_softens_mfi_threshold_instead_of_binary_veto`
+
+---
+
+## 🏛️ PHẦN 29: TÁI THIẾT KẾ THỊ TRƯỜNG ĐI NGANG RANGE-BOUND (NOTES 37, 38, 45, 46)
+
+- [ ] **TODO-AUDIT-NEW-194: Tái Thiết Kế `range_bound.rs` Thay Thế `range_osc.rs` Dựa Trên Hộp Cấu Trúc Cố Định ($VAH/VAL/POC$) (`RNG-ARCH-STRUCTURAL-BOX`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`, `arbiter.rs`
+  - **Mô tả:** Loại bỏ hoàn toàn tư duy bám theo dải Bollinger Bands động 20 nến co giãn méo mó. Xây dựng Hộp Cấu Trúc Cố Định (Fixed Structural Box) xác lập biên trên $Range_{\text{High}}$ ($VAH$) và biên dưới $Range_{\text{Low}}$ ($VAL$) cùng trục giá trị công bằng $POC$ từ các cực trị đã được kiểm định tối thiểu 2 lần (KDE / Donchian phẳng).
+  - **Unit Tests:**
+    - [ ] `test_range_bound_box_construction_from_extrema`
+    - [ ] `test_range_bound_identifies_fixed_support_resistance`
+
+- [ ] **TODO-AUDIT-NEW-195: Tháo Gỡ Bẫy "Kẹp Trong Dải" Bằng Cơ Chế Liquidity Sweep Re-entry ($CLV \ge 0.50$ Sau Spring/Upthrust) (`RNG-SPRING-LIQUIDITY-SWEEP`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
+  - **Mô tả:** Xóa bỏ điều kiện `close <= bb_m && close >= bb_l` (vốn ép điểm = 0 khi nến quét râu ngoài biên); cho phép và ưu tiên bắt đảo chiều khi giá quét thủng biên hộp để nuốt thanh khoản nhưng nến đóng cửa rút chân trở lại vào bên trong hộp với $|CLV| \ge 0.50$ (Mô hình Wyckoff Spring & Upthrust).
+  - **Unit Tests:**
+    - [ ] `test_range_bound_spring_liquidity_sweep_reentry`
+    - [ ] `test_range_bound_upthrust_reentry`
+
+- [ ] **TODO-AUDIT-NEW-196: Chốt Lời Sang Biên Đối Diện Hộp (Opposite Boundary TP, $R:R \ge 1.5$) & Khóa Lãi Hòa Vốn Tại $POC$ (`RNG-OPPOSITE-BOUNDARY-TP`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`, `risk.rs`
+  - **Mô tả:** Khắc phục tử huyệt R:R âm do chốt lời non tại trục giữa ($bb\_middle$). Take Profit thực tế bắt buộc phải hướng sang biên đối diện của hộp ($VAL \to VAH$ hoặc $VAH \to VAL$) để bảo đảm $R:R \ge 1.5$. Trục giữa $POC$ chỉ đóng vai trò là điểm kích hoạt dời Stop Loss về hòa vốn (Break-Even Lock).
+  - **Unit Tests:**
+    - [ ] `test_range_bound_targets_opposite_boundary_rr_ge_1_5`
+    - [ ] `test_range_bound_breakeven_lock_at_poc`
+
+- [ ] **TODO-AUDIT-NEW-197: Bộ Đếm Chu Kỳ Sống Của Hộp (Boundary Touch Counter: Chỉ Đánh Lần 2, 3, 4; Cấm Lần 5+) & Anti-Breakout Veto (`RNG-TOUCH-COUNTER-AND-ANTI-BREAKOUT`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
+  - **Mô tả:** Đếm số lần kiểm định biên của hộp: Chỉ cho phép mở lệnh đảo chiều ở lần chạm thứ 2, 3, 4; khóa hoàn toàn giao dịch nảy biên từ lần chạm thứ 5 trở đi vì xác suất vỡ cản $> 80\%$. Nếu nến đóng ngoài biên hộp kèm Volume $\ge 2.5 \times SMA_{\text{vol}}$ và $|CLV| \ge 0.70 \implies$ Hủy bỏ ngay lập tức trạng thái Range để chống cản đầu xe tăng.
+  - **Unit Tests:**
+    - [ ] `test_range_bound_touch_counter_locks_after_4_touches`
+    - [ ] `test_range_bound_breakout_volume_invalidates_range`
+
+- [ ] **TODO-AUDIT-NEW-198: Sàn Chi Phí Sinh Tồn Của Hộp (Minimum Economic Height $\ge 1.2\%$) & Vùng Cấm Trade $40\%$ Quanh POC (`RNG-ECONOMIC-HEIGHT-AND-DEADZONE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
+  - **Mô tả:** Bắt buộc chiều cao hộp $Height_{\text{box}} \ge 3.0 \times (2 \times \text{Fee} + \text{Slippage})$ (tối thiểu $> 1.2\%$ tại 20x), cấm tiệt giao dịch trong các hộp teo tóp dưới sàn ma sát. Cấm mở lệnh nếu vị trí giá nằm trong vùng chết 40% quanh trục giữa $POC$ (Dead-Zone Exclusion Box).
+  - **Unit Tests:**
+    - [ ] `test_range_bound_rejects_sub_frictional_micro_range`
+    - [ ] `test_range_bound_dead_zone_exclusion_around_poc`
+
+- [ ] **TODO-AUDIT-NEW-199: Giao Thức Đón Sóng Sau Đột Phá Giả UTAD (UTAD Re-entry Protocol) (`RNG-UTAD-REENTRY`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
+  - **Mô tả:** Nhận diện cây nến đỏ quay ngược trở lại vào trong Range sau cú rướn bứt phá giả $> 1.5\text{ ATR}$ ngoài Range High (Upthrust After Distribution), kích hoạt lệnh Short đón sóng sập về đáy hộp với Stop Loss đặt ngay trên đỉnh râu nến UTAD.
+  - **Unit Tests:**
+    - [ ] `test_range_bound_utad_reentry_protocol`
+
+---
+
+## 🏛️ PHẦN 30: DỌN DẸP MÃ NGUỒN, NỢ KỸ THUẬT & TỐI ƯU HÓA HIỆU NĂNG (NOTES 06, 16, 27, 48)
+
+- [ ] **TODO-AUDIT-NEW-200: Đưa `VolMaParams` Vào Cấu Hình DNA Có Thể Tối Ưu Hóa (`H-CFG-FROZEN-VOLMA`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:216-225`
+  - **Mô tả:** Struct `VolMaParams` hardcode `period = 20`, `timeframe = 1m`, làm đóng băng thước đo khối lượng baseline, gây méo mó tỷ lệ kiệt sức/bùng nổ volume trên các tài sản có thanh khoản và độ biến động khác nhau. Bổ sung macro `#[derive(DnaMappable)]` cho `VolMaParams`, mở dải period $[10, 50]$ cho GA tối ưu.
+  - **Unit Tests:**
+    - [ ] `test_vol_ma_params_dna_mapping`
+
+- [ ] **TODO-AUDIT-NEW-201: Chuẩn Hóa Lưới Độ Mịn Bước Nhảy DNA Cho Các Tham Số Vi Cấu Trúc Nến (`DNA-STEP-QUANT-MISMATCH`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs`
+  - **Mô tả:** Một số tham số vi cấu trúc nến cực kỳ nhạy cảm (`min_clv`, `spring_tolerance`, `struct_sl_buffer_atr`) hiện đang bị phân bổ bước nhảy quá thô (ví dụ: `min_clv` step 0.05 từ 0.05 đến 0.50 chỉ có 10 bins), khiến GA dễ nhảy vọt qua điểm tối ưu toàn cục. Nâng độ mịn bước nhảy cho các tham số nhạy cảm: `min_clv` (step 0.01), `spring_tolerance` (step 0.01), `struct_sl_buffer_atr` (step 0.02).
+  - **Unit Tests:**
+    - [ ] `test_dna_mapping_step_granularity_for_microstructural_params`
+
+- [ ] **TODO-AUDIT-NEW-202: Đồng Bộ Hóa Default Timeframe Của Keltner (15m) Khớp Với BBands Trong `config.rs` (`H-CFG-11`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:148, 172, 192`
+  - **Mô tả:** `BbandsParams::default()` chọn 15m nhưng `default_timeframe()` của KeltnerParams lại trả về 5m, phụ thuộc vào lệnh ép đồng bộ thủ công trong `mod.rs`. Đồng bộ hàm fallback của Keltner về 15m để cấu hình độc lập luôn an toàn.
+  - **Unit Tests:**
+    - [ ] `test_keltner_and_bbands_default_timeframe_coherence`
+
+- [ ] **TODO-AUDIT-NEW-203: Dọn Dẹp Mã Chết `HeliosBridge::analyze` 125 Dòng Khỏi Codebase (`TODO-BRG-08`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:360-485`
+  - **Mô tả:** Hàm `HeliosBridge::analyze` dài 125 dòng mã là tàn dư cũ của bản thiết kế ban đầu, hoàn toàn không được gọi ở bất kỳ luồng nào trong dự án, gây ô nhiễm mã nguồn. Xóa bỏ hoàn toàn hàm này.
+  - **Unit Tests:**
+    - [ ] `test_helios_bridge_compilation_without_analyze`
+
+- [ ] **TODO-AUDIT-NEW-204: Đóng Gói `core_v2` Cũ Vào `legacy/` & Bóc Tách 1,500 Dòng Test Khỏi `core_v3/mod.rs` (`CLEANUP-V2-AND-MOD-TESTS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v2/`, `strategies_backtests/helios/src/strategy/core_v3/mod.rs`
+  - **Mô tả:** Thư mục `core_v2` cũ không còn sử dụng gây nhiễu code; file `core_v3/mod.rs` dài hơn 1,800 dòng do nhét toàn bộ test cases vào cuối file, làm giảm tính công thái học và cản trở bảo trì. Di chuyển `core_v2` vào `legacy/core_v2` và bóc tách toàn bộ `mod tests` trong `core_v3/mod.rs` sang file `strategies_backtests/helios/tests/core_v3_integration_tests.rs`.
+  - **Unit Tests:**
+    - [ ] `cargo test -p helios` xác nhận 100% tests pass nguyên vẹn sau khi di chuyển.

@@ -27,8 +27,10 @@ use crate::strategy::core_v3::config::HeliosConfigV3;
 pub enum GateVetoReason {
     /// Bão biến động hỗn loạn (Chaos Index >= threshold hoặc đang trong dải trễ Hysteresis)
     ChaosWhipsaw,
-    /// Sàn biến động chết / tắt thanh khoản (NATR < min_natr_threshold)
-    VolatilityFlatline,
+    /// Sàn biến động vĩ mô không bù nổi chi phí vị thế (Macro NATR < Roundtrip Fee + Min Alpha)
+    MacroFlatline,
+    /// Sàn thanh khoản vi mô chết / que tăm (Micro NATR < Single-leg Taker Fee)
+    MicroFlatline,
     /// Bất thường dữ liệu (NaN, Inf, hoặc chưa đủ warmup)
     DataAnomaly,
 }
@@ -37,7 +39,8 @@ impl GateVetoReason {
     pub fn as_str(&self) -> &'static str {
         match self {
             GateVetoReason::ChaosWhipsaw => "CHAOS_WHIPSAW",
-            GateVetoReason::VolatilityFlatline => "VOLATILITY_FLATLINE",
+            GateVetoReason::MacroFlatline => "MACRO_FLATLINE",
+            GateVetoReason::MicroFlatline => "MICRO_FLATLINE",
             GateVetoReason::DataAnomaly => "DATA_ANOMALY",
         }
     }
@@ -54,12 +57,16 @@ pub struct GateEvaluation {
     pub current_chaos: f64,
     /// Giá trị NATR đo đạc thực tế của thị trường (%) từ sensors.natr MTF
     pub market_natr_pct: f64,
+    /// 🔬 Giá trị NATR vi mô (%) từ sensors.micro_natr
+    pub micro_natr_pct: f64,
     /// Trạng thái khóa trễ Hysteresis có đang hoạt động hay không
     pub is_hysteresis_active: bool,
-    /// 📉 Ngưỡng NATR tối thiểu yêu cầu (%) = fee_floor_pct + min_alpha_pct
+    /// 📉 Ngưỡng NATR vĩ mô tối thiểu yêu cầu (%) = fee_floor_pct + min_alpha_pct
     pub required_min_natr_pct: f64,
-    /// 💰 Sàn chi phí thực tế (%) = 2*taker_fee + slippage
+    /// 💰 Sàn chi phí 2 chiều thực tế (%) = 2*taker_fee + slippage
     pub fee_floor_pct: f64,
+    /// 🛡️ Sàn chi phí 1 chiều vi mô (%) = taker_fee_rate * 100.0
+    pub micro_fee_floor_pct: f64,
     /// 🧬 Ngưỡng Alpha bù đắp từ DNA (%)
     pub min_alpha_pct: f64,
     /// 🌪️ Ngưỡng cắt bão Chaos
@@ -89,15 +96,21 @@ impl RegimeGatekeeper {
         let i = tick.i;
 
         // 1. Kiểm tra giới hạn mảng & Dữ liệu bất thường (Data Anomaly Guard)
-        if matrix.chaos_index.len() <= i || sensors.natr.len() <= i || sensors.atr_sl.len() <= i {
+        if matrix.chaos_index.len() <= i
+            || sensors.natr.len() <= i
+            || sensors.micro_natr.len() <= i
+            || sensors.atr_sl.len() <= i
+        {
             return GateEvaluation {
                 passed: false,
                 veto_reason: Some(GateVetoReason::DataAnomaly),
                 current_chaos: 0.0,
                 market_natr_pct: 0.0,
+                micro_natr_pct: 0.0,
                 is_hysteresis_active: false,
                 required_min_natr_pct: 0.0,
                 fee_floor_pct: 0.0,
+                micro_fee_floor_pct: 0.0,
                 min_alpha_pct: 0.0,
                 chaos_threshold: 0.0,
             };
@@ -105,11 +118,20 @@ impl RegimeGatekeeper {
 
         let current_chaos = matrix.chaos_index.get(i).copied().unwrap_or(f64::NAN);
         let market_natr_pct = sensors.natr.get(i).copied().unwrap_or(f64::NAN);
+        let micro_natr_pct = sensors.micro_natr.get(i).copied().unwrap_or(f64::NAN);
         let current_atr_sl = sensors.atr_sl.get(i).copied().unwrap_or(f64::NAN);
         let current_price = tick.closes().get(i).copied().unwrap_or(0.0);
 
+        let risk_base = &config.risk_management.risk_base;
+        let roundtrip_fee_pct = (risk_base.taker_fee_rate * 2.0 + risk_base.slippage_allowance_pct) * 100.0;
+        let micro_fee_floor_pct = (risk_base.taker_fee_rate * 100.0).max(1e-4);
+        let min_alpha_pct = config.arbiter.min_natr_threshold * 100.0;
+        let required_min_natr_pct = roundtrip_fee_pct + min_alpha_pct;
+        let t_enter = config.arbiter.chaos_veto_threshold;
+
         if current_chaos.is_nan()
             || market_natr_pct.is_nan()
+            || micro_natr_pct.is_nan()
             || current_atr_sl.is_nan()
             || current_price <= 1e-9
             || current_atr_sl <= 0.0
@@ -119,33 +141,47 @@ impl RegimeGatekeeper {
                 veto_reason: Some(GateVetoReason::DataAnomaly),
                 current_chaos: 0.0,
                 market_natr_pct: 0.0,
+                micro_natr_pct: 0.0,
                 is_hysteresis_active: false,
                 required_min_natr_pct: 0.0,
                 fee_floor_pct: 0.0,
+                micro_fee_floor_pct: 0.0,
                 min_alpha_pct: 0.0,
                 chaos_threshold: 0.0,
             };
         }
 
-        // 2. Chốt chặn Sàn Biến Động theo Sàn Chi Phí Sinh Tồn (Physical Cost Floor) + DNA Alpha
+        // 2.1. Chốt chặn Sàn Kinh Tế Vĩ Mô (Macro Economic Floor)
         // sensors.natr lưu giá trị phần trăm (%) từ khung MTF chiến thuật (vd: 0.45 tức 0.45%)
-
-        // Sàn chi phí sinh tồn = 2 * taker_fee_rate + slippage_allowance_pct (quy đổi sang %)
-        let risk_base = &config.risk_management.risk_base;
-        let roundtrip_fee_pct = (risk_base.taker_fee_rate * 2.0 + risk_base.slippage_allowance_pct) * 100.0;
-        let min_alpha_pct = config.arbiter.min_natr_threshold * 100.0;
-        let required_min_natr_pct = roundtrip_fee_pct + min_alpha_pct;
-        let t_enter = config.arbiter.chaos_veto_threshold;
-
         if market_natr_pct < required_min_natr_pct {
             return GateEvaluation {
                 passed: false,
-                veto_reason: Some(GateVetoReason::VolatilityFlatline),
+                veto_reason: Some(GateVetoReason::MacroFlatline),
                 current_chaos,
                 market_natr_pct,
+                micro_natr_pct,
                 is_hysteresis_active: false,
                 required_min_natr_pct,
                 fee_floor_pct: roundtrip_fee_pct,
+                micro_fee_floor_pct,
+                min_alpha_pct,
+                chaos_threshold: t_enter,
+            };
+        }
+
+        // 2.2. Chốt chặn Sàn Thanh Khoản Khớp Lệnh Vi Mô (Micro Execution Liquidity Floor)
+        // Nến vi mô không được phép là nến que tăm có biên độ nhỏ hơn phí vào lệnh Taker (0.04%)
+        if micro_natr_pct < micro_fee_floor_pct {
+            return GateEvaluation {
+                passed: false,
+                veto_reason: Some(GateVetoReason::MicroFlatline),
+                current_chaos,
+                market_natr_pct,
+                micro_natr_pct,
+                is_hysteresis_active: false,
+                required_min_natr_pct,
+                fee_floor_pct: roundtrip_fee_pct,
+                micro_fee_floor_pct,
                 min_alpha_pct,
                 chaos_threshold: t_enter,
             };
@@ -162,9 +198,11 @@ impl RegimeGatekeeper {
                 veto_reason: Some(GateVetoReason::ChaosWhipsaw),
                 current_chaos,
                 market_natr_pct,
+                micro_natr_pct,
                 is_hysteresis_active: true,
                 required_min_natr_pct,
                 fee_floor_pct: roundtrip_fee_pct,
+                micro_fee_floor_pct,
                 min_alpha_pct,
                 chaos_threshold: t_enter,
             };
@@ -196,9 +234,11 @@ impl RegimeGatekeeper {
                     veto_reason: Some(GateVetoReason::ChaosWhipsaw),
                     current_chaos,
                     market_natr_pct,
+                    micro_natr_pct,
                     is_hysteresis_active: true,
                     required_min_natr_pct,
                     fee_floor_pct: roundtrip_fee_pct,
+                    micro_fee_floor_pct,
                     min_alpha_pct,
                     chaos_threshold: t_enter,
                 };
@@ -211,9 +251,11 @@ impl RegimeGatekeeper {
             veto_reason: None,
             current_chaos,
             market_natr_pct,
+            micro_natr_pct,
             is_hysteresis_active: false,
             required_min_natr_pct,
             fee_floor_pct: roundtrip_fee_pct,
+            micro_fee_floor_pct,
             min_alpha_pct,
             chaos_threshold: t_enter,
         }
@@ -281,6 +323,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![0.45; 20]); // Macro NATR 0.45% > (0.10% fee + 0.12% alpha = 0.22%)
+        sensors.micro_natr = Arc::new(vec![0.08; 20]); // Micro NATR 0.08% > 0.04%
         sensors.atr_sl = Arc::new(vec![10.0; 20]);
         matrix.chaos_index = Arc::new(vec![0.30; 20]); // 0.30 < 0.65 threshold
 
@@ -289,10 +332,11 @@ mod tests {
         assert_eq!(eval.veto_reason, None);
         assert!(!eval.is_hysteresis_active);
         assert!((eval.market_natr_pct - 0.45).abs() < 1e-4, "Market NATR phải là 0.45%");
+        assert!((eval.micro_natr_pct - 0.08).abs() < 1e-4, "Micro NATR phải là 0.08%");
     }
 
     #[test]
-    fn test_gatekeeper_volatility_flatline_veto() {
+    fn test_gatekeeper_macro_flatline_veto() {
         let config = HeliosConfigV3::default();
         let mut env = MockTickEnv::new(20);
         let tick = env.tick(10);
@@ -300,19 +344,41 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![0.10; 20]); // Macro NATR 0.10% < 0.22% (Sàn chi phí 0.10% + DNA Alpha 0.12%)
+        sensors.micro_natr = Arc::new(vec![0.08; 20]);
         sensors.atr_sl = Arc::new(vec![2.0; 20]);
         matrix.chaos_index = Arc::new(vec![0.30; 20]);
 
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(!eval.passed);
-        assert_eq!(eval.veto_reason, Some(GateVetoReason::VolatilityFlatline));
+        assert_eq!(eval.veto_reason, Some(GateVetoReason::MacroFlatline));
         assert!((eval.market_natr_pct - 0.10).abs() < 1e-4);
     }
 
     #[test]
+    fn test_gatekeeper_micro_flatline_veto() {
+        // 🛡️ CHỐNG BẪY MÙ 4H (NEW-NATR-4H-BLIND):
+        // Dù Macro NATR 4h rất cao (1.50%), nhưng nếu nến vi mô phẳng lì que tăm (0.02% < 0.04%) thì PHẢI VETO!
+        let config = HeliosConfigV3::default();
+        let mut env = MockTickEnv::new(20);
+        let tick = env.tick(10);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+
+        sensors.natr = Arc::new(vec![1.50; 20]); // Macro NATR 4h 1.50% rất cao
+        sensors.micro_natr = Arc::new(vec![0.02; 20]); // Micro NATR que tăm 0.02% < 0.04%
+        sensors.atr_sl = Arc::new(vec![0.4; 20]);
+        matrix.chaos_index = Arc::new(vec![0.30; 20]);
+
+        let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
+        assert!(!eval.passed, "Nến vi mô que tăm không đủ bù phí Taker phải bị VETO!");
+        assert_eq!(eval.veto_reason, Some(GateVetoReason::MicroFlatline));
+        assert!((eval.micro_natr_pct - 0.02).abs() < 1e-4);
+    }
+
+    #[test]
     fn test_gatekeeper_immune_to_micro_candle_range() {
-        // 🛡️ CHỐNG BẪY LỆCH NGỮ NGHĨA: Nến 1m tích lũy co hẹp (ATR 1m = 1.0 / 2000.0 = 0.05%)
-        // nhưng nếu phiên thị trường NATR MTF lành mạnh (0.45%) thì KHÔNG ĐƯỢC VETO!
+        // 🛡️ CHỐNG BẪY LỆCH NGỮ NGHĨA: Nến vi mô tích lũy co hẹp (0.05% >= 0.04% sàn Taker)
+        // và phiên thị trường NATR MTF lành mạnh (0.45%) thì KHÔNG ĐƯỢC VETO!
         let config = HeliosConfigV3::default();
         let mut env = MockTickEnv::new(20);
         let tick = env.tick(10);
@@ -320,18 +386,19 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![0.45; 20]); // Macro NATR 0.45% > 0.22%
-        sensors.atr_sl = Arc::new(vec![1.0; 20]); // Micro ATR chỉ 1.0 (nến 1m co hẹp 0.05%)
+        sensors.micro_natr = Arc::new(vec![0.05; 20]); // Micro NATR 0.05% >= 0.04%
+        sensors.atr_sl = Arc::new(vec![1.0; 20]);
         matrix.chaos_index = Arc::new(vec![0.30; 20]);
 
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
-        assert!(eval.passed, "Nến 1m co hẹp nhưng phiên có biến động lành mạnh thì phải PASS!");
+        assert!(eval.passed, "Nến vi mô nén tích lũy lành mạnh thì phải PASS!");
         assert_eq!(eval.veto_reason, None);
         assert!((eval.market_natr_pct - 0.45).abs() < 1e-4);
     }
 
     #[test]
     fn test_gatekeeper_micro_data_anomaly_zero_atr() {
-        // Nếu nến vi mô 1m chết thanh khoản hoàn toàn (ATR_SL <= 0.0), phải trả về DataAnomaly
+        // Nếu nến vi mô chết thanh khoản hoàn toàn (ATR_SL <= 0.0), phải trả về DataAnomaly
         let config = HeliosConfigV3::default();
         let mut env = MockTickEnv::new(10);
         let tick = env.tick(5);
@@ -339,6 +406,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![0.45; 10]);
+        sensors.micro_natr = Arc::new(vec![0.08; 10]);
         sensors.atr_sl = Arc::new(vec![0.0; 10]); // ATR = 0.0 lỗi dữ liệu
         matrix.chaos_index = Arc::new(vec![0.30; 10]);
 
@@ -356,6 +424,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![0.25; 20]);
+        sensors.micro_natr = Arc::new(vec![0.08; 20]);
         sensors.atr_sl = Arc::new(vec![10.0; 20]);
         matrix.chaos_index = Arc::new(vec![0.75; 20]); // 0.75 >= 0.65 threshold
 
@@ -373,6 +442,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![0.25; 20]);
+        sensors.micro_natr = Arc::new(vec![0.08; 20]);
         sensors.atr_sl = Arc::new(vec![10.0; 20]);
         // Bar 8: 0.70 (kích hoạt bão >= 0.65)
         // Bar 9: 0.62 (chưa hạ dưới t_exit = 0.55)
@@ -398,6 +468,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![0.25; 20]);
+        sensors.micro_natr = Arc::new(vec![0.08; 20]);
         sensors.atr_sl = Arc::new(vec![10.0; 20]);
         // Bar 7: 0.70 (kích hoạt bão >= 0.65)
         // Bar 8: 0.50 (hạ nhiệt dưới t_exit = 0.55 -> giải phóng)
@@ -424,6 +495,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
 
         sensors.natr = Arc::new(vec![f64::NAN; 10]);
+        sensors.micro_natr = Arc::new(vec![0.08; 10]);
         sensors.atr_sl = Arc::new(vec![10.0; 10]);
         matrix.chaos_index = Arc::new(vec![0.30; 10]);
 
@@ -431,8 +503,16 @@ mod tests {
         assert!(!eval.passed);
         assert_eq!(eval.veto_reason, Some(GateVetoReason::DataAnomaly));
 
-        // Test ATR_SL chứa NaN
+        // Test Micro NATR chứa NaN
         sensors.natr = Arc::new(vec![0.25; 10]);
+        sensors.micro_natr = Arc::new(vec![f64::NAN; 10]);
+        sensors.atr_sl = Arc::new(vec![10.0; 10]);
+        let eval_micro_nan = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
+        assert!(!eval_micro_nan.passed);
+        assert_eq!(eval_micro_nan.veto_reason, Some(GateVetoReason::DataAnomaly));
+
+        // Test ATR_SL chứa NaN
+        sensors.micro_natr = Arc::new(vec![0.08; 10]);
         sensors.atr_sl = Arc::new(vec![f64::NAN; 10]);
         let eval2 = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(!eval2.passed);
