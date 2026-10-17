@@ -419,17 +419,27 @@ impl HeliosArbiter {
                     let sig = opt_p.as_ref().map(|p| p.signal_type);
                     let raw = opt_p.as_ref().map(|p| p.raw_score).unwrap_or(0.0);
                     let (status, reason) = if id == winner_id {
-                        let reason_str = if let Some(r_conf) = runner_up_conf {
+                        let base_reason = if let Some(r_conf) = runner_up_conf {
                             format!("Won auction with confidence {:.3} (Lead: +{:.3} over runner-up)", winner_conf, winner_conf - r_conf)
                         } else {
                             format!("Won auction with confidence {:.3} (Sole approved proposal)", winner_conf)
                         };
+                        let reason_str = if !rej_reason.is_empty() {
+                            format!("{} - {}", base_reason, rej_reason)
+                        } else {
+                            base_reason
+                        };
                         (AuctionStatus::Won, reason_str)
                     } else if passed {
-                        let reason_str = if sig == Some(proposal.signal_type) {
+                        let base_reason = if sig == Some(proposal.signal_type) {
                             format!("Subordinate to winner on same side (Conf: {:.3} < {:.3})", conf, winner_conf)
                         } else {
                             format!("Defeated in inter-side face-off (Conf: {:.3} vs {:.3})", conf, winner_conf)
+                        };
+                        let reason_str = if !rej_reason.is_empty() {
+                            format!("{} - {}", base_reason, rej_reason)
+                        } else {
+                            base_reason
                         };
                         (AuctionStatus::RunnerUp, reason_str)
                     } else {
@@ -734,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn test_arbiter_structural_risk_veto_blocks_deep_sl() {
+    fn test_arbiter_structural_sl_approved_when_exceeds_roe_cap() {
         use ferro_trade::data::{RawDataCache, DataView};
         use ferro_trade::backtest::manager::IndicatorManager;
         use ferro_trade::broker::position::Position;
@@ -784,7 +794,7 @@ mod tests {
         // Mock proposal với SL = 1970.0 (cách 30 giá = 1.5% giá ở 20x = 30% ROE > 15% ROE)
         let deep_sl_prop = Proposal {
             signal_type: SignalType::Long,
-            raw_score: 0.90, // Tự tin rất cao nhưng SL quá sâu
+            raw_score: 0.90, // Tự tin rất cao nhưng SL sâu
             scanner_id: ScannerId::TrendPullback,
             suggested_sl: Some(1970.0),
             suggested_tp: None,
@@ -797,9 +807,81 @@ mod tests {
         }));
 
         let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
-        assert!(!decision.is_approved, "Proposal có SL cấu trúc 30% ROE (> 15% ROE) PHẢI bị VETO!");
+        // 🛡️ [TODO-AUDIT-NEW-04]: Proposal có SL cấu trúc rộng (30% ROE > 15% ROE) nhưng an toàn thanh lý sàn
+        // PHẢI được APPROVE và giữ nguyên SL thô để RiskManager::clamp_sl_price kẹp lại tại mod.rs!
+        assert!(decision.is_approved, "Proposal có SL cấu trúc 30% ROE (> 15% ROE) PHẢI được APPROVE!");
+        assert_eq!(decision.winning_scanner, Some(ScannerId::TrendPullback));
+        assert_eq!(decision.final_sl, Some(1970.0), "Arbiter phải giữ nguyên SL thô 1970.0 để mod.rs:332 clamp!");
         assert_eq!(decision.auction_ledger.len(), 1);
-        assert_eq!(decision.auction_ledger[0].status, AuctionStatus::StructuralRiskVeto);
+        assert_eq!(decision.auction_ledger[0].status, AuctionStatus::Won);
+        assert!(decision.auction_ledger[0].reason.contains("passed to RiskManager for clamping"));
+    }
+
+    #[test]
+    fn test_arbiter_liquidation_risk_vetoed_when_exceeds_safe_liq_dist() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.risk_management.risk_base.leverage = 20.0;
+        config.tactical_sniper.pullback.max_initial_sl_pct = 0.15;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]);
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+
+        // Mock proposal với SL = 1850.0 (cách 150 giá = 7.5% giá ở 20x, vượt xa khoảng cách thanh lý an toàn ~4.42%)
+        let kamikaze_sl_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.95,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(1850.0),
+            suggested_tp: None,
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::TrendPullback,
+            proposal: Some(kamikaze_sl_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+        assert!(!decision.is_approved, "Proposal có SL vi phạm khoảng cách thanh lý an toàn PHẢI bị VETO!");
+        assert_eq!(decision.auction_ledger.len(), 1);
+        assert_eq!(decision.auction_ledger[0].status, AuctionStatus::LiquidationRiskVeto);
     }
 
     #[test]

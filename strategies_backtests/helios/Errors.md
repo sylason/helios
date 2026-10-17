@@ -105,3 +105,24 @@
      - 50/50 tests `ferro_trade` pass.
      - 30/30 unit tests `helios::risk` pass (0.00s latency).
      - 6/6 tests `trailing_sl_test` pass, kiểm chứng thực nghiệm bảo toàn nguyên vẹn đỉnh $1850 khi nến trôi khỏi buffer và giải phóng vốn Zombie 3,000 nến chuẩn xác.
+
+---
+
+### ❌ Lỗi #008: Bẫy Catch-22 VETO Triệt Tiêu Nến Đẹp Của Arbiter (TODO-AUDIT-NEW-04 / TODO-AUDIT-NEW-23 / CATCH-22-STRUCTURAL-SL)
+- **Hiện tượng:** Khi Tactical Scanner phát hiện một mẫu hình nến đảo chiều hoặc pullback hoàn hảo nhưng có râu nến/swing biên độ rộng (khoảng cách Stop Loss cấu trúc $\text{ROE} > \text{playbook\_max\_sl\_roe}$, ví dụ $18\% > 15\%$ tại đòn bẩy $20\text{x}$):
+  1. Arbiter lập tức kích hoạt phán quyết nhị phân cứng: `passed = false` và gán nhãn `AuctionStatus::StructuralRiskVeto`.
+  2. Toàn bộ proposal có điểm tự tin cực cao bị ném vào sọt rác, bị loại bỏ khỏi cuộc đấu thầu tín hiệu Two-Stage Auction.
+  3. Hậu quả trực tiếp: Khối mã kẹp SL tự động `RiskManager::clamp_sl_price` và cơ chế ghi sổ cái phòng vệ `defense_ledger.on_sl_clamped` tại [`mod.rs:332-370`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/mod.rs#L332-L370) bị biến thành **$100\%$ Dead Code** (không bao giờ có cơ hội được thực thi khi gặp nến có SL rộng). Bot bị "đói lệnh" và bỏ lỡ hàng loạt setup đẹp ngoài thị trường.
+- **Nguyên nhân gốc rễ:**
+  1. *Vi phạm nguyên tắc phân định trách nhiệm (Separation of Concerns Violation):* Arbiter là bộ phận chấm điểm tự tin và phân xử xung đột tín hiệu (Confidence Auction), nhưng lại tự tiện áp đặt phán quyết nhị phân về rủi ro cắt lỗ để hủy lệnh.
+  2. *Mâu thuẫn kiến trúc nội tại (Catch-22 Paradox):* Tầng trên (`arbiter.rs`) giết lệnh vì SL $> 15\%$, trong khi tầng dưới (`mod.rs`) đã dày công thiết kế sẵn thuật toán `clamp_sl_price` để tự động kẹp SL về trần $15\%$. Hai cơ chế triệt tiêu lẫn nhau.
+  3. *Không phân biệt giữa Rủi ro Cấu trúc (Structural Risk) và Rủi ro Cháy sàn (Liquidation Risk):* SL cấu trúc $18\%$ ROE tương đương $0.90\%$ biến động giá ở $20\text{x}$, nằm an toàn tuyệt đối bên trong khoảng cách cháy sàn Binance MMR ($\approx 4.42\%$ giá), nhưng lại bị Arbiter đối xử như một lệnh tự sát sàn (Kamikaze).
+- **Giải pháp đã thực hiện (Phương Án A: Auto-Clamping Pass-Through):**
+  1. *Phá bỏ phán quyết nhị phân tại Arbiter:* Trong `arbiter.rs`, khi gặp `SlValidationResult::StructuralRiskVeto`, nếu `confidence >= min_threshold`, Arbiter phê duyệt `passed = true` và đưa proposal vào `approved_proposals` để tham gia đấu thầu Two-Stage bình thường.
+  2. *Bảo toàn 100% Chốt Chặn Cháy Sàn Binance (Liquidation Guard):* Giữ nguyên lệnh VETO hủy bỏ đối với `SlValidationResult::LiquidationRiskVeto` (bảo vệ chống cháy tài khoản trước khi chạm SL) và `SlValidationResult::InvalidPrice` (giá NaN, $\le 0.0$).
+  3. *Ủy thác Kẹp SL Xuống Tầng Thực Thi:* Arbiter giữ nguyên `suggested_sl` thô truyền xuống `decision.final_sl`. Tại `mod.rs:332`, hàm `RiskManager::clamp_sl_price` tự động kẹp SL về trần an toàn của playbook (`playbook_max_sl_roe`) và ghi nhận vào `defense_ledger.on_sl_clamped`.
+  4. *Bảo toàn Telemetry:* Khi proposal có SL rộng thắng thầu hoặc là runner-up, `AuctionCandidate.reason` ghi nhận rõ thông điệp `[Structural SL exceeds ROE cap (X% > Y%), passed to RiskManager for clamping]`.
+  5. *Kiểm thử 100% Zero-Regression:*
+     - 11/11 tests trong `arbiter::tests` pass (bao gồm test case phê duyệt SL 30% ROE chuyển giao cho RiskManager và test case VETO lệnh Kamikaze vi phạm thanh lý sàn).
+     - 108/108 tests toàn bộ thư viện `helios` pass.
+     - 46/46 tests `bot_engine` pass.

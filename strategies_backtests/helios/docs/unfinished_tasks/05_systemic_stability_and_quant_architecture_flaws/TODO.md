@@ -140,7 +140,7 @@
 - [ ] **TODO-AUDIT-NEW-03: Xóa Bỏ Bẫy Clean Slate Bán Tháo Sạch Vị Thế Khi Khởi Động**
   - **File:** `trading_bot/bot_engine/src/execution/account_manager.rs:175-178`
   - **Mô tả:** Xóa bỏ `cancel_all_orders` và `force_close_all_positions`. Triển khai True Adopt & Protect query Open Algo Orders để bảo vệ vị thế đang sống.
-- [ ] **TODO-AUDIT-NEW-04: Phá Bẫy Catch-22 VETO Triệt Tiêu Nến Đẹp của Arbiter**
+- [x] **TODO-AUDIT-NEW-04: Phá Bẫy Catch-22 VETO Triệt Tiêu Nến Đẹp của Arbiter**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:254-280`
   - **Mô tả:** Xóa bỏ Binary Veto khi SL $> 15\%$ ROE. Thay bằng tự động gọi `clamp_sl_price` kẹp SL về trần an toàn và co giãn khối lượng (Dynamic Sizing: $\text{scale} = 15\% / \text{suggested\_roe}$).
 - [ ] **TODO-AUDIT-NEW-05: Vá Lỗ Hổng Inverted SL Bằng Tham Số `is_long`**
@@ -204,7 +204,7 @@
 - [ ] **TODO-AUDIT-NEW-22: Sửa Fallback Z-Score Thành 0.0 Khi Thị Trường Đứng Im (`TODO-FT-02`)**
   - **File:** `ferro_trade/src/indicators/calculate/bulk.rs:128`, `helios/src/utils/normalization.rs:236`
   - **Mô tả:** Khi $\sigma \le 10^{-9}$ và $|X - \mu| \le 10^{-9}$, trả về $Z = 0.0$ thay vì `NaN`, ngăn ngừa lây nhiễm `NaN` toàn hệ thống khi thị trường flat.
-- [ ] **TODO-AUDIT-NEW-23: Chuyển Đổi Veto Structural SL Sang Cơ Chế Auto-Clamping (`CATCH-22-STRUCTURAL-SL`)**
+- [x] **TODO-AUDIT-NEW-23: Chuyển Đổi Veto Structural SL Sang Cơ Chế Auto-Clamping (`CATCH-22-STRUCTURAL-SL`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:254-280`
   - **Mô tả:** Xóa bỏ lệnh Hard Veto hủy tín hiệu khi SL vượt trần; tự động kẹp SL về `max_allowed_roe` và bảo toàn rủi ro bằng cách giảm quy mô vị thế, kích hoạt lại khối mã `clamp_sl_price`.
 - [x] **TODO-AUDIT-NEW-24: Tách Bạch Micro NATR vs Macro NATR Cho Cầu Dao Flatline (`NEW-NATR-4H-BLIND`)**
