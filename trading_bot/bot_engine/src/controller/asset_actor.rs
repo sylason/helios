@@ -27,6 +27,28 @@ pub struct LivePositionState {
     pub current_sl_price: Option<f64>,
     pub current_tp_price: Option<f64>,
     pub opening_playbook_tag: Option<String>,
+    /// [TODO-AUDIT-NEW-12] Giá đỉnh thuận lợi nhất đã đạt được kể từ khi mở vị thế (High Watermark O(1)).
+    pub highest_favorable_price: f64,
+    /// [TODO-AUDIT-NEW-12] Mốc thời gian Unix timestamp (ms) khi đạt đỉnh giá thuận lợi.
+    pub peak_timestamp: i64,
+}
+
+impl LivePositionState {
+    /// Cập nhật đỉnh thuận lợi (High Watermark) đơn điệu O(1) theo nến hiện tại
+    #[inline(always)]
+    pub fn update_peak(&mut self, high: f64, low: f64, timestamp: i64) {
+        if self.position_amt > 0.0 {
+            if high > self.highest_favorable_price {
+                self.highest_favorable_price = high;
+                self.peak_timestamp = timestamp;
+            }
+        } else if self.position_amt < 0.0 {
+            if low < self.highest_favorable_price || self.highest_favorable_price == 0.0 {
+                self.highest_favorable_price = low;
+                self.peak_timestamp = timestamp;
+            }
+        }
+    }
 }
 
 /// 🛡️ CẦU DAO BẢO VỆ TÀI KHOẢN (ACCOUNT CIRCUIT BREAKER - UNIVERSAL PURE TTL)

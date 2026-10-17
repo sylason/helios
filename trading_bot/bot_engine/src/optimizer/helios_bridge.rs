@@ -9,7 +9,7 @@ use ferro_trade::stats::{Stats, StatsInput, compute_stats};
 use ferro_trade::data::Timeframe;
 use smallvec::SmallVec;
 use crate::models::models::Candle;
-use tracing::{debug, warn, error};
+use tracing::{debug, error};
 
 /// Danh sách các khung thời gian tiêu chuẩn cho chiến lược Helios V3 (Bao gồm cả nến vi mô 3m)
 pub const HELIOS_REQUIRED_TIMEFRAMES: [Timeframe; 5] = [
@@ -221,12 +221,10 @@ impl HeliosBridge {
             if pos.position_amt != 0.0 {
                 // Tìm vị trí cây nến mở lệnh thực tế theo Timestamp (bất biến trước mọi thao tác cắt tỉa buffer)
                 let mapped_entry_bar = if pos.entry_timestamp > 0 {
-                    // 🌊 SENSOR PROBE: Bắt méo mó High Watermark khi nến vào lệnh trôi ra ngoài biên trái buffer
                     if !candles.is_empty() && pos.entry_timestamp < candles[0].timestamp {
-                        warn!(
-                            "🌊 [FLAW CONFIRMED: HIGH WATERMARK BUFFER BLEED] Symbol: {} | Entry ts: {} is OLDER than Buffer Start: {} \
-                            | mapped_entry_bar FALLBACK TO 0! Strategy will scan peak_val from index 1 (Scanning pre-entry candles into High Watermark)!",
-                            _symbol, pos.entry_timestamp, candles[0].timestamp
+                        debug!(
+                            "🛡️ [BUFFER SLICED POSITION] Symbol: {} | Entry ts: {} is older than Buffer Start: {} | State Accumulator preserves True High Watermark: {:.2}!",
+                            _symbol, pos.entry_timestamp, candles[0].timestamp, pos.highest_favorable_price
                         );
                     }
                     match candles.binary_search_by_key(&pos.entry_timestamp, |c| c.timestamp) {
@@ -237,18 +235,37 @@ impl HeliosBridge {
                     pos.live_entry_bar.saturating_sub(slice_start)
                 };
 
+                let entry_time_opt = if pos.entry_timestamp > 0 {
+                    chrono::DateTime::from_timestamp_millis(pos.entry_timestamp).map(|dt| dt.naive_utc())
+                } else {
+                    None
+                };
+
                 let mut trade = ferro_trade::broker::trade::Trade::new(
                     1,
                     pos.position_amt,
                     pos.entry_price,
                     mapped_entry_bar.min(last_idx),
-                    None,
+                    entry_time_opt,
                     pos.opening_playbook_tag.clone(),
                 );
                 trade.sl_price = pos.current_sl_price;
                 trade.tp_price = pos.current_tp_price;
                 trade.sl_order_id = if pos.current_sl_price.is_some() { Some(1) } else { None };
                 trade.tp_order_id = if pos.current_tp_price.is_some() { Some(2) } else { None };
+                // 🛡️ [TODO-AUDIT-NEW-12] Chuyển tiếp trạng thái đỉnh tích lũy O(1) vào simulated Trade
+                trade.highest_favorable_price = if pos.highest_favorable_price > 0.0 {
+                    pos.highest_favorable_price
+                } else {
+                    pos.entry_price
+                };
+                trade.peak_timestamp = if pos.peak_timestamp > 0 {
+                    Some(pos.peak_timestamp)
+                } else if pos.entry_timestamp > 0 {
+                    Some(pos.entry_timestamp)
+                } else {
+                    None
+                };
                 live_trades.push(trade);
 
                 live_position_snapshot = ferro_trade::broker::position::Position {

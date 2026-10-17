@@ -161,8 +161,11 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
         Ok(())
     }
 
-    async fn on_candle(&mut self, _candle: &Candle) -> Result<(), BotError> {
-        // Binance Server tự động quản lý lệnh Algo SL/TP trên Sàn, no-op tại local
+    async fn on_candle(&mut self, candle: &Candle) -> Result<(), BotError> {
+        // [TODO-AUDIT-NEW-12] Cập nhật đỉnh thuận lợi (High Watermark) O(1) cho Live Position
+        if let Some(ref mut pos) = self.live_position {
+            pos.update_peak(candle.high, candle.low, candle.timestamp);
+        }
         Ok(())
     }
 
@@ -195,6 +198,17 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
                             live_pos.entry_price = *entry_price;
                         } else {
                             let current_time = chrono::Utc::now().timestamp_millis();
+                            let mark_price = if *position_amt != 0.0 {
+                                *entry_price + (*unrealized_profit / *position_amt)
+                            } else {
+                                *entry_price
+                            };
+                            let init_peak = if *position_amt > 0.0 {
+                                entry_price.max(mark_price)
+                            } else {
+                                entry_price.min(mark_price)
+                            };
+
                             self.live_position = Some(LivePositionState {
                                 symbol: symbol.clone(),
                                 position_amt: *position_amt,
@@ -204,6 +218,8 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
                                 current_sl_price: None,
                                 current_tp_price: None,
                                 opening_playbook_tag: None,
+                                highest_favorable_price: init_peak,
+                                peak_timestamp: current_time,
                             });
                         }
                     } else {

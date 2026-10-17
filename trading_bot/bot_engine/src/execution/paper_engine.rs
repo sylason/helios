@@ -64,6 +64,11 @@ impl ExecutionEngine for PaperExecutionEngine {
                 PositionType::Short => -self.paper_trader.position_size,
                 PositionType::None => 0.0,
             };
+            let (highest_fav, peak_ts) = match self.paper_trader.position_type {
+                PositionType::Long => (self.paper_trader.highest_price_seen, self.paper_trader.peak_timestamp),
+                PositionType::Short => (self.paper_trader.lowest_price_seen, self.paper_trader.peak_timestamp),
+                PositionType::None => (0.0, 0),
+            };
 
             if let Some(ref mut pos) = self.live_position {
                 pos.position_amt = pos_amt;
@@ -72,6 +77,8 @@ impl ExecutionEngine for PaperExecutionEngine {
                 // Luôn đồng bộ chuẩn xác mức SL/TP đã qua bộ lọc Monotonic Ratchet Guard của PaperTrader
                 pos.current_sl_price = self.paper_trader.current_sl_price;
                 pos.current_tp_price = self.paper_trader.current_tp_price;
+                pos.highest_favorable_price = highest_fav;
+                pos.peak_timestamp = peak_ts;
             } else {
                 self.live_position = Some(LivePositionState {
                     symbol: self.core.symbol.clone(),
@@ -82,6 +89,8 @@ impl ExecutionEngine for PaperExecutionEngine {
                     current_sl_price: self.paper_trader.current_sl_price,
                     current_tp_price: self.paper_trader.current_tp_price,
                     opening_playbook_tag: playbook_tag,
+                    highest_favorable_price: highest_fav,
+                    peak_timestamp: peak_ts,
                 });
             }
         } else {

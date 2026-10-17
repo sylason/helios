@@ -86,6 +86,7 @@ pub struct PaperTrader {
     pub last_closed_trade: Option<PaperTradeRecord>, // Lệnh vừa đóng gần nhất phục vụ Cầu Dao và hạch toán
     pub highest_price_seen: f64,       // Giá cao nhất đạt được trong vòng đời vị thế (MFE/MAE tracking)
     pub lowest_price_seen: f64,        // Giá thấp nhất đạt được trong vòng đời vị thế (MFE/MAE tracking)
+    pub peak_timestamp: i64,           // [TODO-AUDIT-NEW-12] Mốc thời gian khi đạt đỉnh thuận lợi (ms)
     pub last_logged_trade_idx: AtomicUsize, // Vị trí trade cuối cùng đã log để chống lặp quadratic
 }
 
@@ -114,6 +115,7 @@ impl PaperTrader {
             last_closed_trade: None,
             highest_price_seen: 0.0,
             lowest_price_seen: 0.0,
+            peak_timestamp: 0,
             last_logged_trade_idx: AtomicUsize::new(0),
         }
     }
@@ -457,6 +459,7 @@ impl PaperTrader {
         self.opening_playbook_tag = tag;
         self.highest_price_seen = current_price;
         self.lowest_price_seen = current_price;
+        self.peak_timestamp = entry_timestamp;
 
         let (icon, side_str) = match self.position_type {
             PositionType::Long => ("🟢 [OPEN LONG] ", "LONG"),
@@ -484,11 +487,18 @@ impl PaperTrader {
             return false;
         }
 
-        self.highest_price_seen = self.highest_price_seen.max(candle.high);
-        if self.lowest_price_seen == 0.0 {
+        if candle.high > self.highest_price_seen {
+            self.highest_price_seen = candle.high;
+            if self.position_type == PositionType::Long {
+                self.peak_timestamp = candle.timestamp;
+            }
+        }
+
+        if self.lowest_price_seen == 0.0 || candle.low < self.lowest_price_seen {
             self.lowest_price_seen = candle.low;
-        } else {
-            self.lowest_price_seen = self.lowest_price_seen.min(candle.low);
+            if self.position_type == PositionType::Short {
+                self.peak_timestamp = candle.timestamp;
+            }
         }
 
         let sl_opt = self.current_sl_price;

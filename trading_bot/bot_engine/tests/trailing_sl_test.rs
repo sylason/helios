@@ -75,6 +75,8 @@ fn test_live_trailing_sl_generation() {
         current_sl_price: Some(1790.0),
         current_tp_price: None,
         opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
+        highest_favorable_price: 1850.0,
+        peak_timestamp: candles[last_bar].timestamp,
     };
 
     // 3. Khởi tạo Helios Strategy V3 với DNA
@@ -117,6 +119,8 @@ fn test_ratchet_protection() {
         current_sl_price: Some(1847.23),
         current_tp_price: None,
         opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
+        highest_favorable_price: 1850.0,
+        peak_timestamp: candles[last_bar - 1].timestamp,
     };
 
     let mut strategy = HeliosStrategyV3::default();
@@ -149,6 +153,8 @@ fn test_short_position_trailing() {
         current_sl_price: Some(1810.0), // Old SL above entry
         current_tp_price: None,
         opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
+        highest_favorable_price: 1750.0,
+        peak_timestamp: candles[last_bar].timestamp,
     };
 
     let mut strategy = HeliosStrategyV3::default();
@@ -188,6 +194,8 @@ fn test_zombie_stagnant_decay() {
         current_sl_price: Some(1790.0),
         current_tp_price: None,
         opening_playbook_tag: Some("RANGE_OSC".to_string()),
+        highest_favorable_price: 1810.0,
+        peak_timestamp: candles[last_bar - 60].timestamp,
     };
 
     let mut strategy = HeliosStrategyV3::default();
@@ -205,6 +213,95 @@ fn test_zombie_stagnant_decay() {
     }
 
     assert!(found_sl_update, "Zombie Decay phải phát lệnh dời SL!");
+}
+
+#[test]
+fn test_high_watermark_buffer_bleed_resilience() {
+    // 🛡️ [TODO-AUDIT-NEW-12] Kiểm thử khả năng chống thảm họa High Watermark Buffer Bleed
+    // Kịch bản:
+    // 1. Vị thế Long mở tại $1800 ở 2,000 nến trước (entry_timestamp cách 2,000 phút).
+    // 2. Vị thế đã từng đạt đỉnh $1850 ở 1,500 nến trước (peak_timestamp cách 1,500 phút).
+    // 3. Lát cắt buffer trong RAM chỉ có 500 nến (giá hiện tại sập về $1820).
+    // Nến vào lệnh và nến đỉnh đều ĐÃ TRÔI HOÀN TOÀN KHỎI BIÊN TRÁI BUFFER!
+    let prices = vec![1820.0; 50];
+    let candles = create_mock_candles(1820.0, &prices);
+
+    let buffer_start_ts = candles[0].timestamp;
+    let entry_ts = buffer_start_ts - (2000 * 60_000);
+    let peak_ts = buffer_start_ts - (1500 * 60_000);
+
+    let live_pos = LivePositionState {
+        symbol: "ETHUSDT".to_string(),
+        position_amt: 1.0,
+        entry_price: 1800.0,
+        entry_timestamp: entry_ts,
+        live_entry_bar: 0,
+        current_sl_price: Some(1840.0), // SL đã dời lên 1840 nhờ đỉnh 1850
+        current_tp_price: None,
+        opening_playbook_tag: Some("MOMENTUM_IGN".to_string()),
+        highest_favorable_price: 1850.0, // Đỉnh lịch sử được bảo toàn bởi State Accumulator
+        peak_timestamp: peak_ts,
+    };
+
+    let mut strategy = HeliosStrategyV3::default();
+    strategy.update_from_dna(&get_mock_dna());
+
+    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, 0, Some(&live_pos), &mut strategy, 1000.0, None);
+
+    // KẾT QUẢ MONG ĐỢI:
+    // SL không được phép sập hay bleed về mức đáy. Nhờ Ratchet Guard và High Watermark O(1),
+    // SL mới (nếu có update) phải luôn >= 1840.0, không bao giờ bị thụt lùi xuống vùng giá hiện tại ($1820).
+    for action in actions {
+        if let Action::UpdateTradeSlTp { new_sl_price: Some(new_sl), .. } = action {
+            println!("✅ [TEST 5 PASS] High Watermark Buffer Bleed Resilient SL: {:.2} (Preserved peak $1850)", new_sl);
+            assert!(new_sl >= 1840.0, "SL mới ({}) không được thụt lùi dưới mức SL đã khóa (1840.0)!", new_sl);
+        }
+    }
+}
+
+#[test]
+fn test_stagnant_capital_release_with_trimmed_buffer() {
+    // 🛡️ [TODO-AUDIT-NEW-12] Kiểm thử giải phóng vốn Zombie khi vị thế trôi khỏi buffer
+    // Kịch bản:
+    // Vị thế Long ngâm 3,000 phút (50 giờ) với giá lình xình hòa vốn ($1800.5).
+    // Buffer chỉ lưu 1,000 nến gần nhất (max_mem = 1,000).
+    // Nếu theo logic cũ (i - entry_bar = 999), bars_held bị chặn ở 999 < max_stagnant_hold_bars (2880 nến = 48h) -> Zombie tê liệt.
+    // Với logic mới tính theo delta_t vật lý, bars_held = 3,000 >= 2880 -> Kích hoạt Action::ClosePosition!
+    let prices = vec![1800.5; 50];
+    let candles = create_mock_candles(1800.5, &prices);
+    let last_bar = candles.len() - 1;
+
+    let now_ts = candles[last_bar].timestamp;
+    let entry_ts = now_ts - (3000 * 60_000); // 3,000 phút trước
+
+    let live_pos = LivePositionState {
+        symbol: "ETHUSDT".to_string(),
+        position_amt: 1.0,
+        entry_price: 1800.0,
+        entry_timestamp: entry_ts,
+        live_entry_bar: 0,
+        current_sl_price: Some(1790.0),
+        current_tp_price: None,
+        opening_playbook_tag: Some("RANGE_OSC".to_string()),
+        highest_favorable_price: 1801.0,
+        peak_timestamp: entry_ts + 60_000,
+    };
+
+    let mut strategy = HeliosStrategyV3::default();
+    strategy.update_from_dna(&get_mock_dna());
+
+    let actions = HeliosBridge::evaluate_live_tick("ETHUSDT", &candles, 0, Some(&live_pos), &mut strategy, 1000.0, None);
+
+    let mut found_close_action = false;
+    for action in actions {
+        if let Action::ClosePosition { portion } = action {
+            println!("✅ [TEST 6 PASS] Zombie Trade Purged! Action::ClosePosition portion: {:.2}", portion);
+            assert_eq!(portion, 1.0, "Phải đóng 100% vị thế ngâm vốn!");
+            found_close_action = true;
+        }
+    }
+
+    assert!(found_close_action, "Phải phát Action::ClosePosition khi vị thế ngâm 3,000 nến vượt trần 2,880 nến!");
 }
 
 
