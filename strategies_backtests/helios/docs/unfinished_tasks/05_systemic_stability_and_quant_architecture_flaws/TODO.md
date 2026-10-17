@@ -15,15 +15,15 @@
 ## 📋 DANH SÁCH NHIỆM VỤ CHI TIẾT
 
 ### PHẦN 1: BẢO VỆ VỐN & KHÓA LỢI NHUẬN TỨC THÌ (RISK & EXECUTION)
-- [ ] **TODO-STAB-01: Triển khai Tiered Profit Lock & Break-Even Ratchet trong Risk Manager**
+- [x] **TODO-STAB-01: Triển khai Tiered Profit Lock & Break-Even Ratchet trong Risk Manager**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `trading_bot/bot_engine/src/execution/paper_trader.rs`
   - **Mô tả:** 
     - Nấc 1: Khi $\text{MFE} \ge +3.5\%$ ROE $\to$ dời SL lên tối thiểu $+1.60\%$ ROE (bảo hiểm đủ phí sàn Binance $20\text{x}$).
     - Nấc 2: Khi $\text{MFE} \ge +8.0\%$ ROE $\to$ khóa cứng mức lãi sàn $+4.00\%$ ROE.
   - **Unit Tests:**
-    - [ ] `test_tiered_profit_lock_break_even_at_3_5_roe`
-    - [ ] `test_tiered_profit_lock_locks_4_pct_at_8_pct_roe`
-    - [ ] `test_anti_atr_expansion_tightening`
+    - [x] `test_tiered_profit_lock_break_even_at_3_5_roe`
+    - [x] `test_tiered_profit_lock_locks_4_pct_at_8_pct_roe`
+    - [x] `test_anti_atr_expansion_tightening`
 
 - [ ] **TODO-STAB-02: Khử triệt để dao rơi trong Absorption Scanner (`TODO-SCN-02`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`

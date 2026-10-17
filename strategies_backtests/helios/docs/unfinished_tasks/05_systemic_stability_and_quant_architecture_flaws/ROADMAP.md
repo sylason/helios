@@ -348,11 +348,11 @@
 | 13 | `P3` | `[ ]` | **`TODO-AUDIT-NEW-203`** | Dọn Dẹp Mã Chết `HeliosBridge::analyze` 125 Dòng Khỏi Codebase (`TODO-BRG-08`) | [TODO.md#L1184](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L1184) | `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:360-485` |
 
 ### 📦 Cụm I: Tầng Thực Thi Lệnh Kép Live & Paper Engine (`trading_bot::execution`)
-**Quy mô:** `35 tasks` (Hoàn thành: `0`, P0: `10`, P1: `25`, P2: `0`, P3: `0`)
+**Quy mô:** `35 tasks` (Hoàn thành: `1`, P0: `10`, P1: `24`, P2: `0`, P3: `0`)
 
 | STT | Ưu Tiên | Trạng Thái | Mã Task | Tên Nhiệm Vụ | Link Reference Trong `TODO.md` | File Mã Nguồn Mục Tiêu |
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
-| 01 | `P1` | `[ ]` | **`TODO-STAB-01`** | Triển khai Tiered Profit Lock & Break-Even Ratchet trong Risk Manager | [TODO.md#L18](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L18) | `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `trading_bot/bot_engine/src/execution/paper_trader.rs` |
+| 01 | `P1` | `[x]` | **`TODO-STAB-01`** | Triển khai Tiered Profit Lock & Break-Even Ratchet trong Risk Manager | [TODO.md#L18](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L18) | `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `trading_bot/bot_engine/src/execution/paper_trader.rs` |
 | 02 | `P1` | `[ ]` | **`TODO-STAB-06`** | Độc quyền hóa Thẩm quyền Risk về `helios::risk` (Khử Split-Brain) | [TODO.md#L67](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L67) | `trading_bot/bot_engine/src/execution/paper_trader.rs`, `order_executor.rs`, `helios_bridge.rs` |
 | 03 | `P0` | `[ ]` | **`TODO-STAB-09`** | Atomic SL Replacement (Khử Naked SL Gap 150ms) | [TODO.md#L76](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L76) | `trading_bot/bot_engine/src/execution/order_executor.rs` |
 | 04 | `P1` | `[ ]` | **`TODO-STAB-10`** | True Adopt & Protect khi Khởi động lại Bot (Chống SL Retraction) | [TODO.md#L79](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L79) | `trading_bot/bot_engine/src/controller/asset_actor.rs`, `live_engine.rs` |

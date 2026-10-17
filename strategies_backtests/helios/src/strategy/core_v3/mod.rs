@@ -960,7 +960,11 @@ mod tests {
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
-        assert_eq!(width, 104, "DNA_WIDTH phải là chính xác 104 chiều sau khi bổ sung micro_natr (timeframe, period) theo TODO-AUDIT-NEW-24!");
+        assert_eq!(width, 106, "DNA_WIDTH phải là chính xác 106 chiều sau khi bổ sung be_atr_trigger_absorption và be_buffer_atr_absorption theo TODO-STAB-01!");
+        let has_be_trigger_abs = defs.iter().any(|(name, _)| name.contains("be_atr_trigger_absorption"));
+        let has_be_buffer_abs = defs.iter().any(|(name, _)| name.contains("be_buffer_atr_absorption"));
+        assert!(has_be_trigger_abs, "defs phải chứa be_atr_trigger_absorption theo TODO-STAB-01!");
+        assert!(has_be_buffer_abs, "defs phải chứa be_buffer_atr_absorption theo TODO-STAB-01!");
         let has_micro_natr_tf = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.timeframe"));
         let has_micro_natr_period = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.period"));
         assert!(has_micro_natr_tf, "defs phải chứa indicators.micro_natr.timeframe!");

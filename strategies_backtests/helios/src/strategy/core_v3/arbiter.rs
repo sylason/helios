@@ -267,16 +267,29 @@ impl HeliosArbiter {
                         )
                     }
                     SlValidationResult::StructuralRiskVeto { suggested_roe, max_roe } => {
-                        (
-                            confidence,
-                            false,
-                            Some(AuctionStatus::StructuralRiskVeto),
-                            format!(
-                                "Structural SL exceeds ROE cap: {:.1}% > {:.1}% (entry too risky)",
-                                suggested_roe * 100.0,
-                                max_roe * 100.0
-                            ),
-                        )
+                        // 🛡️ [TODO-AUDIT-NEW-04] Phá bẫy Catch-22 VETO:
+                        // Tín hiệu có SL cấu trúc vượt trần ROE không bị Arbiter VETO loại bỏ,
+                        // mà được phê duyệt tham gia đấu thầu để chuyển tiếp xuống RiskManager::clamp_sl_price tại mod.rs.
+                        if confidence >= min_threshold {
+                            approved_proposals.push((proposal.clone(), confidence));
+                            (
+                                confidence,
+                                true,
+                                None,
+                                format!(
+                                    "Structural SL exceeds ROE cap ({:.1}% > {:.1}%), passed to RiskManager for clamping",
+                                    suggested_roe * 100.0,
+                                    max_roe * 100.0
+                                ),
+                            )
+                        } else {
+                            (
+                                confidence,
+                                false,
+                                Some(AuctionStatus::LowConfidence),
+                                format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
+                            )
+                        }
                     }
                     SlValidationResult::InvalidPrice => {
                         (

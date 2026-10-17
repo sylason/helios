@@ -1061,13 +1061,21 @@ pub struct RiskStopParams {
     #[dna(min = 0.03, max = 0.25, step = 0.01)]
     pub base_be_roe_trigger: f64,
 
-    // --- 4.1 NHÓM XU HƯỚNG (TREND REGIME: TREND_PB, ABSORPTION) ---
+    // --- 4.1 NHÓM XU HƯỚNG (TREND REGIME: TREND_PB) ---
     /// Ngưỡng kích hoạt BE cho Trend (Lãi đạt 1.0 -> 4.5 ATR mới kéo SL, Step 0.10)
     #[dna(min = 1.0, max = 4.5, step = 0.10)]
     pub be_atr_trigger_trend: f64,
     /// Khoảng đệm bảo vệ vốn dưới đỉnh cho Trend (Giữ khoảng cách 0.8 -> 3.0 ATR cho giá thở, Step 0.10)
     #[dna(min = 0.8, max = 3.0, step = 0.10)]
     pub be_buffer_atr_trend: f64,
+
+    // --- 4.1.1 NHÓM HẤP THỤ VI MÔ (ABSORPTION REGIME) ---
+    /// Ngưỡng kích hoạt BE cho Absorption (0.8 -> 3.0 ATR, Step 0.10)
+    #[dna(min = 0.8, max = 3.0, step = 0.10)]
+    pub be_atr_trigger_absorption: f64,
+    /// Khoảng đệm bảo vệ vốn cho Absorption (0.4 -> 2.0 ATR, Step 0.10)
+    #[dna(min = 0.4, max = 2.0, step = 0.10)]
+    pub be_buffer_atr_absorption: f64,
 
     // --- 4.2 NHÓM ĐI NGANG (RANGE REGIME: RANGE_OSC, REVERSAL) ---
     /// Ngưỡng kích hoạt BE cho Range (Sóng ngắn: 0.8 -> 3.0 ATR, Step 0.10)
@@ -1195,6 +1203,8 @@ impl Default for RiskStopParams {
             base_be_roe_trigger: 0.10,
             be_atr_trigger_trend: 2.0,
             be_buffer_atr_trend: 1.0,
+            be_atr_trigger_absorption: 1.2,
+            be_buffer_atr_absorption: 0.8,
             be_atr_trigger_range: 1.5,
             be_buffer_atr_range: 0.8,
             be_atr_trigger_volatile: 2.0,
