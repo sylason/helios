@@ -168,7 +168,7 @@
 - [ ] **TODO-AUDIT-NEW-11: Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`)**
   - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385`
   - **Mô tả:** Khởi tạo Job mới tăng dần (`new_job_id = max_job + 1`) mỗi chu kỳ Walk-Forward Rolling thay vì bỏ qua tạo Job khi file DB đã tồn tại.
-- [ ] **TODO-AUDIT-NEW-12: Khắc Phục Thảm Họa High Watermark Buffer Bleed Khi Lệnh Trôi Khỏi Buffer (`TODO-BRG-01`)**
+- [x] **TODO-AUDIT-NEW-12: Khắc Phục Thảm Họa High Watermark Buffer Bleed Khi Lệnh Trôi Khỏi Buffer (`TODO-BRG-01`)**
   - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:223-238`, `strategies_backtests/helios/src/strategy/core_v3/risk.rs:310-330`
   - **Mô tả:** Bổ sung `highest_favorable_price` vào `LivePositionState` và `Trade`, cập nhật đơn điệu qua từng nến, xóa bỏ hoàn toàn vòng lặp quét lại toàn bộ nến quá khứ từ index 1 khi `mapped_entry_bar == 0`.
 - [ ] **TODO-AUDIT-NEW-13: Sửa Lỗ Hổng Same-Bar Re-entry Guard Bị Bypassed Khi Đóng Lệnh Giữa Nến (`BUG-ACT-NEW-02`)**

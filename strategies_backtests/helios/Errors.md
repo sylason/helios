@@ -76,3 +76,32 @@
   2. *Struct DNA Vi Mô Độc Lập:* Tạo `MicroNAtrParams` (`timeframe: subset = "1m, 3m, 5m"`, `period: min = 5.0, max = 30.0, step = 1.0`, default: `14, Timeframe::T1m`). Tăng DNA_WIDTH từ 102 lên 104 chiều.
   3. *Tách bạch Telemetry & Defense Ledger:* Ghi nhận riêng biệt `MacroFlatline` và `MicroFlatline` trong telemetry và hourly heartbeat.
   4. *Kiểm thử 100% Zero-Regression:* 11/11 tests trong gatekeeper & telemetry pass; 104/104 tests toàn bộ `helios` pass; 50/50 tests `ferro_trade` pass; 46/46 tests `bot_engine` pass.
+
+---
+
+### ❌ Lỗi #007: Thảm Họa High Watermark Buffer Bleed Khi Lệnh Trôi Khỏi Buffer (TODO-AUDIT-NEW-12 / TODO-BRG-01)
+- **Hiện tượng:** Khi một vị thế chạy dài ngày (ví dụ >30 ngày = 43,200 nến 1m) và nến vào lệnh trôi ra khỏi mép trái của Rolling Buffer trong RAM (`pos.entry_timestamp < candles[0].timestamp`):
+  1. `helios_bridge.rs` buộc phải gán ép `mapped_entry_bar = 0`.
+  2. `risk.rs` quét lịch sử nến `for j in (entry_bar + 1)..=i` (tức từ index 1 đến cuối buffer).
+  3. Đỉnh lợi nhuận trong quá khứ trước buffer bị xóa sổ hoàn toàn (Buffer Bleed).
+  4. Nếu giá hiện tại thấp hơn đỉnh cũ nhưng cao hơn đáy cục bộ của buffer, `decay_cycles` bùng nổ siết Trailing SL về sát sàn hoặc sập SL về Entry/đáy mới một cách oan uổng.
+  5. Đồng thời, `bars_held` bị bóp nghẹt thành số nến trong buffer thay vì thời gian thực tế, khiến Cầu dao giải phóng vốn Zombie (`stagnant_bars`) bị tê liệt hoàn toàn.
+- **Nguyên nhân gốc rễ:**
+  1. *Thiếu cấu trúc tích lũy trạng thái (Missing State Accumulator):* Cả `Trade` (ferro_trade) và `LivePositionState` (bot_engine) chỉ lưu các giá trị ban đầu (entry_price, entry_bar/timestamp) mà không lưu trạng thái đơn điệu của đỉnh lợi nhuận qua thời gian.
+  2. *Thuật toán quét lịch sử $O(N)$ phụ thuộc lát cắt bộ nhớ:* Đẩy trách nhiệm tìm đỉnh cho vòng lặp duyệt nến trong `RiskManager`, vi phạm tính độc lập với không gian bộ nhớ.
+  3. *Lệch ngữ nghĩa thời gian nến và thời gian vật lý:* Đếm số nến lát cắt thay vì tính khoảng cách thời gian vật lý $\Delta t$ chuẩn xác.
+- **Giải pháp đã thực hiện (Phương Án B+ State Accumulator Đơn Điệu):**
+  1. *Mở rộng State Accumulator $O(1)$:* Bổ sung `highest_favorable_price` và `peak_timestamp` (kèm `peak_bar` trong backtest) vào `Trade` (`ferro_trade`), `LivePositionState`, `PaperTrader` và `LiveEngine` (`bot_engine`).
+  2. *Cập nhật đỉnh liên tục $O(1)$:* 
+     - Trong `Broker::next`: Tự động cập nhật `update_peak` cho tất cả lệnh đang mở tại mỗi bước nến (chống Lookahead bias).
+     - Trong `LiveEngine` & `PaperTrader`: Cập nhật đỉnh theo Mark Price và nến thời gian thực.
+  3. *Chuyển tiếp đầy đủ qua Cầu nối (`helios_bridge.rs`):* Chuyển tiếp `highest_favorable_price`, `peak_timestamp` và `entry_time_opt` vào `Trade` giả lập của `TickContext`.
+  4. *Tính toán $O(1)$ & Triệt tiêu Vòng lặp Nến Trong `risk.rs`:*
+     - Xóa sổ hoàn toàn vòng lặp quét slice `for j in (entry_bar + 1)..=i`.
+     - Lấy trực tiếp `peak_val = trade.highest_favorable_price`.
+     - Tính `effective_stagnant_bars` và `bars_held` dựa trên khoảng cách thời gian vật lý: $\frac{t_{\text{current}} - t_{\text{peak}}}{\Delta t_{\text{candle}}}$ và $\frac{t_{\text{current}} - t_{\text{entry}}}{\Delta t_{\text{candle}}}$.
+  5. *Động hóa $\Delta t$:* Bổ sung `TickContext::candle_interval_ms()` để tự động nội suy chu kỳ nến từ `DataView`, triệt tiêu hoàn toàn magic number 60,000 ms.
+  6. *Kiểm thử 100% Zero-Regression:* 
+     - 50/50 tests `ferro_trade` pass.
+     - 30/30 unit tests `helios::risk` pass (0.00s latency).
+     - 6/6 tests `trailing_sl_test` pass, kiểm chứng thực nghiệm bảo toàn nguyên vẹn đỉnh $1850 khi nến trôi khỏi buffer và giải phóng vốn Zombie 3,000 nến chuẩn xác.

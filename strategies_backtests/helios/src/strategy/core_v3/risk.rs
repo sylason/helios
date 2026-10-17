@@ -301,36 +301,46 @@ impl RiskManager {
                 (risk_cfg.tsl_atr_normal, risk_cfg.default_sl_roe_cap)
             };
 
-            // 2. Tìm đỉnh lợi nhuận cao nhất (High Watermark) chuẩn hóa từ giá vào lệnh (FLAW-TSL.5)
-            // Khởi tạo neo chuẩn từ entry_price để triệt tiêu 100% Lookahead bias của nến entry
-            // và đảm bảo đỉnh không bao giờ bị ghi nhận âm dưới giá vốn nếu nến sau giảm.
-            let highs = tick.highs();
-            let lows = tick.lows();
-            
-            let (peak_val, peak_bar) = if trade.is_long() {
-                let mut max_high = trade.entry_price;
-                let mut max_bar = entry_bar;
-                for j in (entry_bar + 1)..=i {
-                    if highs[j] > max_high { 
-                        max_high = highs[j]; 
-                        max_bar = j;
-                    }
+            // 2. [TODO-AUDIT-NEW-12] Bộ Tích Lũy Đơn Điệu O(1) (State Accumulator)
+            // Lấy đỉnh thuận lợi đã tích lũy từ Trade và so sánh O(1) với nến hiện tại (nếu i > entry_bar)
+            // Triệt tiêu hoàn toàn vòng lặp quét slice O(N) và bảo vệ True High Watermark khi nến trôi khỏi buffer.
+            let current_high = tick.highs()[i];
+            let current_low = tick.lows()[i];
+            let current_ts_ms = tick.current_timestamp_ms();
+            let delta_t_ms = tick.candle_interval_ms().unwrap_or(60_000).max(1);
+
+            let (peak_val, peak_ts_opt) = if trade.is_long() {
+                let mut max_high = trade.highest_favorable_price;
+                let mut p_ts = trade.peak_timestamp;
+                if i > entry_bar && current_high > max_high {
+                    max_high = current_high;
+                    p_ts = current_ts_ms;
                 }
-                (max_high, max_bar)
+                (max_high, p_ts)
             } else {
-                let mut min_low = trade.entry_price;
-                let mut min_bar = entry_bar;
-                for j in (entry_bar + 1)..=i {
-                    if lows[j] < min_low { 
-                        min_low = lows[j]; 
-                        min_bar = j;
-                    }
+                let mut min_low = if trade.highest_favorable_price > 0.0 {
+                    trade.highest_favorable_price
+                } else {
+                    trade.entry_price
+                };
+                let mut p_ts = trade.peak_timestamp;
+                if i > entry_bar && (current_low < min_low || min_low == 0.0) {
+                    min_low = current_low;
+                    p_ts = current_ts_ms;
                 }
-                (min_low, min_bar)
+                (min_low, p_ts)
             };
 
-            // 3. Đếm số nến đi ngang kể từ đỉnh
-            let effective_stagnant_bars = if i >= peak_bar { i - peak_bar } else { 0 };
+            // 3. Đếm số nến đi ngang kể từ đỉnh (effective_stagnant_bars) chuẩn hóa thời gian thực
+            let effective_stagnant_bars = if let (Some(now_ts), Some(p_ts)) = (current_ts_ms, peak_ts_opt) {
+                if now_ts >= p_ts {
+                    ((now_ts - p_ts) / delta_t_ms) as usize
+                } else {
+                    i.saturating_sub(trade.peak_bar)
+                }
+            } else {
+                i.saturating_sub(trade.peak_bar)
+            };
 
             let time_countdown_bars = risk_cfg.time_countdown_bars.max(1);
             let decay_cycles = effective_stagnant_bars / time_countdown_bars;
@@ -343,7 +353,16 @@ impl RiskManager {
             // Lệnh chỉ bị đóng do ngâm vốn khi thỏa mãn ĐỒNG THỜI 2 điều kiện:
             // 1. Số nến nắm giữ (holding bars) >= max_stagnant_hold_bars (120 -> 2880 bars)
             // 2. Tỷ lệ lãi trên giá vào lệnh KHÔNG đạt mức tối thiểu (trade_pnl_pct < stagnant_min_profit_pct)
-            let bars_held = i.saturating_sub(entry_bar);
+            let trade_entry_ts_ms = trade.entry_time.map(|dt| dt.and_utc().timestamp_millis());
+            let bars_held = if let (Some(now_ts), Some(entry_ts)) = (current_ts_ms, trade_entry_ts_ms) {
+                if now_ts >= entry_ts {
+                    ((now_ts - entry_ts) / delta_t_ms) as usize
+                } else {
+                    i.saturating_sub(entry_bar)
+                }
+            } else {
+                i.saturating_sub(entry_bar)
+            };
             let current_close = tick.closes()[i];
             let trade_price_pnl_pct = if trade.entry_price > 0.0 {
                 if trade.is_long() {
