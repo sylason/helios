@@ -4,7 +4,7 @@ use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
-use crate::strategy::core_v3::gatekeeper::{RegimeGatekeeper, GateVetoReason};
+use crate::strategy::core_v3::gatekeeper::{RegimeGatekeeper, GateVetoReason, MarketRegime};
 use crate::strategy::core_v3::risk::{RiskManager, SlValidationResult};
 use tracing::info;
 
@@ -59,6 +59,7 @@ pub enum AuctionStatus {
     ConflictEliminated,
     StructuralRiskVeto,  // 🛑 Rủi ro cấu trúc SL vượt quá trần ROE cho phép (Sniper Entry Guard)
     LiquidationRiskVeto, // 🛑 Rủi ro thanh lý sàn (SL nằm ngoài hoặc quá sát P_liq theo MMR)
+    RegimeIneligible(MarketRegime), // 🛑 Scanner không phù hợp với chế độ thị trường hiện tại
     NotTriggered,
 }
 
@@ -155,6 +156,68 @@ impl HeliosArbiter {
         }
     }
 
+    /// 🧭 [PHÂN LUỒNG THẨM QUYỀN CHỌN LỌC PLAYBOOK THEO CHẾ ĐỘ THỊ TRƯỜNG]
+    /// (TODO-AUDIT-NEW-115 / H-GATE-02)
+    /// Trả về `(is_eligible, ineligibility_reason)`.
+    #[inline]
+    pub fn is_scanner_eligible_for_regime(id: ScannerId, regime: MarketRegime) -> (bool, &'static str) {
+        match regime {
+            MarketRegime::Trending => match id {
+                ScannerId::TrendPullback | ScannerId::MomentumIgnition | ScannerId::AbsorptionScout => {
+                    (true, "")
+                }
+                ScannerId::RangeOscillator => (
+                    false,
+                    "Ineligible in Trending regime: RangeOscillator is disabled during macro trends",
+                ),
+                ScannerId::ClimaxReversal => (
+                    false,
+                    "Ineligible in Trending regime: ClimaxReversal prohibited from counter-trend knife-catching",
+                ),
+                ScannerId::AnomalyFade => (
+                    false,
+                    "Ineligible in Trending regime: AnomalyFade prohibited from stepping in front of macro trends",
+                ),
+            },
+            MarketRegime::RangeBound => match id {
+                ScannerId::RangeOscillator
+                | ScannerId::AbsorptionScout
+                | ScannerId::ClimaxReversal
+                | ScannerId::AnomalyFade => (true, ""),
+                ScannerId::TrendPullback => (
+                    false,
+                    "Ineligible in RangeBound regime: TrendPullback requires directional macro momentum",
+                ),
+                ScannerId::MomentumIgnition => (
+                    false,
+                    "Ineligible in RangeBound regime: MomentumIgnition false-breakouts suppressed in chop",
+                ),
+            },
+            MarketRegime::Breakout => match id {
+                ScannerId::MomentumIgnition | ScannerId::AbsorptionScout => (true, ""),
+                ScannerId::TrendPullback => (
+                    false,
+                    "Ineligible in Breakout regime: TrendPullback awaits formed pullback, not initial thrust",
+                ),
+                ScannerId::RangeOscillator => (
+                    false,
+                    "Ineligible in Breakout regime: RangeOscillator prohibited from fading volatility expansions",
+                ),
+                ScannerId::ClimaxReversal => (
+                    false,
+                    "Ineligible in Breakout regime: ClimaxReversal prohibited from counter-breakout fading",
+                ),
+                ScannerId::AnomalyFade => (
+                    false,
+                    "Ineligible in Breakout regime: AnomalyFade prohibited during explosive expansions",
+                ),
+            },
+            MarketRegime::VolatilityFlatline | MarketRegime::TurbulentChaos | MarketRegime::DataAnomaly => {
+                (false, "Ineligible in un-tradable safety regime")
+            }
+        }
+    }
+
     pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
         
@@ -207,109 +270,121 @@ impl HeliosArbiter {
             let opt_prop = scanner.scan(tick, sensors, matrix, config);
             let (conf, passed, rej_status, rej_reason) = if let Some(ref proposal) = opt_prop {
                 let confidence = Self::compute_confidence(proposal.raw_score, chaos_val, max_chaos_penalty);
-                let playbook_max_sl_roe = match id {
-                    ScannerId::TrendPullback => config.tactical_sniper.pullback.max_initial_sl_pct,
-                    ScannerId::MomentumIgnition => config.tactical_sniper.momentum.max_initial_sl_pct,
-                    ScannerId::RangeOscillator => config.tactical_sniper.range.max_initial_sl_pct,
-                    ScannerId::ClimaxReversal => config.tactical_sniper.reversal.max_initial_sl_pct,
-                    ScannerId::AnomalyFade => config.tactical_sniper.anomaly.max_initial_sl_pct,
-                    ScannerId::AbsorptionScout => config.tactical_sniper.absorption.max_initial_sl_pct,
-                };
 
-                // 🛑 CHỐT CHẶN VETO RỦI RO CẤU TRÚC & THANH LÝ SÀN (SNIPER & LIQUIDATION GUARD)
-                let risk_base = &config.risk_management.risk_base;
-                let stop_mgmt = &config.risk_management.stop_management;
-                let validation_res = if let Some(sl) = proposal.suggested_sl {
-                    RiskManager::validate_structural_sl(
-                        current_price,
-                        sl,
-                        playbook_max_sl_roe,
-                        leverage,
-                        risk_base.maintenance_margin_rate,
-                        risk_base.taker_fee_rate,
-                        risk_base.liquidation_buffer_ratio,
-                        stop_mgmt.min_initial_sl_pct,
+                // 🛑 CHỐT CHẶN PHÂN LUỒNG CHẾ ĐỘ THỊ TRƯỜNG (SELECTIVE PLAYBOOK ROUTING)
+                let (is_eligible, ineligibility_reason) = Self::is_scanner_eligible_for_regime(id, gate_eval.regime);
+                if !is_eligible {
+                    (
+                        confidence,
+                        false,
+                        Some(AuctionStatus::RegimeIneligible(gate_eval.regime)),
+                        ineligibility_reason.to_string(),
                     )
                 } else {
-                    // Nếu Scanner không đề xuất SL cụ thể, kiểm tra xem tại đòn bẩy leverage hiện tại
-                    // có đủ không gian thanh lý an toàn không
-                    if RiskManager::calculate_safe_sl_distance(
-                        leverage,
-                        playbook_max_sl_roe,
-                        risk_base.maintenance_margin_rate,
-                        risk_base.taker_fee_rate,
-                        risk_base.liquidation_buffer_ratio,
-                        stop_mgmt.min_initial_sl_pct,
-                    ).is_some() {
-                        SlValidationResult::Acceptable
-                    } else {
-                        SlValidationResult::LiquidationRiskVeto {
-                            suggested_dist_pct: 0.0,
-                            safe_liq_dist_pct: 0.0,
-                            mmr: risk_base.maintenance_margin_rate,
-                        }
-                    }
-                };
+                    let playbook_max_sl_roe = match id {
+                        ScannerId::TrendPullback => config.tactical_sniper.pullback.max_initial_sl_pct,
+                        ScannerId::MomentumIgnition => config.tactical_sniper.momentum.max_initial_sl_pct,
+                        ScannerId::RangeOscillator => config.tactical_sniper.range.max_initial_sl_pct,
+                        ScannerId::ClimaxReversal => config.tactical_sniper.reversal.max_initial_sl_pct,
+                        ScannerId::AnomalyFade => config.tactical_sniper.anomaly.max_initial_sl_pct,
+                        ScannerId::AbsorptionScout => config.tactical_sniper.absorption.max_initial_sl_pct,
+                    };
 
-                match validation_res {
-                    SlValidationResult::LiquidationRiskVeto { suggested_dist_pct, safe_liq_dist_pct, mmr } => {
-                        (
-                            confidence,
-                            false,
-                            Some(AuctionStatus::LiquidationRiskVeto),
-                            format!(
-                                "SL dist {:.2}% exceeds safe liquidation dist {:.2}% (MMR: {:.2}%, Lev: {:.0}x) - Kamikaze rejection",
-                                suggested_dist_pct * 100.0,
-                                safe_liq_dist_pct * 100.0,
-                                mmr * 100.0,
-                                leverage
-                            ),
+                    // 🛑 CHỐT CHẶN VETO RỦI RO CẤU TRÚC & THANH LÝ SÀN (SNIPER & LIQUIDATION GUARD)
+                    let risk_base = &config.risk_management.risk_base;
+                    let stop_mgmt = &config.risk_management.stop_management;
+                    let validation_res = if let Some(sl) = proposal.suggested_sl {
+                        RiskManager::validate_structural_sl(
+                            current_price,
+                            sl,
+                            playbook_max_sl_roe,
+                            leverage,
+                            risk_base.maintenance_margin_rate,
+                            risk_base.taker_fee_rate,
+                            risk_base.liquidation_buffer_ratio,
+                            stop_mgmt.min_initial_sl_pct,
                         )
-                    }
-                    SlValidationResult::StructuralRiskVeto { suggested_roe, max_roe } => {
-                        // 🛡️ [TODO-AUDIT-NEW-04] Phá bẫy Catch-22 VETO:
-                        // Tín hiệu có SL cấu trúc vượt trần ROE không bị Arbiter VETO loại bỏ,
-                        // mà được phê duyệt tham gia đấu thầu để chuyển tiếp xuống RiskManager::clamp_sl_price tại mod.rs.
-                        if confidence >= min_threshold {
-                            approved_proposals.push((proposal.clone(), confidence));
+                    } else {
+                        // Nếu Scanner không đề xuất SL cụ thể, kiểm tra xem tại đòn bẩy leverage hiện tại
+                        // có đủ không gian thanh lý an toàn không
+                        if RiskManager::calculate_safe_sl_distance(
+                            leverage,
+                            playbook_max_sl_roe,
+                            risk_base.maintenance_margin_rate,
+                            risk_base.taker_fee_rate,
+                            risk_base.liquidation_buffer_ratio,
+                            stop_mgmt.min_initial_sl_pct,
+                        ).is_some() {
+                            SlValidationResult::Acceptable
+                        } else {
+                            SlValidationResult::LiquidationRiskVeto {
+                                suggested_dist_pct: 0.0,
+                                safe_liq_dist_pct: 0.0,
+                                mmr: risk_base.maintenance_margin_rate,
+                            }
+                        }
+                    };
+
+                    match validation_res {
+                        SlValidationResult::LiquidationRiskVeto { suggested_dist_pct, safe_liq_dist_pct, mmr } => {
                             (
                                 confidence,
-                                true,
-                                None,
+                                false,
+                                Some(AuctionStatus::LiquidationRiskVeto),
                                 format!(
-                                    "Structural SL exceeds ROE cap ({:.1}% > {:.1}%), passed to RiskManager for clamping",
-                                    suggested_roe * 100.0,
-                                    max_roe * 100.0
+                                    "SL dist {:.2}% exceeds safe liquidation dist {:.2}% (MMR: {:.2}%, Lev: {:.0}x) - Kamikaze rejection",
+                                    suggested_dist_pct * 100.0,
+                                    safe_liq_dist_pct * 100.0,
+                                    mmr * 100.0,
+                                    leverage
                                 ),
                             )
-                        } else {
+                        }
+                        SlValidationResult::StructuralRiskVeto { suggested_roe, max_roe } => {
+                            // 🛡️ [TODO-AUDIT-NEW-04] Phá bẫy Catch-22 VETO:
+                            // Tín hiệu có SL cấu trúc vượt trần ROE không bị Arbiter VETO loại bỏ,
+                            // mà được phê duyệt tham gia đấu thầu để chuyển tiếp xuống RiskManager::clamp_sl_price tại mod.rs.
+                            if confidence >= min_threshold {
+                                approved_proposals.push((proposal.clone(), confidence));
+                                (
+                                    confidence,
+                                    true,
+                                    None,
+                                    format!(
+                                        "Structural SL exceeds ROE cap ({:.1}% > {:.1}%), passed to RiskManager for clamping",
+                                        suggested_roe * 100.0,
+                                        max_roe * 100.0
+                                    ),
+                                )
+                            } else {
+                                (
+                                    confidence,
+                                    false,
+                                    Some(AuctionStatus::LowConfidence),
+                                    format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
+                                )
+                            }
+                        }
+                        SlValidationResult::InvalidPrice => {
                             (
                                 confidence,
                                 false,
-                                Some(AuctionStatus::LowConfidence),
-                                format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
+                                Some(AuctionStatus::StructuralRiskVeto),
+                                "Invalid price or suggested SL (NaN or non-positive)".to_string(),
                             )
                         }
-                    }
-                    SlValidationResult::InvalidPrice => {
-                        (
-                            confidence,
-                            false,
-                            Some(AuctionStatus::StructuralRiskVeto),
-                            "Invalid price or suggested SL (NaN or non-positive)".to_string(),
-                        )
-                    }
-                    SlValidationResult::Acceptable => {
-                        if confidence >= min_threshold {
-                            approved_proposals.push((proposal.clone(), confidence));
-                            (confidence, true, None, String::new())
-                        } else {
-                            (
-                                confidence,
-                                false,
-                                Some(AuctionStatus::LowConfidence),
-                                format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
-                            )
+                        SlValidationResult::Acceptable => {
+                            if confidence >= min_threshold {
+                                approved_proposals.push((proposal.clone(), confidence));
+                                (confidence, true, None, String::new())
+                            } else {
+                                (
+                                    confidence,
+                                    false,
+                                    Some(AuctionStatus::LowConfidence),
+                                    format!("Confidence {:.3} < min_threshold {:.3}", confidence, min_threshold),
+                                )
+                            }
                         }
                     }
                 }
@@ -788,6 +863,7 @@ mod tests {
         sensors.natr = std::sync::Arc::new(vec![0.30; len]); // 0.30% NATR > min_natr_threshold (0.0010)
         sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]); // 0.10% > 0.04% micro floor
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![30.0; len]); // ADX 30.0 >= 25.0 -> Trending regime
         let mut matrix = MarketMatrixV3::default();
         matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
 
@@ -860,6 +936,7 @@ mod tests {
         sensors.natr = std::sync::Arc::new(vec![0.30; len]);
         sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![30.0; len]); // ADX 30.0 >= 25.0 -> Trending regime
         let mut matrix = MarketMatrixV3::default();
         matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
 
@@ -929,6 +1006,7 @@ mod tests {
         sensors.natr = std::sync::Arc::new(vec![0.30; len]); // 0.30% NATR > min_natr_threshold (0.0010)
         sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]); // 0.10% > 0.04% micro floor
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![30.0; len]); // ADX 30.0 >= 25.0 -> Trending regime
         let mut matrix = MarketMatrixV3::default();
         matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
 
@@ -951,5 +1029,144 @@ mod tests {
         assert!(decision.is_approved, "Proposal có SL cấu trúc 10% ROE (<= 15% ROE) PHẢI được APPROVE!");
         assert_eq!(decision.winning_scanner, Some(ScannerId::TrendPullback));
         assert_eq!(decision.final_sl, Some(1990.0));
+    }
+
+    #[test]
+    fn test_selective_routing_matrix_contract() {
+        // 1. Trending: Cho phép TrendPullback, MomentumIgnition, AbsorptionScout. Cấm 3 scanner còn lại.
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::TrendPullback, MarketRegime::Trending).0);
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::MomentumIgnition, MarketRegime::Trending).0);
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::AbsorptionScout, MarketRegime::Trending).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::RangeOscillator, MarketRegime::Trending).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::ClimaxReversal, MarketRegime::Trending).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::AnomalyFade, MarketRegime::Trending).0);
+
+        // 2. RangeBound: Cho phép RangeOscillator, AbsorptionScout, ClimaxReversal, AnomalyFade. Cấm TrendPullback, MomentumIgnition.
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::RangeOscillator, MarketRegime::RangeBound).0);
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::AbsorptionScout, MarketRegime::RangeBound).0);
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::ClimaxReversal, MarketRegime::RangeBound).0);
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::AnomalyFade, MarketRegime::RangeBound).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::TrendPullback, MarketRegime::RangeBound).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::MomentumIgnition, MarketRegime::RangeBound).0);
+
+        // 3. Breakout: Cho phép MomentumIgnition, AbsorptionScout. Cấm 4 scanner còn lại.
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::MomentumIgnition, MarketRegime::Breakout).0);
+        assert!(HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::AbsorptionScout, MarketRegime::Breakout).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::TrendPullback, MarketRegime::Breakout).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::RangeOscillator, MarketRegime::Breakout).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::ClimaxReversal, MarketRegime::Breakout).0);
+        assert!(!HeliosArbiter::is_scanner_eligible_for_regime(ScannerId::AnomalyFade, MarketRegime::Breakout).0);
+
+        // 4. Các chế độ rủi ro an toàn: Cấm tuyệt đối toàn bộ
+        for id in &[
+            ScannerId::TrendPullback,
+            ScannerId::MomentumIgnition,
+            ScannerId::RangeOscillator,
+            ScannerId::ClimaxReversal,
+            ScannerId::AnomalyFade,
+            ScannerId::AbsorptionScout,
+        ] {
+            assert!(!HeliosArbiter::is_scanner_eligible_for_regime(*id, MarketRegime::VolatilityFlatline).0);
+            assert!(!HeliosArbiter::is_scanner_eligible_for_regime(*id, MarketRegime::TurbulentChaos).0);
+            assert!(!HeliosArbiter::is_scanner_eligible_for_regime(*id, MarketRegime::DataAnomaly).0);
+        }
+    }
+
+    #[test]
+    fn test_arbiter_process_tick_selective_routing_ledger() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.risk_management.risk_base.leverage = 20.0;
+        config.tactical_sniper.range.max_initial_sl_pct = 0.15;
+        config.tactical_sniper.pullback.max_initial_sl_pct = 0.15;
+
+        // Cấu hình thị trường RangeBound (ADX = 12.0 < 25.0, ER = 0.10 < 0.35, Squeeze = 0.50)
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]);
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![12.0; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.10; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.50; len]);
+
+        // Đề xuất 1: TrendPullback (Long, raw 0.90) - Không hợp lệ trong RangeBound!
+        let trend_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.90,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(1990.0),
+            suggested_tp: None,
+        };
+
+        // Đề xuất 2: RangeOscillator (Long, raw 0.75) - Hợp lệ trong RangeBound!
+        let range_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.75,
+            scanner_id: ScannerId::RangeOscillator,
+            suggested_sl: Some(1992.0),
+            suggested_tp: None,
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::TrendPullback,
+            proposal: Some(trend_prop),
+        }));
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::RangeOscillator,
+            proposal: Some(range_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+
+        // KẾT QUẢ KỲ VỌNG:
+        // 1. Quyết định được APPROVE vì có RangeOscillator hợp lệ.
+        assert!(decision.is_approved);
+        // 2. Winner PHẢI là RangeOscillator dù TrendPullback có raw_score cao hơn (0.90 vs 0.75)
+        // vì TrendPullback đã bị Selective Routing từ chối!
+        assert_eq!(decision.winning_scanner, Some(ScannerId::RangeOscillator));
+        // 3. Sổ cái đấu thầu (Auction Ledger) phải ghi nhận đầy đủ 2 proposals
+        assert_eq!(decision.auction_ledger.len(), 2);
+
+        let trend_candidate = decision.auction_ledger.iter().find(|c| c.scanner_id == ScannerId::TrendPullback).unwrap();
+        assert_eq!(trend_candidate.status, AuctionStatus::RegimeIneligible(MarketRegime::RangeBound));
+        assert!(trend_candidate.reason.contains("Ineligible in RangeBound regime"));
+
+        let range_candidate = decision.auction_ledger.iter().find(|c| c.scanner_id == ScannerId::RangeOscillator).unwrap();
+        assert_eq!(range_candidate.status, AuctionStatus::Won);
     }
 }

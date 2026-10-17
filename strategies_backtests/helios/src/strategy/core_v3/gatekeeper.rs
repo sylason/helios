@@ -46,9 +46,37 @@ impl GateVetoReason {
     }
 }
 
+/// [MACRO MARKET REGIME]
+/// 6 trạng thái vật lý khép kín của thị trường theo chuẩn phân tích định lượng trực giao.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarketRegime {
+    #[default]
+    VolatilityFlatline, // 🛑 Tử địa thanh khoản (NATR vi mô/vĩ mô < Sàn chi phí)
+    TurbulentChaos,     // 🌪️ Bão biến động hỗn loạn (Chaos Index >= 0.70 hoặc dính Hysteresis)
+    DataAnomaly,        // ⚠️ Dữ liệu bất thường hoặc chứa NaN/Inf
+    Trending,           // 📈 Xu hướng bền vững có trớn (KER >= 0.35 hoặc ADX >= 25, không nén)
+    RangeBound,         // 📦 Vùng dao động đi ngang / nén tích lũy (Squeeze >= 0.65 hoặc KER thấp & ADX < 20)
+    Breakout,           // 🚀 Bứt phá nến đầu từ dải nén (Squeeze <= 0.35 và ADX >= 20, nhưng chưa đủ trớn Trend)
+}
+
+impl MarketRegime {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MarketRegime::VolatilityFlatline => "VOLATILITY_FLATLINE",
+            MarketRegime::TurbulentChaos => "TURBULENT_CHAOS",
+            MarketRegime::DataAnomaly => "DATA_ANOMALY",
+            MarketRegime::Trending => "TRENDING",
+            MarketRegime::RangeBound => "RANGE_BOUND",
+            MarketRegime::Breakout => "BREAKOUT",
+        }
+    }
+}
+
 /// Kết quả thẩm định trạng thái thị trường của Gatekeeper
 #[derive(Debug, Clone, Default)]
 pub struct GateEvaluation {
+    /// 🏛️ Chế độ thị trường vĩ mô được phân loại khách quan
+    pub regime: MarketRegime,
     /// Cho phép Arbiter tiếp tục quét tín hiệu hay không
     pub passed: bool,
     /// Lý do phủ quyết (nếu passed == false)
@@ -102,6 +130,7 @@ impl RegimeGatekeeper {
             || sensors.atr_sl.len() <= i
         {
             return GateEvaluation {
+                regime: MarketRegime::DataAnomaly,
                 passed: false,
                 veto_reason: Some(GateVetoReason::DataAnomaly),
                 current_chaos: 0.0,
@@ -137,6 +166,7 @@ impl RegimeGatekeeper {
             || current_atr_sl <= 0.0
         {
             return GateEvaluation {
+                regime: MarketRegime::DataAnomaly,
                 passed: false,
                 veto_reason: Some(GateVetoReason::DataAnomaly),
                 current_chaos: 0.0,
@@ -155,6 +185,7 @@ impl RegimeGatekeeper {
         // sensors.natr lưu giá trị phần trăm (%) từ khung MTF chiến thuật (vd: 0.45 tức 0.45%)
         if market_natr_pct < required_min_natr_pct {
             return GateEvaluation {
+                regime: MarketRegime::VolatilityFlatline,
                 passed: false,
                 veto_reason: Some(GateVetoReason::MacroFlatline),
                 current_chaos,
@@ -173,6 +204,7 @@ impl RegimeGatekeeper {
         // Nến vi mô không được phép là nến que tăm có biên độ nhỏ hơn phí vào lệnh Taker (0.04%)
         if micro_natr_pct < micro_fee_floor_pct {
             return GateEvaluation {
+                regime: MarketRegime::VolatilityFlatline,
                 passed: false,
                 veto_reason: Some(GateVetoReason::MicroFlatline),
                 current_chaos,
@@ -194,6 +226,7 @@ impl RegimeGatekeeper {
         // Trường hợp 3.1: Nến hiện tại vượt ngưỡng kích hoạt bão
         if current_chaos >= t_enter {
             return GateEvaluation {
+                regime: MarketRegime::TurbulentChaos,
                 passed: false,
                 veto_reason: Some(GateVetoReason::ChaosWhipsaw),
                 current_chaos,
@@ -209,9 +242,6 @@ impl RegimeGatekeeper {
         }
 
         // Trường hợp 3.2: Nến hiện tại nằm trong dải trễ [t_exit, t_enter]
-        // Quét ngược từ i-1 về start_idx để xác định trạng thái Hysteresis FSM:
-        // - Nếu gặp nến < t_exit trước: cơn bão đã hạ nhiệt hoàn toàn trước đó -> Mở khóa
-        // - Nếu gặp nến >= t_enter trước: bão chưa từng hạ nhiệt dưới t_exit -> Vẫn bị khóa
         if current_chaos >= t_exit {
             let lookback_bars = 5usize;
             let start_idx = i.saturating_sub(lookback_bars.saturating_sub(1));
@@ -223,13 +253,13 @@ impl RegimeGatekeeper {
                     storm_locked = true;
                     break;
                 } else if val < t_exit {
-                    // Đã hạ nhiệt hoàn toàn trước đó
                     break;
                 }
             }
 
             if storm_locked {
                 return GateEvaluation {
+                    regime: MarketRegime::TurbulentChaos,
                     passed: false,
                     veto_reason: Some(GateVetoReason::ChaosWhipsaw),
                     current_chaos,
@@ -245,8 +275,27 @@ impl RegimeGatekeeper {
             }
         }
 
-        // Vượt qua toàn bộ các chốt chặn -> Trạng thái thị trường có thể giao dịch
+        // Vượt qua toàn bộ các chốt chặn -> Phân loại chế độ thị trường giao dịch
+        let regime = Self::classify_regime(tick, sensors, matrix, config, None);
+        if regime == MarketRegime::DataAnomaly {
+            return GateEvaluation {
+                regime: MarketRegime::DataAnomaly,
+                passed: false,
+                veto_reason: Some(GateVetoReason::DataAnomaly),
+                current_chaos,
+                market_natr_pct,
+                micro_natr_pct,
+                is_hysteresis_active: false,
+                required_min_natr_pct,
+                fee_floor_pct: roundtrip_fee_pct,
+                micro_fee_floor_pct,
+                min_alpha_pct,
+                chaos_threshold: t_enter,
+            };
+        }
+
         GateEvaluation {
+            regime,
             passed: true,
             veto_reason: None,
             current_chaos,
@@ -258,6 +307,52 @@ impl RegimeGatekeeper {
             micro_fee_floor_pct,
             min_alpha_pct,
             chaos_threshold: t_enter,
+        }
+    }
+
+    /// Phân loại chế độ thị trường vĩ mô khách quan dựa trên KER, ADX và Squeeze Intensity.
+    pub fn classify_regime(
+        tick: &TickContext,
+        sensors: &HeliosSensors,
+        matrix: &MarketMatrixV3,
+        config: &HeliosConfigV3,
+        veto_reason: Option<GateVetoReason>,
+    ) -> MarketRegime {
+        if let Some(reason) = veto_reason {
+            return match reason {
+                GateVetoReason::MacroFlatline | GateVetoReason::MicroFlatline => MarketRegime::VolatilityFlatline,
+                GateVetoReason::ChaosWhipsaw => MarketRegime::TurbulentChaos,
+                GateVetoReason::DataAnomaly => MarketRegime::DataAnomaly,
+            };
+        }
+
+        let i = tick.i;
+        let opt_er = sensors.efficiency_ratio.get(i).copied();
+        let opt_adx = sensors.adx.get(i).copied();
+        let opt_sq = matrix.squeeze_intensity.get(i).copied();
+
+        // 🛑 PHÁT HIỆN DỊ TẬT SỐ HỌC: Nếu có mảng cảm biến mà giá trị là NaN -> DataAnomaly
+        if opt_er.map(|v| v.is_nan()).unwrap_or(false)
+            || opt_adx.map(|v| v.is_nan()).unwrap_or(false)
+            || opt_sq.map(|v| v.is_nan()).unwrap_or(false)
+        {
+            return MarketRegime::DataAnomaly;
+        }
+
+        let er = opt_er.unwrap_or(0.0);
+        let adx = opt_adx.unwrap_or(0.0);
+        let squeeze = opt_sq.unwrap_or(0.5);
+
+        let cfg = &config.macro_regime;
+        let is_mature_trend = (er >= cfg.min_trending_er || adx >= cfg.min_trending_adx)
+            && squeeze < cfg.range_squeeze_percentile;
+
+        if is_mature_trend {
+            MarketRegime::Trending
+        } else if squeeze <= cfg.breakout_squeeze_percentile && adx >= cfg.min_breakout_adx {
+            MarketRegime::Breakout
+        } else {
+            MarketRegime::RangeBound
         }
     }
 }
@@ -325,11 +420,15 @@ mod tests {
         sensors.natr = Arc::new(vec![0.45; 20]); // Macro NATR 0.45% > (0.10% fee + 0.12% alpha = 0.22%)
         sensors.micro_natr = Arc::new(vec![0.08; 20]); // Micro NATR 0.08% > 0.04%
         sensors.atr_sl = Arc::new(vec![10.0; 20]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; 20]);
+        sensors.adx = Arc::new(vec![30.0; 20]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; 20]);
         matrix.chaos_index = Arc::new(vec![0.30; 20]); // 0.30 < 0.65 threshold
 
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(eval.passed);
         assert_eq!(eval.veto_reason, None);
+        assert_eq!(eval.regime, MarketRegime::Trending);
         assert!(!eval.is_hysteresis_active);
         assert!((eval.market_natr_pct - 0.45).abs() < 1e-4, "Market NATR phải là 0.45%");
         assert!((eval.micro_natr_pct - 0.08).abs() < 1e-4, "Micro NATR phải là 0.08%");
@@ -351,6 +450,7 @@ mod tests {
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(!eval.passed);
         assert_eq!(eval.veto_reason, Some(GateVetoReason::MacroFlatline));
+        assert_eq!(eval.regime, MarketRegime::VolatilityFlatline);
         assert!((eval.market_natr_pct - 0.10).abs() < 1e-4);
     }
 
@@ -372,6 +472,7 @@ mod tests {
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(!eval.passed, "Nến vi mô que tăm không đủ bù phí Taker phải bị VETO!");
         assert_eq!(eval.veto_reason, Some(GateVetoReason::MicroFlatline));
+        assert_eq!(eval.regime, MarketRegime::VolatilityFlatline);
         assert!((eval.micro_natr_pct - 0.02).abs() < 1e-4);
     }
 
@@ -388,11 +489,15 @@ mod tests {
         sensors.natr = Arc::new(vec![0.45; 20]); // Macro NATR 0.45% > 0.22%
         sensors.micro_natr = Arc::new(vec![0.05; 20]); // Micro NATR 0.05% >= 0.04%
         sensors.atr_sl = Arc::new(vec![1.0; 20]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; 20]);
+        sensors.adx = Arc::new(vec![30.0; 20]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; 20]);
         matrix.chaos_index = Arc::new(vec![0.30; 20]);
 
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(eval.passed, "Nến vi mô nén tích lũy lành mạnh thì phải PASS!");
         assert_eq!(eval.veto_reason, None);
+        assert_eq!(eval.regime, MarketRegime::Trending);
         assert!((eval.market_natr_pct - 0.45).abs() < 1e-4);
     }
 
@@ -470,6 +575,9 @@ mod tests {
         sensors.natr = Arc::new(vec![0.25; 20]);
         sensors.micro_natr = Arc::new(vec![0.08; 20]);
         sensors.atr_sl = Arc::new(vec![10.0; 20]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; 20]);
+        sensors.adx = Arc::new(vec![30.0; 20]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; 20]);
         // Bar 7: 0.70 (kích hoạt bão >= 0.65)
         // Bar 8: 0.50 (hạ nhiệt dưới t_exit = 0.55 -> giải phóng)
         // Bar 10: 0.60 (vẫn < 0.65 và bão trước đó đã hạ nhiệt)
@@ -483,6 +591,7 @@ mod tests {
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(eval.passed);
         assert_eq!(eval.veto_reason, None);
+        assert_eq!(eval.regime, MarketRegime::Trending);
         assert!(!eval.is_hysteresis_active);
     }
 
@@ -502,6 +611,7 @@ mod tests {
         let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(!eval.passed);
         assert_eq!(eval.veto_reason, Some(GateVetoReason::DataAnomaly));
+        assert_eq!(eval.regime, MarketRegime::DataAnomaly);
 
         // Test Micro NATR chứa NaN
         sensors.natr = Arc::new(vec![0.25; 10]);
@@ -510,6 +620,7 @@ mod tests {
         let eval_micro_nan = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(!eval_micro_nan.passed);
         assert_eq!(eval_micro_nan.veto_reason, Some(GateVetoReason::DataAnomaly));
+        assert_eq!(eval_micro_nan.regime, MarketRegime::DataAnomaly);
 
         // Test ATR_SL chứa NaN
         sensors.micro_natr = Arc::new(vec![0.08; 10]);
@@ -517,5 +628,76 @@ mod tests {
         let eval2 = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
         assert!(!eval2.passed);
         assert_eq!(eval2.veto_reason, Some(GateVetoReason::DataAnomaly));
+        assert_eq!(eval2.regime, MarketRegime::DataAnomaly);
+    }
+
+    #[test]
+    fn test_regime_classification_trending() {
+        let config = HeliosConfigV3::default();
+        let mut env = MockTickEnv::new(10);
+        let tick = env.tick(5);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+
+        sensors.efficiency_ratio = Arc::new(vec![0.45; 10]); // ER 0.45 >= 0.35
+        sensors.adx = Arc::new(vec![28.0; 10]);              // ADX 28 >= 25
+        matrix.squeeze_intensity = Arc::new(vec![0.25; 10]); // Squeeze 0.25 < 0.65
+
+        let regime = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
+        assert_eq!(regime, MarketRegime::Trending);
+    }
+
+    #[test]
+    fn test_regime_classification_breakout() {
+        let config = HeliosConfigV3::default();
+        let mut env = MockTickEnv::new(10);
+        let tick = env.tick(5);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+
+        sensors.efficiency_ratio = Arc::new(vec![0.20; 10]); // ER thấp 0.20 < 0.35 (chưa thành trend)
+        sensors.adx = Arc::new(vec![22.0; 10]);              // ADX 22 >= 20 (xung lực nổ)
+        matrix.squeeze_intensity = Arc::new(vec![0.30; 10]); // Squeeze nổ dải <= 0.35
+
+        let regime = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
+        assert_eq!(regime, MarketRegime::Breakout);
+    }
+
+    #[test]
+    fn test_regime_classification_range_bound() {
+        let config = HeliosConfigV3::default();
+        let mut env = MockTickEnv::new(10);
+        let tick = env.tick(5);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+
+        // Kịch bản 1: Squeeze nén chặt
+        sensors.efficiency_ratio = Arc::new(vec![0.20; 10]);
+        sensors.adx = Arc::new(vec![15.0; 10]);
+        matrix.squeeze_intensity = Arc::new(vec![0.75; 10]); // Squeeze >= 0.65
+        let regime1 = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
+        assert_eq!(regime1, MarketRegime::RangeBound);
+
+        // Kịch bản 2: ADX yếu và ER thấp
+        matrix.squeeze_intensity = Arc::new(vec![0.50; 10]);
+        sensors.efficiency_ratio = Arc::new(vec![0.15; 10]);
+        sensors.adx = Arc::new(vec![12.0; 10]);
+        let regime2 = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
+        assert_eq!(regime2, MarketRegime::RangeBound);
+    }
+
+    #[test]
+    fn test_regime_data_anomaly_on_nan_inputs() {
+        let config = HeliosConfigV3::default();
+        let mut env = MockTickEnv::new(10);
+        let tick = env.tick(5);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+
+        sensors.efficiency_ratio = Arc::new(vec![f64::NAN; 10]);
+        sensors.adx = Arc::new(vec![25.0; 10]);
+        matrix.squeeze_intensity = Arc::new(vec![0.50; 10]);
+        let regime = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
+        assert_eq!(regime, MarketRegime::DataAnomaly);
     }
 }

@@ -201,21 +201,21 @@
 | 08 | `P2` | `[ ]` | **`TODO-AUDIT-NEW-162`** | Bộ Lọc Khử Ô Nhiễm Phương Sai Z-Score Bằng Robust Dispersion / Winsorization / MAD (`SENS-ROBUST-ZSCORE`) | [TODO.md#L886](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L886) | `strategies_backtests/helios/src/utils/normalization.rs`, `sensors.rs`, `matrix.rs` |
 
 ### 📦 Cụm C: Cổng Vào Chiến Lược & Phân Cực Chế Độ Thị Trường (`helios::gatekeeper`)
-**Quy mô:** `4 tasks` (Hoàn thành: `1`, P0: `0`, P1: `4`, P2: `0`, P3: `0`)
+**Quy mô:** `4 tasks` (Hoàn thành: `2`, P0: `0`, P1: `4`, P2: `0`, P3: `0`)
 
 | STT | Ưu Tiên | Trạng Thái | Mã Task | Tên Nhiệm Vụ | Link Reference Trong `TODO.md` | File Mã Nguồn Mục Tiêu |
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
 | 01 | `P1` | `[x]` | **`TODO-AUDIT-NEW-24`** | Tách Bạch Micro NATR vs Macro NATR Cho Cầu Dao Flatline (`NEW-NATR-4H-BLIND`) | [TODO.md#L210](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L210) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:24-32` |
 | 02 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-114`** | Nâng Cấp Phân Luồng Gatekeeper Cho Phép RangeOsc/Absorption Hoạt Động Khi Nén Biến Động (`H-GATE-01`) | [TODO.md#L600](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L600) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:140-152` |
-| 03 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-115`** | Kiến Thiết Bộ Phân Loại Chế Độ Thị Trường Vĩ Mô Macro Regime Classifier (`H-GATE-02`) | [TODO.md#L604](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L604) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:48-67` |
+| 03 | `P1` | `[x]` | **`TODO-AUDIT-NEW-115`** | Kiến Thiết Bộ Phân Loại Chế Độ Thị Trường Vĩ Mô Macro Regime Classifier (`H-GATE-02`) | [TODO.md#L604](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L604) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:48-67` |
 | 04 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-161`** | Kiến Thiết Cầu Dao Khẩn Cấp Flash Crash & Liquidity Shock Circuit Breaker Tại Gateway (`GATE-FLASH-CRASH-BREAKER`) | [TODO.md#L879](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L879) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `matrix.rs` |
 
 ### 📦 Cụm D: Động Cơ Đấu Thầu Tín Hiệu & Hòa Giải Xung Đột (`helios::arbiter`)
-**Quy mô:** `17 tasks` (Hoàn thành: `0`, P0: `1`, P1: `15`, P2: `1`, P3: `0`)
+**Quy mô:** `17 tasks` (Hoàn thành: `3`, P0: `1`, P1: `15`, P2: `1`, P3: `0`)
 
 | STT | Ưu Tiên | Trạng Thái | Mã Task | Tên Nhiệm Vụ | Link Reference Trong `TODO.md` | File Mã Nguồn Mục Tiêu |
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
-| 01 | `P1` | `[ ]` | **`TODO-STAB-03`** | Triển khai Bộ Phân Loại Chế Độ Thị Trường Cấp Vĩ Mô (Macro Regime Classifier) | [TODO.md#L37](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L37) | `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `matrix.rs` |
+| 01 | `P1` | `[x]` | **`TODO-STAB-03`** | Triển khai Bộ Phân Loại Chế Độ Thị Trường Cấp Vĩ Mô (Macro Regime Classifier) | [TODO.md#L37](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L37) | `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `matrix.rs` |
 | 02 | `P1` | `[x]` | **`TODO-AUDIT-NEW-04`** | Phá Bẫy Catch-22 VETO Triệt Tiêu Nến Đẹp của Arbiter | [TODO.md#L143](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L143) | `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:254-280` |
 | 03 | `P1` | `[x]` | **`TODO-AUDIT-NEW-23`** | Chuyển Đổi Veto Structural SL Sang Cơ Chế Auto-Clamping (`CATCH-22-STRUCTURAL-SL`) | [TODO.md#L207](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L207) | `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:254-280` |
 | 04 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-25`** | Gỡ Bỏ Lệnh Đánh Giá Lặp Lại Gatekeeper Trong Arbiter (`NEW-DOUBLE-EVAL`) | [TODO.md#L213](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L213) | `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:168-173` |

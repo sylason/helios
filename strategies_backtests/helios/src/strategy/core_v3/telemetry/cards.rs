@@ -126,6 +126,7 @@ impl DecisionCardFormatter {
                 AuctionStatus::ConflictEliminated => "⚔️ [CONFLICT-FLAT]",
                 AuctionStatus::StructuralRiskVeto => "🛑 [RISK-VETO]    ",
                 AuctionStatus::LiquidationRiskVeto => "💀 [LIQ-VETO]     ",
+                AuctionStatus::RegimeIneligible(_) => "🧭 [REGIME-VETO]  ",
                 AuctionStatus::NotTriggered => "⚪ [NOT-TRIGGERED]",
             };
             let side_str = candidate
@@ -259,6 +260,7 @@ impl DecisionCardFormatter {
                 AuctionStatus::ConflictEliminated => "⚔️ [CONFLICT-FLAT]",
                 AuctionStatus::StructuralRiskVeto => "🛑 [RISK-VETO]    ",
                 AuctionStatus::LiquidationRiskVeto => "💀 [LIQ-VETO]     ",
+                AuctionStatus::RegimeIneligible(_) => "🧭 [REGIME-VETO]  ",
                 AuctionStatus::NotTriggered => "⚪ [NOT-TRIGGERED]",
             };
             let side_str = candidate

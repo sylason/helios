@@ -18,6 +18,9 @@ pub struct HeliosConfigV3 {
     pub tactical_sniper: TacticalSniperConfig,
     #[dna(nest)]
     pub risk_management: RiskManagementConfig,
+    #[serde(default)]
+    #[dna(skip)]
+    pub macro_regime: MacroRegimeConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
@@ -439,6 +442,52 @@ impl Default for MatrixConfig {
 }
 
 fn default_kama_slope_scale_atr() -> f64 { 0.20 }
+
+/// ============================================================================
+/// PHẦN 2.5: BỘ PHÂN LOẠI CHẾ ĐỘ THỊ TRƯỜNG VĨ MÔ (MACRO REGIME CONFIG)
+/// ============================================================================
+/// Cấu hình các ngưỡng chuyển pha chế độ thị trường trực giao (KER, ADX, Squeeze).
+/// Được cố định theo chuẩn vật lý và thống kê, không cấp gen DNA để bảo toàn 104 chiều.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MacroRegimeConfig {
+    /// Ngưỡng Kaufman Efficiency Ratio tối thiểu để xác nhận xu hướng có trớn (0.35)
+    #[serde(default = "default_min_trending_er")]
+    pub min_trending_er: f64,
+
+    /// Ngưỡng Welles Wilder ADX tối thiểu để xác nhận xu hướng mạnh (25.0)
+    #[serde(default = "default_min_trending_adx")]
+    pub min_trending_adx: f64,
+
+    /// Phân vị Squeeze tối thiểu để coi là thị trường nén chặt đi ngang (0.65)
+    #[serde(default = "default_range_squeeze_percentile")]
+    pub range_squeeze_percentile: f64,
+
+    /// Phân vị Squeeze tối đa để kích hoạt bứt phá nến đầu Breakout (0.35)
+    #[serde(default = "default_breakout_squeeze_percentile")]
+    pub breakout_squeeze_percentile: f64,
+
+    /// Ngưỡng Welles Wilder ADX tối thiểu để xác nhận xung lực bứt phá Breakout (20.0)
+    #[serde(default = "default_min_breakout_adx")]
+    pub min_breakout_adx: f64,
+}
+
+impl Default for MacroRegimeConfig {
+    fn default() -> Self {
+        Self {
+            min_trending_er: default_min_trending_er(),
+            min_trending_adx: default_min_trending_adx(),
+            range_squeeze_percentile: default_range_squeeze_percentile(),
+            breakout_squeeze_percentile: default_breakout_squeeze_percentile(),
+            min_breakout_adx: default_min_breakout_adx(),
+        }
+    }
+}
+
+fn default_min_trending_er() -> f64 { 0.35 }
+fn default_min_trending_adx() -> f64 { 25.0 }
+fn default_range_squeeze_percentile() -> f64 { 0.65 }
+fn default_breakout_squeeze_percentile() -> f64 { 0.35 }
+fn default_min_breakout_adx() -> f64 { 20.0 }
 
 /// ============================================================================
 /// PHẦN 3: BỘ TRỌNG TÀI & ĐẤU GIÁ TÍN HIỆU (ARBITER CONFIDENCE AUCTION CONFIG)

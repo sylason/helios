@@ -34,11 +34,16 @@
 ---
 
 ### PHẦN 2: LỌC TRẠNG THÁI NGUY HIỂM & ĐỒNG THUẬN PHA (GATEKEEPER & SENSORS)
-- [ ] **TODO-STAB-03: Triển khai Bộ Phân Loại Chế Độ Thị Trường Cấp Vĩ Mô (Macro Regime Classifier)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `matrix.rs`
-  - **Mô tả:** Nhận diện pha Chop / Đi ngang không có trend (ADX < 20 hoặc KAMA đi ngang). Khóa hoàn toàn `Trend_PB` và `Momentum_IGN` trong pha này để hệ thống ngồi im (Sit on hands).
+- [x] **TODO-STAB-03: Triển khai Bộ Phân Loại Chế Độ Thị Trường Cấp Vĩ Mô (Macro Regime Classifier)**
+  - **Tài liệu thiết kế:** [`03_technical_spec_macro_regime_classifier.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/03_gatekeeper_and_multi_regime_harmonization/03_technical_spec_macro_regime_classifier.md)
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `gatekeeper.rs`, `config.rs`
+  - **Mô tả:** Triển khai enum `MarketRegime` và chốt chặn `is_scanner_eligible_for_regime`. Nhận diện pha Chop / Đi ngang (RangeBound), Trending và Breakout. Khóa hoàn toàn `Trend_PB` và `Momentum_IGN` trong pha RangeBound và cấm `ClimaxReversal`/`AnomalyFade` trong Trending để bảo toàn vốn.
   - **Unit Tests:**
-    - [ ] `test_regime_classifier_blocks_trend_momentum_in_chop`
+    - [x] `test_regime_classification_trending`
+    - [x] `test_regime_classification_breakout`
+    - [x] `test_regime_classification_range_bound`
+    - [x] `test_selective_routing_matrix_contract`
+    - [x] `test_arbiter_process_tick_selective_routing_ledger`
 
 - [ ] **TODO-STAB-04: Bổ sung Chốt Chặn Đồng Thuận Pha Đa Khung Thời Gian (MTF Phase Coherence Gate)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `momentum_ignition.rs`
@@ -601,9 +606,17 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:140-152`
   - **Mô tả:** Thay thế cơ chế VETO cào bằng toàn bộ Playbook khi `VolatilityFlatline` bằng cơ chế phân luồng chọn lọc: Chỉ tạm khóa các Playbook theo đà (`Trend_PB`, `Momentum_Ign`), đồng thời giải phóng quyền giao dịch cho `Range_Osc` và `Absorption` trong vùng tích lũy.
 
-- [ ] **TODO-AUDIT-NEW-115: Kiến Thiết Bộ Phân Loại Chế Độ Thị Trường Vĩ Mô Macro Regime Classifier (`H-GATE-02`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:48-67`
-  - **Mô tả:** Nâng cấp `GateEvaluation` trả về enum `MarketRegime` (Trending, RangeBound, Breakout, Chaos) dựa trên sự kết hợp giữa ADX, KAMA slope, Kaufman ER và NATR để điều phối trọng số đấu thầu trong Arbiter.
+- [x] **TODO-AUDIT-NEW-115: Kiến Thiết Bộ Phân Loại Chế Độ Thị Trường Vĩ Mô Macro Regime Classifier (`H-GATE-02`)**
+  - **Tài liệu thiết kế:** [`03_technical_spec_macro_regime_classifier.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/03_gatekeeper_and_multi_regime_harmonization/03_technical_spec_macro_regime_classifier.md)
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:48-67`, `arbiter.rs`, `config.rs`, `cards.rs`
+  - **Mô tả:** Nâng cấp `GateEvaluation` trả về enum `MarketRegime` 6 trạng thái khép kín (`VolatilityFlatline`, `TurbulentChaos`, `DataAnomaly`, `Trending`, `RangeBound`, `Breakout`) dựa trên mô hình trực giao Kaufman Efficiency Ratio ($KER$), Welles Wilder $ADX$, và $SqueezeIntensity$. Tích hợp chốt chặn phân luồng thẩm quyền chọn lọc playbook `is_scanner_eligible_for_regime` tại Arbiter, minh bạch sổ cái đấu thầu `AuctionStatus::RegimeIneligible`. Bảo toàn tuyệt đối 104 chiều DNA.
+  - **Unit Tests:**
+    - [x] `test_regime_classification_trending`
+    - [x] `test_regime_classification_breakout`
+    - [x] `test_regime_classification_range_bound`
+    - [x] `test_regime_data_anomaly_on_nan_inputs`
+    - [x] `test_selective_routing_matrix_contract`
+    - [x] `test_arbiter_process_tick_selective_routing_ledger`
 
 - [ ] **TODO-AUDIT-NEW-116: Triệt Tiêu Đánh Giá Lặp Lại `RegimeGatekeeper::evaluate` Tại Arbiter (`H-GATE-03`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:169`, `mod.rs:163`
