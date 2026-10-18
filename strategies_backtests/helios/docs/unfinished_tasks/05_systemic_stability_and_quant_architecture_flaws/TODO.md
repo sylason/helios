@@ -179,8 +179,11 @@
 
 ### PHẦN 9: NHIỆM VỤ CỐT TỬ TỪ KIỂM TOÁN GIAO TIẾP BOT-HELIOS & CONCURRENCY (NOTES 16, 17, 18)
 - [x] **TODO-AUDIT-NEW-10: Vá Khuyết Tật Bỏ Quên Hard SL Ban Đầu Khi Mở Lệnh Live (`BUG-EXEC-NEW-01`)**
-  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:249, 261`
-  - **Mô tả:** Bóc tách `sl_price` từ `policy: Some(RiskPolicy::FixedPrice { sl_price, .. })` thay vì chỉ đọc `stop` (vốn là None), đảm bảo vị thế mở trên sàn Binance luôn có lệnh Algo STOP_MARKET bảo vệ ngay lập tức qua WebSocket API.
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs`, `trading_bot/bot_engine/src/execution/live_engine.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH] Bóc tách `sl_price` từ `policy: Some(RiskPolicy::FixedPrice { sl_price, .. })` thay vì chỉ đọc `stop` (vốn là None); bổ sung `pending_initial_sl` trên `LiveEngine` chống race condition với `PositionUpdate`; nâng cấp 7 lần retry qua WebSocket API với exponential backoff; xử lý lỗi trùng lệnh `-4061` và kích hoạt 2-tier Emergency Panic Close (WS -> REST fallback) triệt tiêu hoàn toàn Naked Position.
+  - **Unit Tests:**
+    - [x] `test_extract_sl_price_from_action`
+    - [x] `test_live_engine_initial_sl_from_policy`
 - [ ] **TODO-AUDIT-NEW-11: Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`)**
   - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385`
   - **Mô tả:** Khởi tạo Job mới tăng dần (`new_job_id = max_job + 1`) mỗi chu kỳ Walk-Forward Rolling thay vì bỏ qua tạo Job khi file DB đã tồn tại.
@@ -282,9 +285,13 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:47-75`
   - **Mô tả:** Khôi phục biến `delta_kama = (close - kama_mid) / ATR` và điều kiện kiểm tra khoảng cách an toàn, chấm dứt tình trạng Trend_PB biến thành Dip Buying vu vơ không có điểm tựa hồi quy.
 
-- [x] **TODO-AUDIT-NEW-39: Khắc Phục Lỗi Tê Liệt Stochastic Hook Guard Do Forward-Fill 15m (`STOCH-15M-BLIND`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:81-85, 109-111`
-  - **Mô tả:** Sửa lỗi `stoch_k < prev_stoch_k` bị mù trong 93.3% số nến 1m do chỉ báo 15m dạng bậc thang phẳng; chuyển sang kiểm tra độ dốc nến vi mô hoặc Stoch vi mô tương thích.
+- [x] **TODO-AUDIT-NEW-39: Khắc Phục Lỗi Tê Liệt Stochastic Hook Guard Do Forward-Fill 15m (`STOCH-15M-BLIND`, `TODO-PB-04`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:86, 110-120, 162-172`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH - TWO-TIER HOOK GUARD]. Triệt tiêu 100% Vùng Chết [climax, thresh] và Sàn Bão Hòa $K=D=0.0 / 100.0$:
+    1. Cưỡng chế chặn đứng khi bão hòa cực đoan ($K \le 1.0 \land D \le 1.0$ cho Long; $K \ge 99.0 \land D \ge 99.0$ cho Short).
+    2. Vùng Climax ($K < climax\_thresh$): Đòi hỏi xác nhận kép (không rơi $K \ge prev\_K$ VÀ không nằm dưới $D$: $K \ge D$), khử nến phẳng chúi xuống và chặn 100% Bull Trap.
+    3. Vùng Pullback thường ($climax \le K \le stoch\_thresh$): Triệt tiêu hoàn toàn Vùng Chết, chặn đứng khi nến đang rơi dốc ($K < prev$) hoặc nến phẳng đang chúi xuống ($K == prev \land K < D$).
+    4. Sanitize `stoch_trend_d` chống `NaN`. Vượt qua 17/17 tests trong `cargo test --lib trend_pb`.
 
 - [ ] **TODO-AUDIT-NEW-40: Ngăn Chặn Đu Đỉnh Kiệt Sức Buying Climax Trong Momentum Ignition (`MOM-CLIMAX-SPAM`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:53-57, 108-126`

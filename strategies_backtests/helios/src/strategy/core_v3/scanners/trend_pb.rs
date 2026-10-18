@@ -83,7 +83,7 @@ impl TacticalScanner for TrendPBScanner {
         } else {
             stoch_k
         };
-        let stoch_d = sensors.stoch_trend_d.get(i).copied().unwrap_or(stoch_k);
+        let stoch_d = sensors.stoch_trend_d.get(i).copied().filter(|v| !v.is_nan()).unwrap_or(stoch_k);
         let climax_thresh = pb_cfg.stoch_climax_thresh.max(1.0);
 
         // Đạo hàm vi phân gradient nến: Close Location Value (CLV) [-1.0, +1.0]
@@ -107,11 +107,16 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            // 🛡️ Chốt chặn 2: Soft Stochastic Hook Guard (Chống bắt dao rơi khi thác lũ thanh lý)
-            // Khử dị tật bậc thang phẳng (staircase artifact): nếu nến 1m phẳng (stoch_k == prev), so sánh với %D
-            let is_falling = stoch_k < prev_stoch_k || (stoch_k <= prev_stoch_k && stoch_k < stoch_d);
-            if stoch_k < climax_thresh && is_falling {
-                return None; // Đang rơi tự do cắm đầu, cấm bắt dao rơi!
+            // 🛡️ Chốt chặn 2: Two-Tier Stochastic Hook Guard (Chống bắt dao rơi toàn dải & sàn bão hòa)
+            let is_falling = if stoch_k <= 1.0 && stoch_d <= 1.0 {
+                true // Sàn bão hòa thác lũ cực đoan: cấm tuyệt đối
+            } else if stoch_k < climax_thresh {
+                stoch_k < prev_stoch_k || stoch_k < stoch_d // Vùng Climax: đòi hỏi xác nhận kép (không rơi VÀ không dưới %D)
+            } else {
+                stoch_k < prev_stoch_k || (stoch_k <= prev_stoch_k && stoch_k < stoch_d) // Vùng Pullback thường
+            };
+            if is_falling {
+                return None;
             }
 
             // Chốt chặn 3: Xác nhận lực cầu vi mô CLV (Close Location Value >= min_clv)
@@ -154,11 +159,16 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            // 🛡️ Chốt chặn 2: Soft Stochastic Hook Guard (Chống bán khống khi FOMO bốc đầu)
-            // Khử dị tật bậc thang phẳng (staircase artifact): nếu nến 1m phẳng (stoch_k == prev), so sánh với %D
-            let is_surging = stoch_k > prev_stoch_k || (stoch_k >= prev_stoch_k && stoch_k > stoch_d);
-            if stoch_k > (100.0 - climax_thresh) && is_surging {
-                return None; // Đang tăng dựng đứng, cấm chặn đầu xe lửa!
+            // 🛡️ Chốt chặn 2: Two-Tier Stochastic Hook Guard (Chống chặn đầu xe lửa toàn dải & trần bão hòa)
+            let is_surging = if stoch_k >= 99.0 && stoch_d >= 99.0 {
+                true // Trần bão hòa FOMO cực đoan: cấm tuyệt đối
+            } else if stoch_k > (100.0 - climax_thresh) {
+                stoch_k > prev_stoch_k || stoch_k > stoch_d // Vùng Climax: đòi hỏi xác nhận kép (không tăng VÀ không trên %D)
+            } else {
+                stoch_k > prev_stoch_k || (stoch_k >= prev_stoch_k && stoch_k > stoch_d) // Vùng Pullback thường
+            };
+            if is_surging {
+                return None;
             }
 
             // Chốt chặn 3: Xác nhận lực cung vi mô CLV (Close Location Value <= -min_clv)
@@ -492,5 +502,200 @@ mod tests {
 
         let prop_flat_hooked = TrendPBScanner.scan(&tick, &sensors_flat_hooked, &matrix, &config);
         assert!(prop_flat_hooked.is_some(), "Soft Hook Guard PHẢI phê duyệt nến phẳng MTF khi %K đã cắt lên trên %D!");
+    }
+
+    #[test]
+    fn test_trend_pb_hook_guard_blocks_zero_and_hundred_saturation() {
+        let len = 10;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2002.0; len];
+        let mut lows = vec![1990.0; len];
+        let mut closes = vec![1998.0; len];
+        opens[i] = 1995.0;
+        highs[i] = 2000.0;
+        lows[i] = 1992.0;
+        closes[i] = 1998.0; // CLV = 0.50
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.min_clv = 0.20;
+
+        // Long bão hòa sàn 0.0: K = 0.0, D = 0.0
+        let mut sensors_zero = HeliosSensors::default();
+        sensors_zero.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_zero.stoch_trend_k = std::sync::Arc::new(vec![0.0; len]);
+        sensors_zero.stoch_trend_d = std::sync::Arc::new(vec![0.0; len]);
+        sensors_zero.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let mut matrix_long = MarketMatrixV3::default();
+        matrix_long.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop_zero = TrendPBScanner.scan(&tick, &sensors_zero, &matrix_long, &config);
+        assert!(prop_zero.is_none(), "Hook Guard PHẢI chặn đứng sàn bão hòa xả lũ K=D=0.0!");
+
+        // Short bão hòa trần 100.0: K = 100.0, D = 100.0
+        let mut sensors_hundred = HeliosSensors::default();
+        sensors_hundred.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_hundred.stoch_trend_k = std::sync::Arc::new(vec![100.0; len]);
+        sensors_hundred.stoch_trend_d = std::sync::Arc::new(vec![100.0; len]);
+        sensors_hundred.rsi_trend = std::sync::Arc::new(vec![65.0; len]);
+
+        let mut matrix_short = MarketMatrixV3::default();
+        matrix_short.kama_slope_atr = std::sync::Arc::new(vec![-0.20; len]);
+
+        // Tạo nến CLV âm cho Short
+        let mut closes_short = vec![1998.0; len];
+        closes_short[i] = 1993.0; // CLV = -0.75 <= -0.20
+        let (data_view_s, ind_mgr_s, mut actions_s, trades_s) = setup_mock_tick(
+            vec![2000.0; len], vec![2000.0; len], vec![1992.0; len], closes_short, i
+        );
+        let tick_short = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_s,
+            indicator_manager: &ind_mgr_s,
+            trades: &trades_s,
+            last_closed_trade: None,
+            actions: &mut actions_s,
+            position: Position::default(),
+        };
+
+        let prop_hundred = TrendPBScanner.scan(&tick_short, &sensors_hundred, &matrix_short, &config);
+        assert!(prop_hundred.is_none(), "Hook Guard PHẢI chặn đứng trần bão hòa FOMO K=D=100.0!");
+    }
+
+    #[test]
+    fn test_trend_pb_hook_guard_blocks_deadzone_falling() {
+        let len = 10;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2000.0; len];
+        let lows = vec![1992.0; len];
+        let closes = vec![1998.0; len]; // CLV = 0.50
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_climax_thresh = 10.0;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 35.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.min_clv = 0.20;
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        // Kịch bản rơi trong Vùng Chết cũ: K = 22.0 < prev = 28.0 (cả 2 đều > climax_thresh 10.0)
+        let mut stoch_deadzone = vec![30.0; len];
+        stoch_deadzone[i - 1] = 28.0;
+        stoch_deadzone[i] = 22.0;
+
+        let mut sensors_deadzone = HeliosSensors::default();
+        sensors_deadzone.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_deadzone.stoch_trend_k = std::sync::Arc::new(stoch_deadzone);
+        sensors_deadzone.stoch_trend_d = std::sync::Arc::new(vec![25.0; len]);
+        sensors_deadzone.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_deadzone = TrendPBScanner.scan(&tick, &sensors_deadzone, &matrix, &config);
+        assert!(prop_deadzone.is_none(), "Hook Guard PHẢI triệt tiêu Vùng Chết [10, 35], cấm mua khi Stoch đang rơi!");
+
+        // Kịch bản hồi ngóc đầu trong dải [10, 35]: K = 26.0 > prev = 24.0, D = 25.0
+        let mut stoch_rebound = vec![30.0; len];
+        stoch_rebound[i - 1] = 24.0;
+        stoch_rebound[i] = 26.0;
+
+        let mut sensors_rebound = HeliosSensors::default();
+        sensors_rebound.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_rebound.stoch_trend_k = std::sync::Arc::new(stoch_rebound);
+        sensors_rebound.stoch_trend_d = std::sync::Arc::new(vec![25.0; len]);
+        sensors_rebound.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_rebound = TrendPBScanner.scan(&tick, &sensors_rebound, &matrix, &config);
+        assert!(prop_rebound.is_some(), "Hook Guard PHẢI cho phép mở Long khi Stoch tạo đáy ngóc đầu trong dải [10, 35]!");
+    }
+
+    #[test]
+    fn test_trend_pb_hook_guard_climax_dual_confirmation() {
+        let len = 10;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2000.0; len];
+        let lows = vec![1992.0; len];
+        let closes = vec![1998.0; len]; // CLV = 0.50
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_climax_thresh = 10.0;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 35.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.min_clv = 0.20;
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        // Kịch bản A: Climax giật giả Bull Trap (K = 8.0 > prev = 6.0 nhưng D = 12.0 => K < D)
+        let mut stoch_fake = vec![30.0; len];
+        stoch_fake[i - 1] = 6.0;
+        stoch_fake[i] = 8.0;
+
+        let mut sensors_fake = HeliosSensors::default();
+        sensors_fake.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_fake.stoch_trend_k = std::sync::Arc::new(stoch_fake);
+        sensors_fake.stoch_trend_d = std::sync::Arc::new(vec![12.0; len]);
+        sensors_fake.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_fake = TrendPBScanner.scan(&tick, &sensors_fake, &matrix, &config);
+        assert!(prop_fake.is_none(), "Hook Guard PHẢI chặn đứng Bull Trap khi K < Climax nhưng chưa vượt D!");
+
+        // Kịch bản B: Climax xác nhận kép hoàn tất (K = 9.0 > prev = 6.0 VÀ D = 8.5 => K >= D)
+        let mut stoch_confirmed = vec![30.0; len];
+        stoch_confirmed[i - 1] = 6.0;
+        stoch_confirmed[i] = 9.0;
+
+        let mut sensors_confirmed = HeliosSensors::default();
+        sensors_confirmed.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_confirmed.stoch_trend_k = std::sync::Arc::new(stoch_confirmed);
+        sensors_confirmed.stoch_trend_d = std::sync::Arc::new(vec![8.5; len]);
+        sensors_confirmed.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_confirmed = TrendPBScanner.scan(&tick, &sensors_confirmed, &matrix, &config);
+        assert!(prop_confirmed.is_some(), "Hook Guard PHẢI phê duyệt khi K < Climax có đủ xác nhận kép (K > prev && K >= D)!");
     }
 }

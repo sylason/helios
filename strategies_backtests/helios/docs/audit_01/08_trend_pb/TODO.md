@@ -27,10 +27,18 @@
   - **Bản chất:** Bỏ phép lấy `.abs()` trong `sat_proximity(delta_kama.abs(), max_dist)`. Khi giá xuyên thủng KAMA ($\text{delta\_kama} < 0$ cho Long), phải áp dụng hệ số phạt (penalty) thay vì thưởng điểm cao.
   - **Test case:** Giá thủng KAMA -0.4 ATR phải có điểm khoảng cách thấp hơn rõ rệt so với giá giữ vững hỗ trợ +0.1 ATR.
 
-- [x] **TODO-PB-04: Bổ Sung Tín Hiệu Stochastic Ngóc Đầu Đảo Chiều (Stoch Hook Guard)**
-  - **File:** `trend_pb.rs:101-103, 140-142`
-  - **Bản chất:** Cấm Long khi $\text{stoch\_k} < 10.0$ và đang cắm đầu rơi tự do ($\text{stoch\_k} < \text{prev\_stoch\_k}$); Cấm Short khi $\text{stoch\_k} > 90.0$ và đang dựng đứng ($\text{stoch\_k} > \text{prev\_stoch\_k}$). Chỉ cho phép mở vị thế khi Stochastic đã uốn cong tạo điểm uốn (Hook inflection point).
-  - **Test case:** `test_trend_pb_soft_hook_guard_blocks_falling_knife`: Chặn đứng dao rơi Stoch cắm đầu, phê duyệt khi Stoch đã ngóc đầu tạo đáy.
+- [x] **TODO-PB-04: Nâng Cấp Two-Tier Stochastic Hook Guard (Chống Bắt Dao Rơi Toàn Dải & Khử Sàn Bão Hòa)**
+  - **File:** `trend_pb.rs:110-120, 162-172`
+  - **Bản chất:** Nâng cấp cơ chế Two-Tier Hook Guard:
+    1. Cưỡng chế chặn đứng khi bão hòa thác lũ/FOMO cực đoan ($K \le 1.0 \land D \le 1.0$ cho Long; $K \ge 99.0 \land D \ge 99.0$ cho Short).
+    2. Vùng Climax ($K < climax\_thresh$): Đòi hỏi xác nhận kép (vừa không rơi $K \ge prev\_K$, vừa không nằm dưới $D$: $K \ge D$), chống 100% Bull Trap.
+    3. Vùng Pullback thường ($climax \le K \le stoch\_thresh$): Triệt tiêu hoàn toàn Vùng Chết (Deadzone), chặn đứng khi nến đang rơi dốc ($K < prev$) hoặc nến phẳng đang chúi xuống ($K == prev \land K < D$).
+    4. Sanitize `stoch_trend_d` chống `NaN` khi chỉ báo warmup.
+  - **Test case:**
+    - `test_trend_pb_soft_hook_guard_blocks_falling_knife`: Chặn đứng dao rơi Stoch cắm đầu, phê duyệt khi Stoch đã ngóc đầu tạo đáy hoặc nến phẳng cắt lên %D.
+    - `test_trend_pb_hook_guard_blocks_zero_and_hundred_saturation`: Chặn đứng sàn bão hòa $K=D=0.0$ và trần bão hòa $K=D=100.0$.
+    - `test_trend_pb_hook_guard_blocks_deadzone_falling`: Triệt tiêu Vùng Chết $[climax, thresh]$, cấm mua khi đang rơi và phê duyệt khi tạo đáy ngóc đầu.
+    - `test_trend_pb_hook_guard_climax_dual_confirmation`: Chặn đứng Bull Trap $K < Climax$ nhưng $K < D$, phê duyệt khi có đủ xác nhận kép ($K > prev \land K \ge D$).
 
 - [x] **TODO-PB-05: Đưa Lực Nến `clv` Vào Hàm Chấm Điểm Lồi**
   - **File:** `trend_pb.rs:110, 149`

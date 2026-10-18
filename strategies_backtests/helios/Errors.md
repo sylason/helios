@@ -146,3 +146,42 @@
      - 53/53 tests `bot_engine::lib` pass.
      - 6/6 tests `trailing_sl_test` pass.
      - `cargo check` trên cả `helios`, `ferro_trade`, và ví dụ `walk_forward_smart_seed` đều pass 100%.
+
+---
+
+### ❌ Lỗi #010: Bỏ Quên Hard SL Ban Đầu Khi Mở Lệnh Live & Nguy Cơ Vị Thế Trần Trụi (TODO-AUDIT-NEW-10 / BUG-EXEC-NEW-01)
+- **Hiện tượng:** Khi chiến lược Helios V3 phát sinh tín hiệu mở vị thế mới (`Action::Buy` / `Action::Sell`), bot trên sàn Binance Futures Live/Testnet mở Market Order thành công nhưng **hoàn toàn bỏ qua việc đặt lệnh Algo `STOP_MARKET` bảo vệ ban đầu**. Vị thế bị thả nổi trần trụi (Naked Position) trong suốt thời gian của cây nến đầu tiên ($\ge 60$s) hoặc cho tới khi có nhịp dời Trailing SL. Nếu xảy ra râu nến quét thanh khoản hoặc sập giá bất ngờ, tài khoản phải đối mặt với nguy cơ thanh lý cưỡng bức (Liquidation).
+- **Nguyên nhân gốc rễ:**
+  1. *Lệch pha mô hình dữ liệu (Data Contract Mismatch):* Helios V3 đóng gói giá dừng lỗ ban đầu vào `policy: Some(RiskPolicy::FixedPrice { sl_price, .. })` và gán `stop = None`. Tuy nhiên, `OrderExecutor` và `LiveEngine` chỉ đọc biến `sl_price_to_set = stop;`, dẫn tới `sl_price_to_set` luôn luôn là `None`.
+  2. *Bẫy tranh chấp luồng mạng (Network Race Condition):* Khi Market Order khớp trên sàn, sự kiện WebSocket `PositionUpdate` thường đến máy khách trước khi chu trình đặt lệnh Algo SL hoàn tất và ghi vào RAM `active_sl`. `LiveEngine` rơi vào trạng thái "mù" SL hoặc phải gọi REST API `sync_active_algo_orders` làm tốn API Weight vô ích.
+  3. *Thiếu cơ chế phòng vệ chốt chặn cuối (Absence of Panic Defense):* Cơ chế đặt SL chỉ có 3 lần retry sơ sài (20ms) và nếu thất bại hoàn toàn thì chỉ in log lỗi `error!` rồi bỏ mặc vị thế mở trần trụi ngoài thị trường, không có phản xạ thoát lệnh khẩn cấp.
+- **Giải pháp đã thực hiện:**
+  1. *Hàm trích xuất chuẩn hóa:* Xây dựng pure helper function `OrderExecutor::extract_sl_price(action: &Action) -> Option<f64>` ưu tiên bóc tách `sl_price` từ `RiskPolicy::FixedPrice`, fallback sang `stop` và `new_sl_price` của `UpdateTradeSlTp`.
+  2. *Bộ đệm bảo vệ đón đầu (`pending_initial_sl`):* Mở rộng `LiveEngine` với trường `pending_initial_sl`, lưu giá SL ngay khi nhận `Action` từ Strategy trước khi gửi lệnh. Khi `PositionUpdate` đến, `LiveEngine` ưu tiên gán ngay `pending_initial_sl` vào `live_position.current_sl_price` mà không cần chờ hay gọi REST API, và tự động dọn sạch khi vị thế flat (`position_amt == 0.0`).
+  3. *Kháng nhiễu mạng 7 tầng & Tự hủy trùng lệnh:* Nâng cấp vòng lặp đặt Hard SL qua WebSocket lên 7 lần retry với exponential backoff (`[10, 20, 40, 80, 160, 320, 500]ms`); tự động bắt mã lỗi trùng lệnh `-4061` để đồng bộ và hủy lệnh Algo cũ trước khi retry.
+  4. *Cơ chế 2-Tier Emergency Panic Close:* Nếu sau cả 7 lần retry vẫn thất bại, bot lập tức kích hoạt Emergency Market Close đảo chiều qua WebSocket Trade API (kèm Last-Resort REST API fallback) để đóng ngay vị thế, bảo đảm không bao giờ để Naked Position tồn tại ngoài thị trường.
+  5. *Kiểm thử 100% Zero-Regression:*
+     - Viết mới `test_extract_sl_price_from_action` và `test_live_engine_initial_sl_from_policy`.
+     - 57/57 tests `bot_engine::lib` pass 100%.
+     - 117/117 tests `helios::lib` pass 100%.
+     - 51/51 tests `ferro_trade::lib` pass 100%.
+
+---
+
+### ❌ Lỗi #011: Vùng Chết (Deadzone) & Sàn Bão Hòa Cực Đoan Trong Stochastic Hook Guard Của Trend_PB (TODO-PB-04 / TODO-AUDIT-NEW-39)
+- **Hiện tượng:**
+  1. *Vùng Chết (Deadzone) $[climax\_thresh, stoch\_thresh]$:* Khi Stochastic nằm trong khoảng $[15.0, 30.0]$ và đang cắm đầu rơi tự do dốc đứng, do điều kiện kẹp `stoch_k < climax_thresh && is_falling`, scanner không chặn mà vẫn duyệt lệnh Long, biến Trend_PB thành hành vi bắt dao rơi liều mạng.
+  2. *Sàn Bão Hòa Cực Đoan ($K = D = 0.0$ cho Long / $K = D = 100.0$ cho Short):* Khi thị trường bán tháo xả lũ cực mạnh đè bẹp Stochastic xuống sàn $0.0$, phép so sánh `stoch_k < prev_stoch_k` và `stoch_k < stoch_d` đều cho kết quả `false`, dẫn đến `is_falling = false` và bot nhảy vào mua ngay tại tâm bão xả lũ.
+  3. *Lỗ hổng NaN Warmup:* `sensors.stoch_trend_d` chưa lọc giá trị `NaN` trong giai đoạn khởi động chỉ báo.
+- **Nguyên nhân gốc rễ:**
+  1. Giả định ngầm sai lầm rằng "chỉ khi rơi xuống vùng xả lũ cực đoan ($< climax\_thresh$) mới cần chặn rơi tự do". Trong thực tế, bất kỳ nhịp hồi nào đang rơi dốc đứng ở mức 20 hay 25 cũng đều chưa hình thành điểm uốn đảo chiều.
+  2. Bỏ quên trường hợp suy biến bão hòa số học biên tại $0.0$ và $100.0$ của bộ dao động $[0, 100]$.
+- **Giải pháp đã thực hiện (Two-Tier Stochastic Hook Guard):**
+  1. *Khử sàn/trần bão hòa:* Cưỡng chế $is\_falling = true$ khi $K \le 1.0 \land D \le 1.0$; $is\_surging = true$ khi $K \ge 99.0 \land D \ge 99.0$.
+  2. *Vùng Climax ($K < climax\_thresh$):* Đòi hỏi xác nhận kép (không rơi $K \ge prev\_K$ VÀ không nằm dưới $D$: $K \ge D$). Chặn đứng 100% Bull Trap khi $K$ giật nhẹ nhưng vẫn nằm dưới $D$.
+  3. *Vùng Pullback thường ($climax \le K \le stoch\_thresh$):* Triệt tiêu hoàn toàn Vùng Chết, chặn đứng khi nến đang rơi dốc ($K < prev$) hoặc nến phẳng đang chúi xuống ($K == prev \land K < D$).
+  4. *Sanitize NaN:* Thêm `.filter(|v| !v.is_nan()).unwrap_or(stoch_k)`.
+  5. *Kiểm thử 100% Zero-Regression:*
+     - Viết mới 3 tests: `test_trend_pb_hook_guard_blocks_zero_and_hundred_saturation`, `test_trend_pb_hook_guard_blocks_deadzone_falling`, `test_trend_pb_hook_guard_climax_dual_confirmation`.
+     - 17/17 tests `trend_pb` pass 100%.
+     - `test_dna_width_and_parameter_defs_integrity` pass 100% (bảo toàn 107 chiều DNA).
