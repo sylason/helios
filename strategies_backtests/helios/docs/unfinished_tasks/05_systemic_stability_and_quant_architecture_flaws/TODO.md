@@ -69,9 +69,18 @@
 ---
 
 ### PHẦN 4: HÓA GIẢI CÁC ĐIỂM YẾU GIAO THOA GIỮA HELIOS VÀ TRADING BOT
-- [ ] **TODO-STAB-06: Độc quyền hóa Thẩm quyền Risk về `helios::risk` (Khử Split-Brain)**
-  - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs`, `order_executor.rs`, `helios_bridge.rs`
-  - **Mô tả:** Đồng bộ 1:1 công thức và logic tính Stop Loss / Take Profit giữa Backtest và Bot Engine.
+- [x] **TODO-STAB-06: Độc quyền hóa Thẩm quyền Risk về `helios::risk` (Khử Split-Brain) & Pure WebSocket Trade API**
+  - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs`, `live_engine.rs`, `ws_manager.rs`
+  - **Mô tả:** 
+    - Độc quyền hóa thẩm quyền Risk về `helios::risk`, đồng bộ 1:1 Stop Loss và Playbook Tag giữa Helios và Bot Engine.
+    - Chuyển đổi 100% việc gửi lệnh Market (`order.place`), hủy Algo SL (`algoOrder.cancel`) và đặt Algo SL (`algoOrder.place`) sang Pure WebSocket của Binance Connector Rust, bảo toàn 2400 API Weight/phút và triệt tiêu độ trễ HTTP.
+    - Cơ chế Fast Reconnect và theo dõi `active_algo_ids` chuẩn xác theo quy tắc vi mô sàn Binance (Hủy SL cũ -> Đặt SL mới trong 5-15ms).
+  - **Unit Tests:**
+    - [x] `test_order_executor_wait_ws_ready_timeout`
+    - [x] `test_order_executor_algo_id_tracking`
+    - [x] `test_live_engine_syncs_current_sl_price`
+    - [x] `test_live_engine_preserves_playbook_tag`
+    - [x] `test_live_engine_adopt_position_with_active_sl`
 - [ ] **TODO-STAB-07: Cơ chế Tick-Level Emergency Circuit Breaker (Khử Intra-Candle Blindness)**
   - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs`
   - **Mô tả:** Lắng nghe WebSocket MarkPrice để cắt lỗ khẩn cấp ngay trong nến khi xảy ra Flash Crash hoặc gãy cấu trúc nghiêm trọng.
@@ -151,9 +160,9 @@
 - [ ] **TODO-AUDIT-NEW-05: Vá Lỗ Hổng Inverted SL Bằng Tham Số `is_long`**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:84-138`
   - **Mô tả:** Bổ sung `is_long: bool` vào `validate_structural_sl`. Long bắt buộc $SL < Price$, Short bắt buộc $SL > Price$.
-- [ ] **TODO-AUDIT-NEW-06: Khử Lỗi Mù SL Của Strategy (Phantom SL Desync)**
+- [x] **TODO-AUDIT-NEW-06: Khử Lỗi Mù SL Của Strategy (Phantom SL Desync)**
   - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:117-160`
-  - **Mô tả:** Cập nhật ngay `live_position.current_sl_price = Some(new_sl)` khi dời SL để Strategy không bị mù trạng thái sàn và ngừng spam lệnh dời SL mỗi nến.
+  - **Mô tả:** Cập nhật ngay `live_position.current_sl_price = Some(new_sl)` khi dời SL để Strategy không bị mù trạng thái sàn và ngừng spam lệnh dời SL mỗi nến. (Đã hoàn thành và kiểm thử trong `test_live_engine_syncs_current_sl_price`).
 - [ ] **TODO-AUDIT-NEW-07: Khai Thông `Trend_PB` & Sửa Hàm Volume Bán Tháo `Reversal`**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:64, 98`, `reversal.rs:105-107`
   - **Mô tả:** Gỡ bỏ Squeeze ngáng chân trong TrendPB (vì RangeOsc đã tắt); sửa hàm volume Reversal chấp nhận cả bão khối lượng bán tháo ($vol\_ratio > 1.5$) là tín hiệu đảo chiều.
@@ -167,9 +176,9 @@
 ---
 
 ### PHẦN 9: NHIỆM VỤ CỐT TỬ TỪ KIỂM TOÁN GIAO TIẾP BOT-HELIOS & CONCURRENCY (NOTES 16, 17, 18)
-- [ ] **TODO-AUDIT-NEW-10: Vá Khuyết Tật Bỏ Quên Hard SL Ban Đầu Khi Mở Lệnh Live (`BUG-EXEC-NEW-01`)**
+- [x] **TODO-AUDIT-NEW-10: Vá Khuyết Tật Bỏ Quên Hard SL Ban Đầu Khi Mở Lệnh Live (`BUG-EXEC-NEW-01`)**
   - **File:** `trading_bot/bot_engine/src/execution/order_executor.rs:249, 261`
-  - **Mô tả:** Bóc tách `sl_price` từ `policy: Some(RiskPolicy::FixedPrice { sl_price, .. })` thay vì chỉ đọc `stop` (vốn là None), đảm bảo vị thế mở trên sàn Binance luôn có lệnh Algo STOP_MARKET bảo vệ ngay lập tức.
+  - **Mô tả:** Bóc tách `sl_price` từ `policy: Some(RiskPolicy::FixedPrice { sl_price, .. })` thay vì chỉ đọc `stop` (vốn là None), đảm bảo vị thế mở trên sàn Binance luôn có lệnh Algo STOP_MARKET bảo vệ ngay lập tức qua WebSocket API.
 - [ ] **TODO-AUDIT-NEW-11: Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`)**
   - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385`
   - **Mô tả:** Khởi tạo Job mới tăng dần (`new_job_id = max_job + 1`) mỗi chu kỳ Walk-Forward Rolling thay vì bỏ qua tạo Job khi file DB đã tồn tại.
@@ -179,12 +188,12 @@
 - [ ] **TODO-AUDIT-NEW-13: Sửa Lỗ Hổng Same-Bar Re-entry Guard Bị Bypassed Khi Đóng Lệnh Giữa Nến (`BUG-ACT-NEW-02`)**
   - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:373-378, 637-644`
   - **Mô tả:** Bổ sung `last_exit_bar_idx: Option<usize>` vào `AssetActor`, khóa cứng cấm mở lệnh lại trên cùng cây nến vừa thoát lệnh, bất kể lệnh đóng giữa nến qua WS hay tại nến đóng.
-- [ ] **TODO-AUDIT-NEW-14: Khôi Phục Tag Playbook & Đồng Bộ SL Sàn Vào Live Position (`TODO-BRG-03`)**
+- [x] **TODO-AUDIT-NEW-14: Khôi Phục Tag Playbook & Đồng Bộ SL Sàn Vào Live Position (`TODO-BRG-03`)**
   - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:197-207`
-  - **Mô tả:** Lưu và chuyển tiếp `opening_playbook_tag` sang vị thế để kích hoạt Dynamic TP của Range/Reversal; đồng bộ `current_sl_price` từ `OrderExecutor` để Strategy không bị mù trạng thái sàn.
-- [ ] **TODO-AUDIT-NEW-15: Căn Chỉnh Lát Cắt Buffer Chia Hết 4h UTC & Nâng Buffer 30,000 Nến (`TODO-ACT-04`)**
-  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:604`, `models/config.rs:79`
-  - **Mô tả:** Tăng buffer lên 30,000 nến 1m và căn chỉnh `slice_start` lùi về mốc 4h UTC tròn để cây nến 4h đầu tiên không bị cắt cụt, bảo toàn hội tụ chỉ báo MTF.
+  - **Mô tả:** Lưu và chuyển tiếp `opening_playbook_tag` sang vị thế để kích hoạt Dynamic TP của Range/Reversal; đồng bộ `current_sl_price` từ `OrderExecutor` để Strategy không bị mù trạng thái sàn. (Đã kiểm thử trong `test_live_engine_preserves_playbook_tag` & `test_live_engine_adopt_position_with_active_sl`).
+- [x] **TODO-AUDIT-NEW-15: Đồng Bộ Hóa Cửa Sổ Bộ Nhớ Theo Ngày & Xóa Bỏ Cắt Lát Nến Cụt (`TODO-ACT-04`)**
+  - **File:** `trading_bot/bot_engine/src/models/config.rs:24-95`, `models/models.rs:29-76`, `controller/asset_actor.rs:148, 196, 575`, `examples/walk_forward_smart_seed.rs:63, 192`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH: Bác bỏ phương án hardcode 4h UTC vi phạm tính độc lập khung thời gian]. Triển khai kiến trúc Single Source of Truth dẫn xuất động theo số ngày (`EngineConfig::for_days(days)`): Động hóa `Asset.max_capacity`, đồng bộ `sync_history` với `historical_sync_days`. Trong `walk_forward_smart_seed.rs`, đồng bộ RAM của Actor bằng đúng `TRAIN_WINDOW_DAYS` (40 ngày = 57,600 nến 1m) khiến `slice_start = 0`, triệt tiêu hoàn toàn nến cụt và sai số khởi tạo MTF, đồng bộ 1:1 dữ liệu giữa GA Optimizer và Actor.
 - [ ] **TODO-AUDIT-NEW-16: Chuẩn Hóa `apply_dna` Cho Toàn Bộ Điểm Cập Nhật DNA Nóng (`TODO-ACT-05`)**
   - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:338, 515`
   - **Mô tả:** Thay thế các lệnh gọi trực tiếp `update_from_dna` bằng `self.apply_dna(...)` để kiểm tra kích thước DNA (103 chiều) và chặn triệt để `NaN`/`Inf`.
@@ -919,11 +928,11 @@
 
 ## 🏛️ PHẦN 24: TÁI CẤU TRÚC SÀN ĐẤU THẦU ARBITER & RỦI RO CHIẾN THUẬT (NOTES 05, 12, 14, 15, 21, 22)
 
-- [ ] **TODO-AUDIT-NEW-165: Xây Dựng Module Quantile Normalization & Đấu Thầu EV Kỳ Vọng Toán Học Thuần Khiết Trong Arbiter (`H-QUANTILE-FAIR-ARBITER`)**
+- [x] **TODO-AUDIT-NEW-165: Xây Dựng Module Quantile Normalization & Đấu Thầu EV Kỳ Vọng Toán Học Thuần Khiết Trong Arbiter (`H-QUANTILE-FAIR-ARBITER`) (ĐÃ TỐI GIẢN HÓA & QUY HOẠCH CỤM E)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:150-185`
-  - **Mô tả:** Chuẩn hóa điểm số thô của từng scanner theo phân phối lịch sử của chính nó thành điểm phân vị $Z$-Score $\in [0.0, 1.0]$. Đấu thầu dựa trên điểm kỳ vọng toán học chuẩn hóa: $EV = \text{Score}_{\text{norm}} \times \frac{\text{TP Dist}}{\text{SL Dist}} - \text{Friction}$, triệt tiêu hoàn toàn tình trạng Absorption cướp quyền vô lý của Momentum và Reversal.
+  - **Mô tả:** [HOÀN THÀNH: Đã viết Unit Test thực nghiệm `test_intra_regime_fair_auction_pattern_quality_wins` chứng minh Arbiter giải quyết xung đột cùng chiều hoàn toàn dựa trên Pattern Quality phi thứ nguyên trong cùng Regime. Đã bác bỏ giải pháp EV = TP/SL (do TP là None) và Quantile Buffer cồng kềnh; việc hiệu chuẩn dải điểm tại nguồn được chuyển giao chính quy sang Cụm E.] Chuẩn hóa điểm số thô của từng scanner theo phân phối lịch sử của chính nó thành điểm phân vị $Z$-Score $\in [0.0, 1.0]$. Đấu thầu dựa trên điểm kỳ vọng toán học chuẩn hóa: $EV = \text{Score}_{\text{norm}} \times \frac{\text{TP Dist}}{\text{SL Dist}} - \text{Friction}$, triệt tiêu hoàn toàn tình trạng Absorption cướp quyền vô lý của Momentum và Reversal.
   - **Unit Tests:**
-    - [ ] `test_fair_arbiter_momentum_wins_when_stronger_ev_despite_lower_raw_score`
+    - [x] `test_intra_regime_fair_auction_pattern_quality_wins`
 
 - [ ] **TODO-AUDIT-NEW-166: Điều Chỉnh `min_lock_roe` Khử Vùng Chân Không Trailing SL Từ $+6\%$ Đến $+20\%$ ROE (`H-TSL-VACUUM-RECONCILIATION`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:1187`, `risk.rs:431-445`

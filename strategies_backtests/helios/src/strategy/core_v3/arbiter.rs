@@ -1169,4 +1169,104 @@ mod tests {
         let range_candidate = decision.auction_ledger.iter().find(|c| c.scanner_id == ScannerId::RangeOscillator).unwrap();
         assert_eq!(range_candidate.status, AuctionStatus::Won);
     }
+
+    #[test]
+    fn test_intra_regime_fair_auction_pattern_quality_wins() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.risk_management.risk_base.leverage = 20.0;
+        config.tactical_sniper.pullback.max_initial_sl_pct = 0.15;
+        config.tactical_sniper.momentum.max_initial_sl_pct = 0.15;
+
+        // Cấu hình thị trường Trending mạnh mẽ (ADX = 32.0 >= 25.0, ER = 0.45 >= 0.35)
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]);
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![32.0; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.45; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.20; len]);
+
+        // Đề xuất 1: TrendPullback (Long, raw 0.75, SL = 1990.0) - Hợp lệ trong Trending!
+        let trend_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.75,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(1990.0),
+            suggested_tp: None,
+        };
+
+        // Đề xuất 2: MomentumIgnition (Long, raw 0.88, SL = 1992.0) - Cùng hợp lệ trong Trending!
+        let mom_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.88,
+            scanner_id: ScannerId::MomentumIgnition,
+            suggested_sl: Some(1992.0),
+            suggested_tp: None,
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::TrendPullback,
+            proposal: Some(trend_prop),
+        }));
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::MomentumIgnition,
+            proposal: Some(mom_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+
+        // KẾT QUẢ KỲ VỌNG:
+        // 1. Quyết định được APPROVE vì cả 2 đều hợp lệ trong Trending và vượt min_confidence_threshold
+        assert!(decision.is_approved);
+        // 2. Winner PHẢI là MomentumIgnition vì có điểm tự tin Pattern Quality cao hơn (0.88 > 0.75)
+        assert_eq!(decision.winning_scanner, Some(ScannerId::MomentumIgnition));
+        assert_eq!(decision.final_confidence, 0.88);
+        assert_eq!(decision.final_sl, Some(1992.0));
+        // 3. Sổ cái đấu thầu (Auction Ledger) phải ghi nhận đầy đủ 2 proposals
+        assert_eq!(decision.auction_ledger.len(), 2);
+
+        let mom_candidate = decision.auction_ledger.iter().find(|c| c.scanner_id == ScannerId::MomentumIgnition).unwrap();
+        assert_eq!(mom_candidate.status, AuctionStatus::Won);
+
+        let trend_candidate = decision.auction_ledger.iter().find(|c| c.scanner_id == ScannerId::TrendPullback).unwrap();
+        assert_eq!(trend_candidate.status, AuctionStatus::RunnerUp);
+        assert!(trend_candidate.reason.contains("Subordinate to winner on same side"));
+        assert!(trend_candidate.reason.contains("0.750 < 0.880"));
+    }
 }

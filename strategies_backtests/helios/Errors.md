@@ -126,3 +126,23 @@
      - 11/11 tests trong `arbiter::tests` pass (bao gồm test case phê duyệt SL 30% ROE chuyển giao cho RiskManager và test case VETO lệnh Kamikaze vi phạm thanh lý sàn).
      - 108/108 tests toàn bộ thư viện `helios` pass.
      - 46/46 tests `bot_engine` pass.
+
+---
+
+### ❌ Lỗi #009: Lệch Pha Cắt Lát Buffer & Nến Cụt MTF Khởi Tạo (TODO-AUDIT-NEW-15 / TODO-ACT-04 / SLICE-WARMUP-MISMATCH)
+- **Hiện tượng:** 
+  1. Trong `AssetActor::get_live_candles_slice`, buffer RAM bị cắt lát cứng xuống 15,000 nến (`max_live_mem_candles`). Cây nến đầu tiên sau lát cắt rơi vào một phút ngẫu nhiên không chia hết cho 240m (4h), dẫn đến cây nến 4h đầu tiên bị cắt cụt (truncated candle) làm biến dạng chỉ báo MTF Resampling.
+  2. Sự mất đồng bộ giữa GA In-Sample Window (40 ngày = 57,600 nến) và Actor Buffer (30 ngày hoặc 15,000 nến) khiến GA tối ưu một tập dữ liệu, còn Actor vận hành trên một tập dữ liệu hoàn toàn khác, gây sai số khởi tạo chỉ báo (Warmup Initialization Drift).
+- **Nguyên nhân gốc rễ:**
+  1. *Đề xuất ban đầu sai bản chất:* Ý định hardcode 4h UTC (`timestamp % 14_400_000 == 0`) vi phạm nguyên tắc trừu tượng phân tầng (Leaky Abstraction) và xung đột với kiến trúc độc lập khung thời gian `TODO-AUDIT-NEW-159` ($T_{micro}, T_{meso}, T_{macro}$).
+  2. *Thiếu Single Source of Truth (SSOT) về thời gian:* `Asset.candles` bị hardcode trần dung lượng 43,200 nến trong `models.rs`, `sync_history` hardcode 30 ngày, trong khi các hằng số ngày cấu hình phân mảnh ở nhiều nơi.
+- **Giải pháp đã thực hiện (Kiến Trúc Dẫn Xuất Động Theo Số Ngày - Dynamic Days-Driven Engine):**
+  1. *Single Source of Truth:* Thêm hàm khởi tạo `EngineConfig::for_days(days: u64)` tự động tính $\text{Candles} = \text{days} \times 1,440$ nến 1m và `historical_sync_days = days`.
+  2. *Động hóa `Asset`:* Mở rộng `Asset` với trường `pub max_capacity: usize`, bổ sung constructor `new_with_capacity(symbol, capacity)` và tự động cập nhật dung lượng khi gọi `with_config` hoặc `with_max_mem_candles`.
+  3. *Đồng bộ `sync_history`:* Nạp dữ liệu lịch sử từ SQLite theo đúng `self.config.historical_sync_days`, triệt tiêu hardcode 30 ngày.
+  4. *Đồng bộ 1:1 trong `walk_forward_smart_seed.rs`:* Cấu hình Actor bằng `EngineConfig::for_days(TRAIN_WINDOW_DAYS as u64)` (40 ngày = 57,600 nến). Khi đó `slice_start = 0`, GA và Actor nhìn thấy tập dữ liệu 1:1, nến cụt và sai số khởi tạo tự động biến mất 100%.
+  5. *Chuẩn hóa Mock Candles:* Loại bỏ data artifact trong `create_mock_candles` (cập nhật `last_p = p` liên tục và làm mượt warmup candles kết thúc tại `start_price`).
+  6. *Kiểm thử 100% Zero-Regression:*
+     - 53/53 tests `bot_engine::lib` pass.
+     - 6/6 tests `trailing_sl_test` pass.
+     - `cargo check` trên cả `helios`, `ferro_trade`, và ví dụ `walk_forward_smart_seed` đều pass 100%.
