@@ -24,33 +24,34 @@ fn create_mock_candles(start_price: f64, prices: &[f64]) -> Vec<Candle> {
     let mut candles = Vec::with_capacity(43200 + prices.len());
     let mut timestamp = 1700000000000;
 
-    // 1. Tạo 43,200 nến Warmup (30 ngày dữ liệu 1m chuẩn như AssetActor::handle_initial_sync)
+    // 1. Tạo 43,200 nến Warmup (30 ngày dữ liệu 1m chuẩn kết thúc tại start_price)
     for i in 0..43200 {
-        let p = start_price + (i as f64 * 0.001);
+        let p = start_price - 4.32 + (i as f64 * 0.0001);
         candles.push(Candle {
             symbol: "ETHUSDT".to_string(),
             timestamp,
             open: p,
-            high: p + 1.0,
-            low: p - 1.0,
+            high: p + 0.5,
+            low: p - 0.5,
             close: p,
             volume: 1000.0,
         });
         timestamp += 60000;
     }
 
-    // 2. Bơm danh sách các nến biến động theo kịch bản
-    let last_p = candles.last().unwrap().close;
+    // 2. Bơm danh sách các nến biến động theo kịch bản (cập nhật last_p liên tục)
+    let mut last_p = candles.last().unwrap().close;
     for &p in prices {
         candles.push(Candle {
             symbol: "ETHUSDT".to_string(),
             timestamp,
             open: last_p,
-            high: p.max(last_p) + 1.0,
-            low: p.min(last_p) - 1.0,
+            high: p.max(last_p) + 0.5,
+            low: p.min(last_p) - 0.5,
             close: p,
             volume: 1200.0,
         });
+        last_p = p;
         timestamp += 60000;
     }
 
