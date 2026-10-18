@@ -341,9 +341,9 @@ impl HeliosArbiter {
                             )
                         }
                         SlValidationResult::StructuralRiskVeto { suggested_roe, max_roe } => {
-                            // 🛡️ [TODO-AUDIT-NEW-04] Phá bẫy Catch-22 VETO:
+                            // 🛡️ [TODO-AUDIT-NEW-37]: Phá bẫy Catch-22 VETO:
                             // Tín hiệu có SL cấu trúc vượt trần ROE không bị Arbiter VETO loại bỏ,
-                            // mà được phê duyệt tham gia đấu thầu để chuyển tiếp xuống RiskManager::clamp_sl_price tại mod.rs.
+                            // mà được phê duyệt tham gia đấu thầu để chuyển tiếp xuống RiskManager kẹp SL và định cỡ Dynamic De-leverage.
                             if confidence >= min_threshold {
                                 approved_proposals.push((proposal.clone(), confidence));
                                 (
@@ -351,7 +351,7 @@ impl HeliosArbiter {
                                     true,
                                     None,
                                     format!(
-                                        "Structural SL exceeds ROE cap ({:.1}% > {:.1}%), passed to RiskManager for clamping",
+                                        "Structural SL exceeds ROE cap ({:.1}% > {:.1}%), passed to RiskManager for clamping & dynamic sizing",
                                         suggested_roe * 100.0,
                                         max_roe * 100.0
                                     ),

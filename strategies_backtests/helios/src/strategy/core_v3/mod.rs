@@ -179,8 +179,10 @@ impl Strategy for HeliosStrategyV3 {
         s.vol_z_score = ctx.z_score_volume(ind.vol_z_score.timeframe, "VolZScore", ind.vol_z_score.lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
 
-        // 🛡️ FLAW-REG.10: Tính độ dốc chuẩn hóa của trục giữa Bollinger Bands (SMA 20) qua ATR (K = 5 bars)
-        let k_bars = 5;
+        // 🛡️ FLAW-REG.10 & TODO-AUDIT-NEW-37: Tính độ dốc chuẩn hóa của trục giữa Bollinger Bands (SMA 20) qua ATR
+        // Bước nhảy k_bars tỷ lệ thuận theo timeframe của BB (Single Source of Truth qua Timeframe::to_minutes())
+        // triệt tiêu hoàn toàn dị tật bậc thang phẳng (trừ ra 0.0 giả tạo).
+        let k_bars = ind.bbands.timeframe.to_minutes().max(1) as usize;
         let bb_m_len = s.bb_middle.len();
         let mut bb_slope = Vec::with_capacity(bb_m_len);
         for idx in 0..bb_m_len {
@@ -274,29 +276,6 @@ impl Strategy for HeliosStrategyV3 {
                 // bởi Bot Engine (AssetActor) dựa trên PnL thực tế của tài khoản (Net PnL).
                 // Helios Strategy chuyên tâm 100% vào việc sinh tín hiệu Alpha, không tự ý can thiệp Cooldown.
                 let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
-                
-                let size = RiskManager::calculate_size(
-                    tick.equity, 
-                    self.config.risk_management.risk_base.percent_per_trade, 
-                    self.config.risk_management.risk_base.min_order_usd, 
-                    leverage,
-                    self.config.risk_management.risk_base.max_cap_fraction,
-                );
-
-                // Chốt chặn Capital Starvation Guard (TODO-MATH-03):
-                // Nếu tài khoản không đủ vốn để đạt min_order_usd hoặc size không hợp lệ,
-                // hủy bỏ mở lệnh ngay lập tức để không gửi lệnh ảo tick.buy/sell(Some(0.0))
-                // và triệt tiêu nguy cơ downstream nhầm tưởng size None rồi All-in 100%.
-                if size <= 0.0 || !size.is_finite() {
-                    if self.debug_mode {
-                        warn!(
-                            "🛑 [CAPITAL STARVATION VETO] Bar: {} | Equity: {:.2} | Lev: {:.1}x | Signal: {:?} -> Size <= 0.0 (Order Aborted)",
-                            tick.i, tick.equity, leverage, signal
-                        );
-                    }
-                    return;
-                }
-                
                 let is_long = signal == SignalType::Long;
                 
                 // [FLAW-TSL.8: FALLBACK HIERARCHY]
@@ -341,6 +320,32 @@ impl Strategy for HeliosStrategyV3 {
                     risk_base.taker_fee_rate,
                     risk_base.liquidation_buffer_ratio,
                 );
+
+                // 🛡️ [TODO-AUDIT-NEW-37]: Định cỡ vị thế động theo $Risk Parity (Dynamic De-leverage)
+                // Tính toán size dựa trên khoảng cách SL thực tế đã được kẹp an toàn.
+                let size = RiskManager::calculate_dynamic_size(
+                    tick.equity, 
+                    risk_base.percent_per_trade, 
+                    price,
+                    initial_sl,
+                    leverage,
+                    risk_base.min_order_usd, 
+                    risk_base.max_cap_fraction,
+                );
+
+                // Chốt chặn Capital Starvation Guard (TODO-MATH-03):
+                // Nếu tài khoản không đủ vốn để đạt min_order_usd hoặc size không hợp lệ,
+                // hủy bỏ mở lệnh ngay lập tức để không gửi lệnh ảo tick.buy/sell(Some(0.0))
+                // và triệt tiêu nguy cơ downstream nhầm tưởng size None rồi All-in 100%.
+                if size <= 0.0 || !size.is_finite() {
+                    if self.debug_mode {
+                        warn!(
+                            "🛑 [CAPITAL STARVATION VETO] Bar: {} | Equity: {:.2} | Lev: {:.1}x | Signal: {:?} -> Size <= 0.0 (Order Aborted)",
+                            tick.i, tick.equity, leverage, signal
+                        );
+                    }
+                    return;
+                }
                 
                 // Ghi nhận kẹp SL vào Sổ cái nếu có
                 let hard_cap_sl = RiskManager::clamp_sl_price(
@@ -960,11 +965,13 @@ mod tests {
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
         let defs = HeliosConfigV3::parameter_defs();
-        assert_eq!(width, 106, "DNA_WIDTH phải là chính xác 106 chiều sau khi bổ sung be_atr_trigger_absorption và be_buffer_atr_absorption theo TODO-STAB-01!");
+        assert_eq!(width, 107, "DNA_WIDTH phải là chính xác 107 chiều sau khi bổ sung stoch_climax_thresh theo Phương Án A!");
         let has_be_trigger_abs = defs.iter().any(|(name, _)| name.contains("be_atr_trigger_absorption"));
         let has_be_buffer_abs = defs.iter().any(|(name, _)| name.contains("be_buffer_atr_absorption"));
         assert!(has_be_trigger_abs, "defs phải chứa be_atr_trigger_absorption theo TODO-STAB-01!");
         assert!(has_be_buffer_abs, "defs phải chứa be_buffer_atr_absorption theo TODO-STAB-01!");
+        let has_stoch_climax = defs.iter().any(|(name, _)| name.contains("stoch_climax_thresh"));
+        assert!(has_stoch_climax, "defs phải chứa tactical_sniper.pullback.stoch_climax_thresh!");
         let has_micro_natr_tf = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.timeframe"));
         let has_micro_natr_period = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.period"));
         assert!(has_micro_natr_tf, "defs phải chứa indicators.micro_natr.timeframe!");

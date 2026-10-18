@@ -658,6 +658,12 @@ pub struct TacticalPullbackParams {
     #[dna(min = 0.05, max = 0.50, step = 0.05)]
     #[serde(default = "default_pullback_min_clv")]
     pub min_clv: f64,
+
+    /// 12. Ngưỡng Cực Trị Thác Lũ Thanh Lý / Bắt Dao Rơi (5.0 -> 25.0, Step 2.0 -> 11 nấc)
+    /// Chỉ khi Stochastic rơi vào vùng xả lũ cực đoan này mới kích hoạt Soft Hook Guard.
+    #[dna(min = 5.0, max = 25.0, step = 2.0)]
+    #[serde(default = "default_pullback_stoch_climax_thresh")]
+    pub stoch_climax_thresh: f64,
 }
 
 impl Default for TacticalPullbackParams {
@@ -674,6 +680,7 @@ impl Default for TacticalPullbackParams {
             max_boundary_z: default_pullback_max_boundary_z(),
             max_squeeze_intensity: default_pullback_max_squeeze_intensity(),
             min_clv: default_pullback_min_clv(),
+            stoch_climax_thresh: default_pullback_stoch_climax_thresh(),
         }
     }
 }
@@ -1396,6 +1403,10 @@ fn default_pullback_max_squeeze_intensity() -> f64 {
 
 fn default_pullback_min_clv() -> f64 {
     0.20
+}
+
+fn default_pullback_stoch_climax_thresh() -> f64 {
+    10.0
 }
 
 fn default_reversal_min_clv() -> f64 {

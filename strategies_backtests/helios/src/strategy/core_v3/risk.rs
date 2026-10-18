@@ -188,6 +188,56 @@ impl RiskManager {
         }
     }
 
+    /// Tính toán Size ký quỹ động theo $Risk Parity (Dynamic De-leverage - TODO-AUDIT-NEW-37).
+    /// Đảm bảo nếu chạm SL, số tiền thực tế tài khoản bị mất luôn luôn cố định bằng đúng (equity * risk_pct).
+    /// Trả về một giá trị < 1.0 (ví dụ 0.1 = 10% ký quỹ) để `ferro_trade` dùng làm Initial Margin.
+    pub fn calculate_dynamic_size(
+        equity: f64,
+        risk_pct: f64,
+        entry_price: f64,
+        sl_price: f64,
+        leverage: f64,
+        min_order_usd: f64,
+        max_cap_fraction: f64,
+    ) -> f64 {
+        // 🛡️ TIỀN ĐIỀU KIỆN (PRE-CONDITION WHITELIST):
+        // Bắt buộc tất cả biến số cốt lõi phải là số thực dương hữu hạn (> 0.0 và không phải NaN / Inf)
+        if !(equity.is_finite() && equity > 0.0 
+            && risk_pct.is_finite() && risk_pct > 0.0 
+            && entry_price.is_finite() && entry_price > 0.0 
+            && sl_price.is_finite() && sl_price > 0.0
+            && leverage.is_finite() && leverage >= 1.0 
+            && min_order_usd.is_finite() && min_order_usd > 0.0) 
+        {
+            return 0.0;
+        }
+
+        // Xử lý cap fraction an toàn: nếu cap lỗi hoặc <= 0.0 thì fallback về mức an toàn 25%
+        let cap = if max_cap_fraction.is_finite() && max_cap_fraction > 0.0 {
+            max_cap_fraction.min(1.0)
+        } else {
+            0.25
+        };
+
+        // Khoảng cách SL phần trăm với sàn bảo vệ epsilon 0.1% (0.001) chống chia cho 0 hoặc SL trùng Entry
+        let sl_dist_pct = ((entry_price - sl_price).abs() / entry_price).max(0.001);
+
+        // $Risk Parity Formula:
+        // Position_USD = (equity * risk_pct) / sl_dist_pct
+        // Margin_USD = Position_USD / leverage = (equity * risk_pct) / (sl_dist_pct * leverage)
+        // Size_Fraction = Margin_USD / equity = risk_pct / (sl_dist_pct * leverage)
+        let target_margin_fraction = (risk_pct / (sl_dist_pct * leverage)).min(cap);
+
+        // 🛡️ HẬU ĐIỀU KIỆN (POST-CONDITION WHITELIST):
+        // Giá trị danh nghĩa thực tế phải đạt sàn min_order_usd kèm đệm epsilon 1e-4 chống sai số làm tròn float
+        let nominal_value = equity * target_margin_fraction * leverage;
+        if nominal_value.is_finite() && nominal_value >= (min_order_usd - 1e-4) {
+            target_margin_fraction
+        } else {
+            0.0
+        }
+    }
+
     /// Hàm khống chế trần SL ban đầu theo % ROE tối đa cho phép và khoảng cách thanh lý an toàn (FLAW-TSL.8 & TODO-RSK-01)
     /// Min Distance Floor Guard bảo vệ chống kẹp ngược khi đòn bẩy cao.
     pub fn clamp_sl_price(
@@ -829,6 +879,48 @@ mod tests {
         assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, 0.0, 0.25), 0.0);
         assert_eq!(RiskManager::calculate_size(100.0, 0.20, 21.0, -20.0, 0.25), 0.0);
         assert_eq!(RiskManager::calculate_size(100.0, 0.20, 0.0, 20.0, 0.25), 0.0);
+    }
+
+    #[test]
+    fn test_dynamic_risk_parity_sizing() {
+        let equity = 1000.0;
+        let risk_pct = 0.02; // Mất $20 rủi ro
+        let price = 100.0;
+        let lev = 20.0;
+        let min_order = 21.0;
+        let max_cap = 0.25;
+
+        // Kịch bản A: SL hẹp 1% (SL = $99) -> size_fraction = 0.02 / (0.01 * 20) = 0.10
+        // Ký quỹ = 10% * 1000 = $100 -> Vị thế = $2000 -> Lỗ 1% = $20
+        let size_a = RiskManager::calculate_dynamic_size(equity, risk_pct, price, 99.0, lev, min_order, max_cap);
+        assert!((size_a - 0.10).abs() < 1e-4, "Size A phải là 0.10, nhận được: {}", size_a);
+
+        // Kịch bản B: SL rộng 5% (SL = $95) -> size_fraction = 0.02 / (0.05 * 20) = 0.02
+        // Ký quỹ = 2% * 1000 = $20 -> Vị thế = $400 -> Lỗ 5% = $20
+        let size_b = RiskManager::calculate_dynamic_size(equity, risk_pct, price, 95.0, lev, min_order, max_cap);
+        assert!((size_b - 0.02).abs() < 1e-4, "Size B phải là 0.02, nhận được: {}", size_b);
+
+        // Kịch bản C: SL cực hẹp 0.01% -> sl_dist_pct bị ép sàn 0.001 (0.1%)
+        // size_fraction = 0.02 / (0.001 * 20) = 1.0 -> Kẹp trần max_cap 0.25
+        let size_c = RiskManager::calculate_dynamic_size(equity, risk_pct, price, 99.99, lev, min_order, max_cap);
+        assert_eq!(size_c, 0.25, "Size C phải bị kẹp trần an toàn ở 0.25");
+
+        // Kịch bản D: SL cực xa 50% -> size_fraction = 0.02 / (0.50 * 20) = 0.002
+        // Vị thế = 1000 * 0.002 * 20 = $40 >= $21 -> Hợp lệ
+        let size_d = RiskManager::calculate_dynamic_size(equity, risk_pct, price, 50.0, lev, min_order, max_cap);
+        assert!((size_d - 0.002).abs() < 1e-5);
+
+        // Kịch bản E: Tài khoản nhỏ không đủ $21 min notional
+        // Equity = $10, size = 0.02 / (0.05 * 20) = 0.02 -> Vị thế = 10 * 0.02 * 20 = $4 < $21 -> 0.0
+        let size_e = RiskManager::calculate_dynamic_size(10.0, risk_pct, price, 95.0, lev, min_order, max_cap);
+        assert_eq!(size_e, 0.0, "Tài khoản không đủ min notional phải trả về 0.0");
+
+        // Kịch bản F: NaN resilience
+        assert_eq!(RiskManager::calculate_dynamic_size(f64::NAN, risk_pct, price, 95.0, lev, min_order, max_cap), 0.0);
+        assert_eq!(RiskManager::calculate_dynamic_size(equity, f64::NAN, price, 95.0, lev, min_order, max_cap), 0.0);
+        assert_eq!(RiskManager::calculate_dynamic_size(equity, risk_pct, f64::NAN, 95.0, lev, min_order, max_cap), 0.0);
+        assert_eq!(RiskManager::calculate_dynamic_size(equity, risk_pct, price, f64::NAN, lev, min_order, max_cap), 0.0);
+        assert_eq!(RiskManager::calculate_dynamic_size(equity, risk_pct, price, 95.0, f64::NAN, min_order, max_cap), 0.0);
     }
 
     #[test]

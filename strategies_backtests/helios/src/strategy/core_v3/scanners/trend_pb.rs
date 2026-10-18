@@ -83,6 +83,8 @@ impl TacticalScanner for TrendPBScanner {
         } else {
             stoch_k
         };
+        let stoch_d = sensors.stoch_trend_d.get(i).copied().unwrap_or(stoch_k);
+        let climax_thresh = pb_cfg.stoch_climax_thresh.max(1.0);
 
         // Đạo hàm vi phân gradient nến: Close Location Value (CLV) [-1.0, +1.0]
         let tr_span = (high - low).max(1e-6);
@@ -106,7 +108,9 @@ impl TacticalScanner for TrendPBScanner {
             }
 
             // 🛡️ Chốt chặn 2: Soft Stochastic Hook Guard (Chống bắt dao rơi khi thác lũ thanh lý)
-            if stoch_k < 10.0 && stoch_k < prev_stoch_k {
+            // Khử dị tật bậc thang phẳng (staircase artifact): nếu nến 1m phẳng (stoch_k == prev), so sánh với %D
+            let is_falling = stoch_k < prev_stoch_k || (stoch_k <= prev_stoch_k && stoch_k < stoch_d);
+            if stoch_k < climax_thresh && is_falling {
                 return None; // Đang rơi tự do cắm đầu, cấm bắt dao rơi!
             }
 
@@ -151,7 +155,9 @@ impl TacticalScanner for TrendPBScanner {
             }
 
             // 🛡️ Chốt chặn 2: Soft Stochastic Hook Guard (Chống bán khống khi FOMO bốc đầu)
-            if stoch_k > 90.0 && stoch_k > prev_stoch_k {
+            // Khử dị tật bậc thang phẳng (staircase artifact): nếu nến 1m phẳng (stoch_k == prev), so sánh với %D
+            let is_surging = stoch_k > prev_stoch_k || (stoch_k >= prev_stoch_k && stoch_k > stoch_d);
+            if stoch_k > (100.0 - climax_thresh) && is_surging {
                 return None; // Đang tăng dựng đứng, cấm chặn đầu xe lửa!
             }
 
@@ -466,5 +472,25 @@ mod tests {
 
         let prop_hooked = TrendPBScanner.scan(&tick, &sensors_hooked, &matrix, &config);
         assert!(prop_hooked.is_some(), "Soft Hook Guard PHẢI phê duyệt khi Stoch đã ngóc đầu tạo đáy!");
+
+        // Kịch bản C: Nến phẳng MTF do Forward-Fill (prev = 4.0, curr = 4.0) nhưng %K < %D (stoch_d = 6.0)
+        let mut sensors_flat_falling = HeliosSensors::default();
+        sensors_flat_falling.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_flat_falling.stoch_trend_k = std::sync::Arc::new(vec![4.0; len]);
+        sensors_flat_falling.stoch_trend_d = std::sync::Arc::new(vec![6.0; len]);
+        sensors_flat_falling.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_flat_falling = TrendPBScanner.scan(&tick, &sensors_flat_falling, &matrix, &config);
+        assert!(prop_flat_falling.is_none(), "Soft Hook Guard PHẢI chặn đứng nến phẳng MTF khi %K < %D!");
+
+        // Kịch bản D: Nến phẳng MTF do Forward-Fill (prev = 4.0, curr = 4.0) nhưng %K >= %D (stoch_d = 3.0)
+        let mut sensors_flat_hooked = HeliosSensors::default();
+        sensors_flat_hooked.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors_flat_hooked.stoch_trend_k = std::sync::Arc::new(vec![4.0; len]);
+        sensors_flat_hooked.stoch_trend_d = std::sync::Arc::new(vec![3.0; len]);
+        sensors_flat_hooked.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+
+        let prop_flat_hooked = TrendPBScanner.scan(&tick, &sensors_flat_hooked, &matrix, &config);
+        assert!(prop_flat_hooked.is_some(), "Soft Hook Guard PHẢI phê duyệt nến phẳng MTF khi %K đã cắt lên trên %D!");
     }
 }

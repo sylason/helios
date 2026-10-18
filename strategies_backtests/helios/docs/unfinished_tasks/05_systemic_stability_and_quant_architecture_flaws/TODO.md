@@ -225,15 +225,15 @@
 ---
 
 ### PHẦN 11: NHIỆM VỤ CỐT TỬ TỪ KIỂM TOÁN ARBITER & RÀO CẢN TIỀN KHỚP LỆNH (NOTES 21, 22)
-- [ ] **TODO-AUDIT-NEW-27: Xóa Bỏ Nhánh Đối Kháng Nến Đơn Là Mã Chết 100% Trong Arbiter (`TODO-ARB-01`)**
+- [x] **TODO-AUDIT-NEW-27: Xóa Bỏ Nhánh Đối Kháng Nến Đơn Là Mã Chết 100% Trong Arbiter (`TODO-ARB-01`) (BÁO ĐỘNG GIẢ: ĐÃ BÁC BỎ)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:521-538`
-  - **Mô tả:** Do $CLV$ chỉ có 1 dấu trên mỗi cây nến $i$, nhánh đối đầu liên chiều Long vs Short không bao giờ xuất hiện. Đơn giản hóa `resolve_conflicts` về một chuỗi tìm kiếm cực đại đơn giản `proposals.into_iter().max_by(...)`.
-- [ ] **TODO-AUDIT-NEW-28: Triển Khai Inter-Bar Flip-Flop Guard Chống Bẫy Vả 2 Đầu (`TODO-ARB-02`)**
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / ĐÃ BÁC BỎ: Tiền đề note 21 sai lầm do AnomalyFade và RangeOscillator không dùng CLV, cặp Long/Short nến đơn hoàn toàn xảy ra trong thực tế. Nhánh resolve_conflicts là chốt chặn phòng vệ xung đột tối quan trọng, giữ nguyên 100% mã nguồn theo nguyên lý First-Principles.] Do $CLV$ chỉ có 1 dấu trên mỗi cây nến $i$, nhánh đối đầu liên chiều Long vs Short không bao giờ xuất hiện. Đơn giản hóa `resolve_conflicts` về một chuỗi tìm kiếm cực đại đơn giản `proposals.into_iter().max_by(...)`.
+- [x] **TODO-AUDIT-NEW-28: Triển Khai Inter-Bar Flip-Flop Guard Chống Bẫy Vả 2 Đầu (`TODO-ARB-02`) (BÁO ĐỘNG GIẢ: ĐÃ BÁC BỎ)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:111-158`, `core_v3/mod.rs`
-  - **Mô tả:** Bổ sung bộ nhớ liên nến: Cấm mở lệnh đảo chiều ngược lại trong vòng $K=2$ nến ngay sau khi vừa bị cắt lỗ Stop Loss, trừ khi có nến xung lực bứt phá cực đại $> 2.0\text{ ATR}$.
-- [ ] **TODO-AUDIT-NEW-29: Chuyển Đổi Sniper Veto Sang Dynamic De-leverage & Size Scaling (`TODO-ARB-03`)**
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / ĐÃ BÁC BỎ: Hiện tượng bẫy vả 2 đầu đã được ngăn chặn triệt để ở tầng Bot Engine thông qua Dual Sentinels: No Same-Bar Re-entry + EngineCooldownGuard (khóa 15-45 nến khi dính SL). Đề xuất nhét logic này vào Arbiter là sai lệch phân tầng kiến trúc theo nguyên tắc ARCH-COOLDOWN-SEPARATION tại mod.rs:273.] Bổ sung bộ nhớ liên nến: Cấm mở lệnh đảo chiều ngược lại trong vòng $K=2$ nến ngay sau khi vừa bị cắt lỗ Stop Loss, trừ khi có nến xung lực bứt phá cực đại $> 2.0\text{ ATR}$.
+- [-] **TODO-AUDIT-NEW-29: Chuyển Đổi Sniper Veto Sang Dynamic De-leverage & Size Scaling (`TODO-ARB-03`) (PENDING: Chờ Cụm F)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:223-289`, `risk.rs:84-138`
-  - **Mô tả:** Khi SL cấu trúc $> 15\%$ ROE (nhưng $\le 35\%$ ROE), tự động co giảm kích thước vị thế tỷ lệ nghịch với khoảng cách SL để bảo toàn \$ USD Risk cố định thay vì VETO hủy lệnh, tái kích hoạt khối code `clamp_sl_price`.
+  - **Mô tả:** [PENDING: Phần Arbiter gỡ bỏ Hard Veto đã hoàn thành tại TODO-AUDIT-NEW-04 & NEW-23. Phần co size $Fixed Risk USD thuộc thẩm quyền tầng Quản trị Rủi ro tại Cụm F (TODO-AUDIT-NEW-55 & TODO-AUDIT-NEW-118).] Khi SL cấu trúc $> 15\%$ ROE (nhưng $\le 35\%$ ROE), tự động co giảm kích thước vị thế tỷ lệ nghịch với khoảng cách SL để bảo toàn \$ USD Risk cố định thay vì VETO hủy lệnh, tái kích hoạt khối code `clamp_sl_price`.
 - [ ] **TODO-AUDIT-NEW-30: Bổ Sung EV Hurdle Gate Nhận Thức Chi Phí Ma Sát Sàn 2.6% ROE (`TODO-ARB-05`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:290-302`
   - **Mô tả:** Bắt buộc biên độ kỳ vọng tối thiểu của lệnh phải thỏa mãn $\ge 2.5 \times \text{Friction Cost} \ge 6.5\%$ ROE (tại 20x) trước khi phê duyệt mở lệnh, loại bỏ các lệnh scalp mỏng bị âm sau phí.
@@ -263,7 +263,7 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:67-76`, `normalization.rs:25-37`
   - **Mô tả:** Hiệu chuẩn lại hàm `sat_ratio_damped` để điểm tự tin `raw_score` không bị thổi phồng lên $0.90 \sim 0.98$ mỗi khi thân nến hẹp; loại bỏ điều kiện `vwma < bb_middle` gây nhiễu loạn 50/50 trong vùng nén.
 
-- [ ] **TODO-AUDIT-NEW-37: Nâng Cấp Kiến Trúc Tách Bạch 3 Tầng & Bộ Nhớ Sự Kiện Vi Mô (`ARCH-DECOUPLED-TIERS`)**
+- [x] **TODO-AUDIT-NEW-37: Nâng Cấp Kiến Trúc Tách Bạch 3 Tầng & Bộ Nhớ Sự Kiện Vi Mô (`ARCH-DECOUPLED-TIERS`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/` (`matrix.rs`, `gatekeeper.rs`, `arbiter.rs`, `risk.rs`, `scanners/`)
   - **Mô tả:** Tách bạch 3 ranh giới trách nhiệm: (1) Context Tracker theo dõi bối cảnh và bộ nhớ sự kiện vi mô (Spring tại bar $i$, xác nhận tại bar $i+1$); (2) Scanners chỉ phát hiện xác suất hiện tượng và điểm neo cấu trúc; (3) Arbiter & Risk độc quyền phân bổ vốn và co size động theo SL (`Dynamic De-leverage`) thay vì VETO hủy lệnh.
 
@@ -271,7 +271,7 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:47-75`
   - **Mô tả:** Khôi phục biến `delta_kama = (close - kama_mid) / ATR` và điều kiện kiểm tra khoảng cách an toàn, chấm dứt tình trạng Trend_PB biến thành Dip Buying vu vơ không có điểm tựa hồi quy.
 
-- [ ] **TODO-AUDIT-NEW-39: Khắc Phục Lỗi Tê Liệt Stochastic Hook Guard Do Forward-Fill 15m (`STOCH-15M-BLIND`)**
+- [x] **TODO-AUDIT-NEW-39: Khắc Phục Lỗi Tê Liệt Stochastic Hook Guard Do Forward-Fill 15m (`STOCH-15M-BLIND`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:81-85, 109-111`
   - **Mô tả:** Sửa lỗi `stoch_k < prev_stoch_k` bị mù trong 93.3% số nến 1m do chỉ báo 15m dạng bậc thang phẳng; chuyển sang kiểm tra độ dốc nến vi mô hoặc Stoch vi mô tương thích.
 
@@ -339,11 +339,11 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:241`, `arbiter.rs:168-173`
   - **Mô tả:** Xóa bỏ lệnh gọi `RegimeGatekeeper::evaluate` thừa thãi tại `mod.rs:241` khi có defense_ledger, thống nhất quyền đánh giá duy nhất bên trong `arbiter.process_tick()`.
 
-- [ ] **TODO-AUDIT-NEW-55: Chuyển Đổi Veto Structural SL Sang Dynamic De-leverage Co Size Động (`H-MOD-03`, `H-MOD-04`)**
+- [x] **TODO-AUDIT-NEW-55: Chuyển Đổi Veto Structural SL Sang Dynamic De-leverage Co Size Động (`H-MOD-03`, `H-MOD-04`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:277-283, 332-370`, `risk.rs:156-189`
   - **Mô tả:** Thay thế công thức tính size cố định theo vốn $\text{Size} = \frac{\text{Margin} \times L}{P}$ bằng công thức chuẩn quant $\text{Size} = \frac{\text{Risk USD}}{\text{Distance SL}}$; loại bỏ mã chết kẹp SL 15% ROE và kích hoạt lại khối lệnh an toàn.
 
-- [ ] **TODO-AUDIT-NEW-56: Chuẩn Hóa Lát Cắt Tính Slope BB Middle Trong `init()` (`H-MOD-05`)**
+- [x] **TODO-AUDIT-NEW-56: Chuẩn Hóa Lát Cắt Tính Slope BB Middle Trong `init()` (`H-MOD-05`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:181-200`
   - **Mô tả:** Chuyển phép tính `bb_middle_slope_adj` sang sử dụng ATR cùng khung thời gian MTF của dải Bollinger (15m/1h) thay vì dùng 1m ATR tạo bậc thang giả.
 
