@@ -63,7 +63,7 @@ impl MarketMatrixV3 {
         }
 
         // TÍNH TOÁN CÁC DÒNG CHUẨN HÓA V3.3
-        let sqz_lb = if config.matrix.squeeze_lookback == 0 { 20 } else { config.matrix.squeeze_lookback };
+        let chaos_lb = if config.matrix.chaos_lookback == 0 { 20 } else { config.matrix.chaos_lookback };
         let trend_lb = if config.matrix.trend_lookback == 0 { 20 } else { config.matrix.trend_lookback };
 
         // 🚀 TASK-MAT-03 & TASK-MAT-06: Chuẩn hóa tuyến tính thuần khiết ADX / 100.0 (Occam's Scalpel)
@@ -78,9 +78,11 @@ impl MarketMatrixV3 {
             trend_strength.push(val);
         }
 
-        let squeeze_intensity = normalization::rolling_percentile(&sqz_raw, sqz_lb);
+        // 🚀 [TODO-AUDIT-NEW-19 / TODO-MAT-01]: Thoát bẫy thoái hóa phân vị 0.50 (Stationary Percentile Drift).
+        // sqz_raw bản thân đã là đại lượng phi thứ nguyên tuyệt đối [0.0, 1.0], gán trực tiếp không qua rolling_percentile.
+        let squeeze_intensity = sqz_raw;
         // 🛡️ TASK-MAT-07: chaos_ratio và entropy là biến nội bộ tạm thời để tính chaos_index
-        let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, sqz_lb);
+        let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, chaos_lb);
         let entropy = normalization::rolling_percentile(&sensors.efficiency_ratio, trend_lb);
 
         // 🚀 1. DỐC KAMA CHUẨN HÓA THEO ATR (PHI THỨ NGUYÊN - ASSET AGNOSTIC)
@@ -364,7 +366,7 @@ mod tests {
         sensors.kc_lower = Arc::new(kc_l);
 
         let mut config = HeliosConfigV3::default();
-        config.matrix.squeeze_lookback = 20;
+        config.matrix.chaos_lookback = 20;
 
         let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
 
@@ -493,8 +495,41 @@ mod tests {
             assert_eq!(matrix.bb_width_norm[i], 0.0, "Độ rộng BB nến phẳng lì phải là 0.0");
             assert!(matrix.squeeze_intensity[i].is_finite(), "KC_w = 0 không được panic chia cho 0");
             assert!(matrix.squeeze_intensity[i] >= 0.0 && matrix.squeeze_intensity[i] <= 1.0, "squeeze_intensity phải trong [0.0, 1.0]");
-            // Khi toàn bộ mảng sqz_raw đều bằng 0.0 (tất cả phần tử bằng nhau), rolling_percentile trả về 0.50 (trung vị thống kê)
-            assert_eq!(matrix.squeeze_intensity[i], 0.5, "Khi mọi phần tử đều bằng nhau (0.0), rolling percentile rơi vào trung vị 0.50");
+            // 🛡️ [TODO-AUDIT-NEW-19]: Khi toàn bộ nến phẳng lì đứng im (KC_w = 0, BB_w = 0), sqz_raw = 0.0, phản ánh trung thực không có nén
+            assert_eq!(matrix.squeeze_intensity[i], 0.0, "Khi thị trường đứng im (KC_w = 0), squeeze_intensity phải là 0.0, không được kẹt ảo ở 0.50");
+        }
+    }
+
+    #[test]
+    fn test_squeeze_intensity_absolute_physical_no_drift() {
+        // 🚀 [TODO-AUDIT-NEW-19]: Chứng minh chuỗi 50 nến tích lũy nén chặt liên tục không bị bẫy thoái hóa về 0.50
+        let len = 50;
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![102.0; len]);
+        sensors.lows = Arc::new(vec![98.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+
+        // KC_w = 10.0, BB_w = 2.0 => ratio = 0.20 => sqz = 1 / (1 + 0.04) ≈ 0.961538
+        sensors.kc_upper = Arc::new(vec![105.0; len]);
+        sensors.kc_lower = Arc::new(vec![95.0; len]);
+        sensors.bb_upper = Arc::new(vec![101.0; len]);
+        sensors.bb_lower = Arc::new(vec![99.0; len]);
+        sensors.bb_middle = Arc::new(vec![100.0; len]);
+
+        let mut config = HeliosConfigV3::default();
+        config.matrix.chaos_lookback = 20;
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        let expected_sqz = 1.0 / (1.0 + 0.04);
+
+        for i in 0..len {
+            let actual = matrix.squeeze_intensity[i];
+            assert!(
+                (actual - expected_sqz).abs() < 1e-4,
+                "Nến {} phải giữ nguyên độ nén thực tế ({:.4}), không được thoái hóa về 0.50! Thực tế: {:.4}",
+                i, expected_sqz, actual
+            );
         }
     }
 }

@@ -420,10 +420,13 @@ pub struct MatrixConfig {
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub trend_lookback: usize,
     
-    /// 2. Chu kỳ quan sát độ nén bão hòa Squeeze (100 -> 1000 nến, Step 30 -> 31 nấc)
+    /// 2. Chu kỳ quan sát độ bão hỗn loạn Chaos (100 -> 1000 nến, Step 30 -> 31 nấc)
     #[dna(min = 100.0, max = 1000.0, step = 30.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
-    pub squeeze_lookback: usize,
+    #[serde(
+        alias = "squeeze_lookback",
+        deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64"
+    )]
+    pub chaos_lookback: usize,
 
     /// 3. Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR (0.05 -> 0.50, Step 0.01 -> 46 nấc)
     #[dna(min = 0.05, max = 0.50, step = 0.01)]
@@ -435,7 +438,7 @@ impl Default for MatrixConfig {
     fn default() -> Self {
         Self {
             trend_lookback: 300,
-            squeeze_lookback: 300,
+            chaos_lookback: 300,
             kama_slope_scale_atr: default_kama_slope_scale_atr(),
         }
     }
@@ -458,13 +461,13 @@ pub struct MacroRegimeConfig {
     #[serde(default = "default_min_trending_adx")]
     pub min_trending_adx: f64,
 
-    /// Phân vị Squeeze tối thiểu để coi là thị trường nén chặt đi ngang (0.65)
-    #[serde(default = "default_range_squeeze_percentile")]
-    pub range_squeeze_percentile: f64,
+    /// Ngưỡng Squeeze tối thiểu để coi là thị trường nén chặt đi ngang (0.65)
+    #[serde(default = "default_range_squeeze_threshold", alias = "range_squeeze_percentile")]
+    pub range_squeeze_threshold: f64,
 
-    /// Phân vị Squeeze tối đa để kích hoạt bứt phá nến đầu Breakout (0.35)
-    #[serde(default = "default_breakout_squeeze_percentile")]
-    pub breakout_squeeze_percentile: f64,
+    /// Ngưỡng Squeeze tối đa để kích hoạt bứt phá nến đầu Breakout (0.35)
+    #[serde(default = "default_breakout_squeeze_threshold", alias = "breakout_squeeze_percentile")]
+    pub breakout_squeeze_threshold: f64,
 
     /// Ngưỡng Welles Wilder ADX tối thiểu để xác nhận xung lực bứt phá Breakout (20.0)
     #[serde(default = "default_min_breakout_adx")]
@@ -476,8 +479,8 @@ impl Default for MacroRegimeConfig {
         Self {
             min_trending_er: default_min_trending_er(),
             min_trending_adx: default_min_trending_adx(),
-            range_squeeze_percentile: default_range_squeeze_percentile(),
-            breakout_squeeze_percentile: default_breakout_squeeze_percentile(),
+            range_squeeze_threshold: default_range_squeeze_threshold(),
+            breakout_squeeze_threshold: default_breakout_squeeze_threshold(),
             min_breakout_adx: default_min_breakout_adx(),
         }
     }
@@ -485,8 +488,8 @@ impl Default for MacroRegimeConfig {
 
 fn default_min_trending_er() -> f64 { 0.35 }
 fn default_min_trending_adx() -> f64 { 25.0 }
-fn default_range_squeeze_percentile() -> f64 { 0.65 }
-fn default_breakout_squeeze_percentile() -> f64 { 0.35 }
+fn default_range_squeeze_threshold() -> f64 { 0.65 }
+fn default_breakout_squeeze_threshold() -> f64 { 0.35 }
 fn default_min_breakout_adx() -> f64 { 20.0 }
 
 /// ============================================================================
@@ -1489,7 +1492,7 @@ mod tests {
         assert!(config.indicators.price_z_score.lookback > 0);
         assert!(config.indicators.vol_z_score.lookback > 0);
         assert!(config.matrix.trend_lookback > 0);
-        assert!(config.matrix.squeeze_lookback > 0);
+        assert!(config.matrix.chaos_lookback > 0);
         assert!(config.tactical_sniper.pullback.max_initial_sl_pct > 0.0);
         assert!(config.tactical_sniper.momentum.max_initial_sl_pct > 0.0);
         assert!(config.tactical_sniper.reversal.max_initial_sl_pct > 0.0);

@@ -197,7 +197,7 @@
 ---
 
 ### PHẦN 10: NHIỆM VỤ CỐT TỬ TỪ KIỂM TOÁN MARKET MATRIX & REGIME GATEKEEPER (NOTES 19, 20)
-- [ ] **TODO-AUDIT-NEW-19: Khử Triệt Để Bẫy Tụt Về 0.50 Của Squeeze Intensity (`TODO-MAT-01`)**
+- [x] **TODO-AUDIT-NEW-19: Khử Triệt Để Bẫy Tụt Về 0.50 Của Squeeze Intensity (`TODO-MAT-01`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:55-63, 81`
   - **Mô tả:** Loại bỏ hoàn toàn bước bọc qua `rolling_percentile`. Gán trực tiếp giá trị thực phi thứ nguyên $\text{sqz\_raw} = \frac{1}{1 + (BB/KC)^2} \in [0.0, 1.0]$, bảo toàn độ nén thực khi thị trường tích lũy kéo dài.
 - [ ] **TODO-AUDIT-NEW-20: Triển Khai Tanh Scaling Cho KAMA Slope Chuẩn Hóa Theo ATR (`TODO-MAT-02`)**

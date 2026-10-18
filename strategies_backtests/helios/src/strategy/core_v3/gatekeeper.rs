@@ -345,11 +345,11 @@ impl RegimeGatekeeper {
 
         let cfg = &config.macro_regime;
         let is_mature_trend = (er >= cfg.min_trending_er || adx >= cfg.min_trending_adx)
-            && squeeze < cfg.range_squeeze_percentile;
+            && squeeze < cfg.range_squeeze_threshold;
 
         if is_mature_trend {
             MarketRegime::Trending
-        } else if squeeze <= cfg.breakout_squeeze_percentile && adx >= cfg.min_breakout_adx {
+        } else if squeeze <= cfg.breakout_squeeze_threshold && adx >= cfg.min_breakout_adx {
             MarketRegime::Breakout
         } else {
             MarketRegime::RangeBound
