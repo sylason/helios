@@ -841,9 +841,10 @@ pub struct TacticalReversalParams {
     #[dna(min = 0.5, max = 6.0, step = 0.25)]
     pub min_reversal_displacement: f64,
 
-    /// Tỷ lệ sụt giảm volume kiệt sức (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
-    pub exhaustion_vol_drop: f64,
+    /// Ngưỡng tỷ số khối lượng bùng nổ cao trào Climax Reversal (1.00 -> 3.50 x SMA, Step 0.10 -> 26 nấc)
+    #[dna(min = 1.00, max = 3.50, step = 0.10)]
+    #[serde(default = "default_reversal_climax_vol_threshold")]
+    pub climax_vol_threshold: f64,
 
     /// Đệm ATR bảo vệ qua râu nến (0.2 -> 6.0 ATR, Step 0.2 -> 30 nấc)
     #[dna(min = 0.20, max = 6.00, step = 0.20)]
@@ -881,7 +882,7 @@ impl Default for TacticalReversalParams {
             max_initial_sl_pct: 0.15,
             z_score_threshold: 2.0,
             min_reversal_displacement: 1.5,
-            exhaustion_vol_drop: 0.30,
+            climax_vol_threshold: default_reversal_climax_vol_threshold(),
             wick_sl_buffer_atr: 1.0,
             min_activation_score: default_min_activation_score(),
             min_reversal_clv: default_reversal_min_clv(),
@@ -1410,6 +1411,10 @@ fn default_pullback_min_clv() -> f64 {
 
 fn default_pullback_stoch_climax_thresh() -> f64 {
     10.0
+}
+
+fn default_reversal_climax_vol_threshold() -> f64 {
+    1.50
 }
 
 fn default_reversal_min_clv() -> f64 {

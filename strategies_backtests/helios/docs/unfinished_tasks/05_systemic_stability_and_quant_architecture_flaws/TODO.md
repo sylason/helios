@@ -112,10 +112,12 @@
 
 ---
 
-### PHẦN 6: GIẢI CỨU CÁC SCANNER BỊ TÊ LIỆT & ĐẤU THẦU CÔNG BẰNG (`helios`)
-- [ ] **TODO-AUDIT-H-01: Hóa Giải Nghịch Lý Khối Lượng và Tái Sinh `reversal.rs`**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`
-  - **Mô tả:** Bỏ hàm `sat_proximity` ép vol về 0.50; chấp nhận bão khối lượng lớn ($vol\_ratio \ge 1.5$) là tín hiệu cạn kiệt; điều chỉnh tương thích giữa CLV và MFI.
+- [x] **TODO-AUDIT-H-01: Hóa Giải Nghịch Lý Khối Lượng và Tái Sinh `reversal.rs`**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** Thay thế trường DNA `exhaustion_vol_drop` bằng `climax_vol_threshold` (1.00 -> 3.50, default 1.50) dùng hàm `sat_unbounded(vol_ratio, vol_thresh)`. Chấp nhận bão khối lượng lớn ($vol\_ratio \ge 1.5$) là tín hiệu Selling/Buying Climax; bảo toàn ngân sách 107 chiều DNA.
+  - **Unit Tests:**
+    - [x] `test_reversal_volume_exhaustion_behavior`
+    - [x] `test_dna_width_and_parameter_defs_integrity`
 - [ ] **TODO-AUDIT-H-02: Phá Bẫy Catch-22 Giữa Stop Loss Cấu Trúc và VETO ROE**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `anomaly.rs`, `arbiter.rs`
   - **Mô tả:** Cho phép Scanner tự động co hẹp SL về trần an toàn $15\%$ ROE thay vì bị Arbiter giết chết toàn bộ tín hiệu biên độ lớn.
@@ -288,9 +290,9 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:53-57, 108-126`
   - **Mô tả:** Bắt buộc có giai đoạn nén biến động trước đó (`prior_squeeze`), khử bẫy thưởng điểm cao nhất tại nến kiệt sức ngoài dải BB.
 
-- [ ] **TODO-AUDIT-NEW-41: Sửa Nghịch Lý Volume Trong Reversal Scanner (`REVERSAL-VOL-PARADOX`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:105-106`
-  - **Mô tả:** Thay thế hàm `sat_proximity` đang phạt 0 điểm khi volume bán tháo cực đại; đưa điều kiện volume cao trào $Z_{\text{vol}} \ge 2.0$ vào đúng bản chất của Selling Climax.
+- [x] **TODO-AUDIT-NEW-41: Sửa Nghịch Lý Volume Trong Reversal Scanner (`REVERSAL-VOL-PARADOX`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:101-107`, `config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** Thay thế hàm `sat_proximity` bằng `sat_unbounded(vol_ratio, climax_vol_threshold)`. Loại bỏ nghịch lý phạt 0 điểm khi volume bùng nổ hoảng loạn; chấp nhận volume cao trào là đặc trưng của Selling/Buying Climax; bảo toàn 107 chiều DNA.
 
 - [ ] **TODO-AUDIT-NEW-42: Khắc Phục Các Tử Huyệt Trên Live Engine (`LIVE-SAFETY-PACK`)**
   - **File:** `trading_bot/bot_engine/src/execution/` (`live_engine.rs:133, 206`, `order_executor.rs:249`, `account_manager.rs:175`)
@@ -928,9 +930,9 @@
 
 ## 🏛️ PHẦN 24: TÁI CẤU TRÚC SÀN ĐẤU THẦU ARBITER & RỦI RO CHIẾN THUẬT (NOTES 05, 12, 14, 15, 21, 22)
 
-- [x] **TODO-AUDIT-NEW-165: Xây Dựng Module Quantile Normalization & Đấu Thầu EV Kỳ Vọng Toán Học Thuần Khiết Trong Arbiter (`H-QUANTILE-FAIR-ARBITER`) (ĐÃ TỐI GIẢN HÓA & QUY HOẠCH CỤM E)**
+- [-] **TODO-AUDIT-NEW-165: Xây Dựng Module Quantile Normalization & Đấu Thầu EV Kỳ Vọng Toán Học Thuần Khiết Trong Arbiter (`H-QUANTILE-FAIR-ARBITER`) (ĐÃ TỐI GIẢN HÓA & QUY HOẠCH CỤM E)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:150-185`
-  - **Mô tả:** [HOÀN THÀNH: Đã viết Unit Test thực nghiệm `test_intra_regime_fair_auction_pattern_quality_wins` chứng minh Arbiter giải quyết xung đột cùng chiều hoàn toàn dựa trên Pattern Quality phi thứ nguyên trong cùng Regime. Đã bác bỏ giải pháp EV = TP/SL (do TP là None) và Quantile Buffer cồng kềnh; việc hiệu chuẩn dải điểm tại nguồn được chuyển giao chính quy sang Cụm E.] Chuẩn hóa điểm số thô của từng scanner theo phân phối lịch sử của chính nó thành điểm phân vị $Z$-Score $\in [0.0, 1.0]$. Đấu thầu dựa trên điểm kỳ vọng toán học chuẩn hóa: $EV = \text{Score}_{\text{norm}} \times \frac{\text{TP Dist}}{\text{SL Dist}} - \text{Friction}$, triệt tiêu hoàn toàn tình trạng Absorption cướp quyền vô lý của Momentum và Reversal.
+  - **Mô tả:** [PENDING: Chờ bằng chứng thực nghiệm OOS. Unit Test `test_intra_regime_fair_auction_pattern_quality_wins` đã pass nhưng dữ liệu 29 chu kỳ Walk-Forward OOS chưa có trường hợp nào xung đột 2 proposal cùng regime để kiểm chứng tác động PnL.] Chuẩn hóa điểm số thô của từng scanner theo phân phối lịch sử của chính nó thành điểm phân vị $Z$-Score $\in [0.0, 1.0]$. Đấu thầu dựa trên điểm kỳ vọng toán học chuẩn hóa: $EV = \text{Score}_{\text{norm}} \times \frac{\text{TP Dist}}{\text{SL Dist}} - \text{Friction}$, triệt tiêu hoàn toàn tình trạng Absorption cướp quyền vô lý của Momentum và Reversal.
   - **Unit Tests:**
     - [x] `test_intra_regime_fair_auction_pattern_quality_wins`
 

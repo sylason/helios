@@ -905,7 +905,7 @@ mod tests {
         config.tactical_sniper.reversal.min_activation_score = 0.70;
         config.tactical_sniper.reversal.min_reversal_clv = 0.20;
         config.tactical_sniper.reversal.mfi_reversal_thresh = 30.0;
-        config.tactical_sniper.reversal.exhaustion_vol_drop = 0.50;
+        config.tactical_sniper.reversal.climax_vol_threshold = 1.50;
         config.tactical_sniper.reversal.w_z_score = 0.35;
         config.tactical_sniper.reversal.w_displacement = 0.35;
 
@@ -932,33 +932,35 @@ mod tests {
         };
 
         let indicator_manager = IndicatorManager::new();
-        let mut actions_exhaust = SmallVec::new();
-        let mut actions_dump = SmallVec::new();
+        let mut actions_climax = SmallVec::new();
+        let mut actions_weak = SmallVec::new();
         let trades = Vec::new();
 
-        // 1. KỊCH BẢN 1: Volume cạn kiệt (vol = 300 < 500 = 0.5 * SMA) -> Phê duyệt mở Long!
-        let dv_exhaust = make_tick(300.0);
-        let tick_exhaust = ferro_trade::strategy::TickContext {
-            i, equity: 1000.0, data_view: &dv_exhaust, indicator_manager: &indicator_manager,
-            trades: &trades, last_closed_trade: None, actions: &mut actions_exhaust, position: Position::default(),
+        // 1. KỊCH BẢN 1 (TODO-AUDIT-H-01): Volume xả lũ cao trào Selling Climax (vol = 2500 > 1500 = 1.5 * SMA)
+        // Nến búa rút chân (CLV = +0.80) kèm volume bão thanh lý -> Phê duyệt mở Long bắt đáy cao trào!
+        let dv_climax = make_tick(2500.0);
+        let tick_climax = ferro_trade::strategy::TickContext {
+            i, equity: 1000.0, data_view: &dv_climax, indicator_manager: &indicator_manager,
+            trades: &trades, last_closed_trade: None, actions: &mut actions_climax, position: Position::default(),
         };
-        let prop_exhaust = ReversalScanner.scan(&tick_exhaust, &sensors, &matrix, &config);
-        assert!(prop_exhaust.is_some(), "ReversalScanner PHẢI phê duyệt khi volume cạn kiệt!");
+        let prop_climax = ReversalScanner.scan(&tick_climax, &sensors, &matrix, &config);
+        assert!(prop_climax.is_some(), "ReversalScanner PHẢI phê duyệt khi có nến rút chân kèm volume cao trào (Selling Climax)!");
 
-        // 2. KỊCH BẢN 2: Volume xả hàng bùng nổ (vol = 2500 >> 500) -> f_vol = 0.0 -> Bị loại bỏ!
-        let dv_dump = make_tick(2500.0);
-        let tick_dump = ferro_trade::strategy::TickContext {
-            i, equity: 1000.0, data_view: &dv_dump, indicator_manager: &indicator_manager,
-            trades: &trades, last_closed_trade: None, actions: &mut actions_dump, position: Position::default(),
+        // 2. KỊCH BẢN 2 (TODO-AUDIT-H-01): Volume teo tóp thiếu lực (vol = 100 << 1000) -> f_vol tiệm cận 0 -> Bị loại bỏ!
+        let dv_weak = make_tick(100.0);
+        let tick_weak = ferro_trade::strategy::TickContext {
+            i, equity: 1000.0, data_view: &dv_weak, indicator_manager: &indicator_manager,
+            trades: &trades, last_closed_trade: None, actions: &mut actions_weak, position: Position::default(),
         };
-        let prop_dump = ReversalScanner.scan(&tick_dump, &sensors, &matrix, &config);
-        assert!(prop_dump.is_none(), "ReversalScanner PHẢI từ chối khi volume xả hàng bùng nổ để chống bắt dao rơi!");
+        let prop_weak = ReversalScanner.scan(&tick_weak, &sensors, &matrix, &config);
+        assert!(prop_weak.is_none(), "ReversalScanner PHẢI từ chối khi volume teo tóp thiếu lực (không có cao trào xả lũ)!");
 
         // 3. KỊCH BẢN 3: Warmup NaN trong vol_sma -> Fallback an toàn, không sinh panic
         let mut sensors_nan = sensors.clone();
         sensors_nan.vol_sma = std::sync::Arc::new(vec![f64::NAN; len]);
-        let prop_nan = ReversalScanner.scan(&tick_exhaust, &sensors_nan, &matrix, &config);
-        let _ = prop_nan; // Xác nhận chạy an toàn không panic
+        let prop_nan = ReversalScanner.scan(&tick_climax, &sensors_nan, &matrix, &config);
+        assert!(prop_nan.is_some());
+        assert!(!prop_nan.unwrap().raw_score.is_nan(), "raw_score không được là NaN khi vol_sma warmup");
     }
 
     #[test]
@@ -1024,6 +1026,8 @@ mod tests {
         let has_rev_mfi = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.mfi_reversal_thresh"));
         let has_rev_w_z = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.w_z_score"));
         let has_rev_w_disp = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.w_displacement"));
+        let has_rev_climax_vol = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.climax_vol_threshold"));
+        let has_rev_exhaust_vol = defs.iter().any(|(name, _)| name.contains("exhaustion_vol_drop"));
         let has_range = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range"));
         let has_anomaly = defs.iter().any(|(name, _)| name.contains("tactical_sniper.anomaly"));
         let has_rsi_ano = defs.iter().any(|(name, _)| name.contains("rsi_anomaly"));
@@ -1049,6 +1053,8 @@ mod tests {
         assert!(has_rev_mfi, "defs phải chứa tactical_sniper.reversal.mfi_reversal_thresh!");
         assert!(has_rev_w_z, "defs phải chứa tactical_sniper.reversal.w_z_score!");
         assert!(has_rev_w_disp, "defs phải chứa tactical_sniper.reversal.w_displacement!");
+        assert!(has_rev_climax_vol, "defs phải chứa tactical_sniper.reversal.climax_vol_threshold theo TODO-AUDIT-H-01!");
+        assert!(!has_rev_exhaust_vol, "defs KHÔNG được chứa exhaustion_vol_drop theo TODO-AUDIT-H-01!");
         assert!(has_mom_adverse, "defs phải chứa tactical_sniper.momentum.max_adverse_slope!");
         assert!(has_mom_w_break, "defs phải chứa tactical_sniper.momentum.w_breakout!");
         assert!(!has_matrix_adx, "defs KHÔNG được chứa matrix.adx_trend_threshold (đã loại bỏ theo TASK-MAT-07)!");

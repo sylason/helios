@@ -28,7 +28,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
-use crate::strategy::core_v3::normalization::{sat_unbounded, sat_proximity, convex_combine};
+use crate::strategy::core_v3::normalization::{sat_unbounded, convex_combine};
 
 pub struct ReversalScanner;
 
@@ -96,14 +96,14 @@ impl TacticalScanner for ReversalScanner {
             return None;
         };
 
-        // 📊 Task REV-04 & Task REV-07: Chấm Điểm Mềm 3 Thành Phần với Trọng Số Lồi (Convex Normalization)
+        // 📊 Task REV-04, REV-07 & TODO-AUDIT-H-01: Chấm Điểm Mềm 3 Thành Phần với Trọng Số Lồi (Convex Normalization)
         let z_thresh = if rev_cfg.z_score_threshold <= 0.0 { 2.0 } else { rev_cfg.z_score_threshold.max(0.1) };
-        let exhaust_drop = if rev_cfg.exhaustion_vol_drop <= 0.0 { 0.50 } else { rev_cfg.exhaustion_vol_drop.max(0.01) };
+        let vol_thresh = if rev_cfg.climax_vol_threshold <= 0.0 { 1.50 } else { rev_cfg.climax_vol_threshold.max(0.50) };
 
         let f_z = sat_unbounded(z_score.abs(), z_thresh);
         let f_disp = sat_unbounded(displacement, min_disp_dist);
         let vol_ratio = if vol_sma > 0.0 { vol_current / vol_sma.max(1e-5) } else { 1.0 };
-        let f_vol = sat_proximity(vol_ratio, exhaust_drop);
+        let f_vol = sat_unbounded(vol_ratio, vol_thresh);
 
         // Trọng số lồi (Convex Weights)
         let w_z = if rev_cfg.w_z_score <= 0.0 { 0.40 } else { rev_cfg.w_z_score.clamp(0.10, 0.80) };
