@@ -28,6 +28,8 @@ pub struct BinanceLiveExecutionEngine {
     pub last_closed_pos_snapshot: Option<LivePositionState>,
     /// Mảnh 2: Thông tin fill từ OrderTradeUpdate (giá thoát, realized pnl, loại lệnh, timestamp)
     pub pending_closed_fill: Option<(f64, f64, String, i64)>,
+    /// Nhãn chiến thuật đang chờ mở vị thế (phục vụ đồng bộ opening_playbook_tag khi mở lệnh live)
+    pub pending_playbook_tag: Option<String>,
 }
 
 impl BinanceLiveExecutionEngine {
@@ -48,6 +50,7 @@ impl BinanceLiveExecutionEngine {
             recently_closed_trade: None,
             last_closed_pos_snapshot: None,
             pending_closed_fill: None,
+            pending_playbook_tag: None,
         }
     }
 
@@ -141,7 +144,7 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
 
         tokio::spawn(async move {
             if let Err(e) = executor_clone.execute_action(&symbol, action_clone, current_price, usable_capital, position_amt, leverage).await {
-                error!("❌ [{}] Lỗi gửi lệnh REST API: {:?}", symbol, e);
+                error!("❌ [{}] Lỗi gửi lệnh API: {:?}", symbol, e);
                 // Bắn event REJECTED để reset cờ chống Deadlock
                 let _ = account_tx_clone.send(AccountEvent::OrderTradeUpdate {
                     symbol,
@@ -159,6 +162,39 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
         });
 
         Ok(())
+    }
+
+    /// [TODO-STAB-06] Thực thi Action với ngữ cảnh nến để đồng bộ Stop Loss & Opening Playbook Tag
+    async fn execute_action_ctx(
+        &mut self,
+        action: &Action,
+        current_price: f64,
+        _timestamp: i64,
+        bar_idx: usize,
+    ) -> Result<(), BotError> {
+        match action {
+            Action::UpdateTradeSlTp { new_sl_price, .. } => {
+                if let Some(ref mut pos) = self.live_position {
+                    pos.current_sl_price = *new_sl_price;
+                    info!("🔄 [{}] LiveEngine đã đồng bộ current_sl_price = {:?}", self.core.symbol, new_sl_price);
+                }
+            }
+            Action::Buy { tag, stop, .. } | Action::Sell { tag, stop, .. } => {
+                self.pending_playbook_tag = tag.clone();
+                if let Some(ref mut pos) = self.live_position {
+                    pos.live_entry_bar = bar_idx;
+                    if tag.is_some() {
+                        pos.opening_playbook_tag = tag.clone();
+                    }
+                    if stop.is_some() {
+                        pos.current_sl_price = *stop;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        self.execute_action(action, current_price).await
     }
 
     async fn on_candle(&mut self, candle: &Candle) -> Result<(), BotError> {
@@ -196,6 +232,17 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
                         if let Some(ref mut live_pos) = self.live_position {
                             live_pos.position_amt = *position_amt;
                             live_pos.entry_price = *entry_price;
+                            if live_pos.opening_playbook_tag.is_none() {
+                                live_pos.opening_playbook_tag = self.pending_playbook_tag.clone().or_else(|| Some("TREND_PB".to_string()));
+                            }
+                            if live_pos.current_sl_price.is_none() {
+                                let mut sl = self.executor.get_active_sl(symbol).await;
+                                if sl.is_none() {
+                                    let _ = self.executor.sync_active_algo_orders(symbol).await;
+                                    sl = self.executor.get_active_sl(symbol).await;
+                                }
+                                live_pos.current_sl_price = sl;
+                            }
                         } else {
                             let current_time = chrono::Utc::now().timestamp_millis();
                             let mark_price = if *position_amt != 0.0 {
@@ -209,20 +256,28 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
                                 entry_price.min(mark_price)
                             };
 
+                            let mut active_sl = self.executor.get_active_sl(symbol).await;
+                            if active_sl.is_none() {
+                                let _ = self.executor.sync_active_algo_orders(symbol).await;
+                                active_sl = self.executor.get_active_sl(symbol).await;
+                            }
+                            let tag = self.pending_playbook_tag.clone().or_else(|| Some("TREND_PB".to_string()));
+
                             self.live_position = Some(LivePositionState {
                                 symbol: symbol.clone(),
                                 position_amt: *position_amt,
                                 entry_price: *entry_price,
                                 entry_timestamp: current_time,
                                 live_entry_bar: 0,
-                                current_sl_price: None,
+                                current_sl_price: active_sl,
                                 current_tp_price: None,
-                                opening_playbook_tag: None,
+                                opening_playbook_tag: tag,
                                 highest_favorable_price: init_peak,
                                 peak_timestamp: current_time,
                             });
                         }
                     } else {
+                        self.pending_playbook_tag = None;
                         if let Some(pos) = self.live_position.take() {
                             self.last_closed_pos_snapshot = Some(pos);
                             self.try_assemble_closed_trade();
@@ -361,5 +416,83 @@ mod tests {
         assert_eq!(trade.pos_type, PositionType::Short);
         assert_eq!(trade.net_pnl, 50.0);
         assert_eq!(trade.exit_reason, ExitReason::TrailingStopLoss);
+    }
+
+    #[tokio::test]
+    async fn test_live_engine_syncs_current_sl_price() {
+        let mut engine = create_test_engine();
+
+        // 1. Giả lập mở vị thế qua PositionUpdate
+        engine.on_account_event(&AccountEvent::PositionUpdate {
+            symbol: "BTCUSDT".into(),
+            position_amt: 1.0,
+            entry_price: 60_000.0,
+            unrealized_profit: 0.0,
+        }).await;
+        assert!(engine.live_position.is_some());
+        assert_eq!(engine.get_position().unwrap().current_sl_price, None);
+
+        // 2. Helios gửi Action::UpdateTradeSlTp qua execute_action_ctx
+        let action = Action::UpdateTradeSlTp {
+            trade_id: 1,
+            new_sl_price: Some(59_000.0),
+            new_tp_price: None,
+        };
+        let res = engine.execute_action_ctx(&action, 60_500.0, 1000, 10).await;
+        assert!(res.is_ok());
+
+        // 3. Xác minh: live_position ĐÃ ĐƯỢC ĐỒNG BỘ SL -> Helios không còn bị "mù"!
+        let pos = engine.get_position().unwrap();
+        assert_eq!(pos.current_sl_price, Some(59_000.0));
+    }
+
+    #[tokio::test]
+    async fn test_live_engine_preserves_playbook_tag() {
+        let mut engine = create_test_engine();
+
+        // 1. Strategy phát lệnh Mua thuận xu hướng (TREND_PB) với initial SL 58,000
+        let action = Action::Buy {
+            size: 1.0,
+            limit: None,
+            stop: Some(58_000.0),
+            policy: None,
+            tag: Some("TREND_PB".to_string()),
+        };
+        let res = engine.execute_action_ctx(&action, 60_000.0, 1000, 25).await;
+        assert!(res.is_ok());
+        assert_eq!(engine.pending_playbook_tag, Some("TREND_PB".to_string()));
+
+        // 2. Sàn Binance bắn sự kiện PositionUpdate xác nhận vị thế đã mở
+        engine.on_account_event(&AccountEvent::PositionUpdate {
+            symbol: "BTCUSDT".into(),
+            position_amt: 1.0,
+            entry_price: 60_000.0,
+            unrealized_profit: 0.0,
+        }).await;
+
+        // 3. Xác minh: Vị thế được bảo toàn 100% opening_playbook_tag và live_entry_bar
+        let pos = engine.get_position().unwrap();
+        assert_eq!(pos.opening_playbook_tag, Some("TREND_PB".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_live_engine_adopt_position_with_active_sl() {
+        let mut engine = create_test_engine();
+
+        // 1. Giả lập sàn đã có SL từ trước trong OrderExecutor
+        engine.executor.set_active_sl("BTCUSDT", 48_000.0).await;
+
+        // 2. Bot khởi động lại và nhận PositionUpdate từ sàn (chưa có action trước)
+        engine.on_account_event(&AccountEvent::PositionUpdate {
+            symbol: "BTCUSDT".into(),
+            position_amt: 2.0,
+            entry_price: 50_000.0,
+            unrealized_profit: 100.0,
+        }).await;
+
+        // 3. Xác minh: Vị thế được Adopt và gán SL từ sàn cùng nhãn an toàn TREND_PB
+        let pos = engine.get_position().unwrap();
+        assert_eq!(pos.current_sl_price, Some(48_000.0));
+        assert_eq!(pos.opening_playbook_tag, Some("TREND_PB".to_string()));
     }
 }

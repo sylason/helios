@@ -33,8 +33,8 @@ impl From<ConnectorError> for ExecutionError {
             ConnectorError::ConnectorClientError { msg, code } |
             ConnectorError::UnauthorizedError { msg, code } |
             ConnectorError::ForbiddenError { msg, code } |
-            ConnectorError::TooManyRequestsError { msg, code } |
-            ConnectorError::RateLimitBanError { msg, code } |
+            ConnectorError::TooManyRequestsError { msg, code, .. } |
+            ConnectorError::RateLimitBanError { msg, code, .. } |
             ConnectorError::NotFoundError { msg, code } |
             ConnectorError::BadRequestError { msg, code } => ExecutionError::Api {
                 code: code.unwrap_or(-1) as i32,

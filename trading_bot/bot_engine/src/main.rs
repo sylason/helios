@@ -138,15 +138,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         account_tx.clone()
     );
 
+    // 8.5 Khởi tạo Order Executor cho bot trade thật (Thuần WebSocket API)
+    let executor = Arc::new(crate::execution::order_executor::OrderExecutor::new(
+        _config.api_key.clone(),
+        _config.api_secret.clone(),
+        _config.use_testnet,
+        market_filter.clone(),
+        db_store.clone(),
+        monitor.clone()
+    ));
+
     ws_manager.start_market_data_stream(symbol.clone(), "1m".to_string());
     ws_manager.start_user_data_stream();
-    // let (ws_cmd_tx, ws_cmd_rx) = tokio::sync::mpsc::channel(100);
-    // ws_manager.start_websocket_api(ws_cmd_rx);
+    ws_manager.start_trade_api_stream(executor.clone()).await;
 
     // Lấy account_rx sớm để không bị rớt mất message initial từ AccountManager
     let account_rx = event_bus.account_tx.subscribe();
 
-    // 8.5 Khởi tạo Account Manager (Gọi REST API 1 lần lúc startup)
+    // 8.6 Khởi tạo Account Manager (Gọi REST API 1 lần lúc startup)
     let account_manager = crate::execution::account_manager::AccountManager::new(
         _config.api_key.clone(),
         _config.api_secret.clone(),
@@ -158,16 +167,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::error!("❌ Lỗi khởi tạo tài khoản ban đầu: {}", e);
     }
 
-    // 8.6 Khởi tạo Order Executor cho bot trade thật
-    let executor = Arc::new(crate::execution::order_executor::OrderExecutor::new(
-        _config.api_key.clone(),
-        _config.api_secret.clone(),
-        _config.use_testnet, // Đã sửa: lấy cấu hình đồng bộ từ .env thay vì hardcode true
-        market_filter.clone(),
-        db_store.clone(),
-        monitor.clone()
-    ));
-
     // 9. Khởi chạy Asset Actor (Nhạc trưởng) với HeliosStrategyV3
     let test_strategy = Box::new(HeliosStrategyV3::new(&std::collections::HashMap::new()));
 
@@ -178,8 +177,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         commission_rate: 0.0004,
         margin_rate: 1.0 / 20.0,
         fractional_unit: Some(0.0001),
-        max_live_mem_candles: 15000,
-        historical_sync_days: 33,
+        max_live_mem_candles: 43_200,
+        historical_sync_days: 30,
         buffer_padding_bars: 200,
         opt_num_threads: 4,
     };

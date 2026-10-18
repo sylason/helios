@@ -60,7 +60,8 @@ const COMMISSION_RATE: f64 = 0.0004;     // Tỷ lệ phí giao dịch (0.04% Ma
 const FRACTIONAL_UNIT: f64 = 0.0001;     // Đơn vị bước nhảy khối lượng
 
 // 5. Bộ nhớ Nến & Hiệu năng Động cơ
-const MAX_LIVE_MEM_CANDLES: usize = 43100; // Số nến tối đa lưu trong Rolling Buffer (>= 12000 để đủ 50 nến 4h)
+const TRAIN_WINDOW_BARS: usize = (TRAIN_WINDOW_DAYS * 24 * 60) as usize;
+const MAX_LIVE_MEM_CANDLES: usize = TRAIN_WINDOW_BARS; // Bằng đúng số nến cửa sổ huấn luyện để slice_start = 0, loại bỏ nến cụt
 const BUFFER_PADDING_BARS: usize = 200;    // Số nến dự phòng an toàn
 const WEIGHT_LIMIT: u32 = 2400;            // Giới hạn IP Rate Limit Binance
 const CHANNEL_CAPACITY: usize = 64;        // Dung lượng kênh Backpressure Async Channel
@@ -189,16 +190,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         strategy_inst.config.risk_management.risk_base.taker_fee_rate = COMMISSION_RATE;
         let strategy = Box::new(strategy_inst);
 
-        let engine_config = EngineConfig {
-            initial_cash: INITIAL_CASH,
-            commission_rate: COMMISSION_RATE,
-            margin_rate: 1.0 / LEVERAGE,
-            fractional_unit: Some(FRACTIONAL_UNIT),
-            max_live_mem_candles: MAX_LIVE_MEM_CANDLES,
-            historical_sync_days: TOTAL_FETCH_DAYS as u64,
-            buffer_padding_bars: BUFFER_PADDING_BARS,
-            opt_num_threads: 4,
-        };
+        let mut engine_config = EngineConfig::for_days(TRAIN_WINDOW_DAYS as u64);
+        engine_config.initial_cash = INITIAL_CASH;
+        engine_config.commission_rate = COMMISSION_RATE;
+        engine_config.margin_rate = 1.0 / LEVERAGE;
+        engine_config.fractional_unit = Some(FRACTIONAL_UNIT);
+        engine_config.buffer_padding_bars = BUFFER_PADDING_BARS;
+        engine_config.opt_num_threads = 4;
 
         let paper_engine = ExecutionEngineFactory::create_paper(
             SYMBOL,

@@ -76,8 +76,8 @@ impl Default for EngineConfig {
             commission_rate: 0.0004,
             margin_rate: 0.05,
             fractional_unit: Some(0.0001),
-            max_live_mem_candles: 15000,
-            historical_sync_days: 33,
+            max_live_mem_candles: 43_200, // [TODO-AUDIT-NEW-15] Chuẩn hóa 30 ngày mặc định (30 * 1440 nến 1m)
+            historical_sync_days: 30,
             buffer_padding_bars: 200,
             opt_num_threads: 4,
         }
@@ -85,6 +85,18 @@ impl Default for EngineConfig {
 }
 
 impl EngineConfig {
+    /// 🛡️ [TODO-AUDIT-NEW-15] Khởi tạo cấu hình tự động dẫn xuất số nến RAM theo số ngày huấn luyện / đồng bộ:
+    /// - historical_sync_days = days
+    /// - max_live_mem_candles = days * 24 * 60 (1,440 nến 1m/ngày)
+    pub fn for_days(days: u64) -> Self {
+        let candle_count = (days as usize) * 24 * 60;
+        Self {
+            historical_sync_days: days,
+            max_live_mem_candles: candle_count.max(1000),
+            ..Self::default()
+        }
+    }
+
     /// Kiểm định tính hợp lệ của cấu hình
     pub fn validate(&self) -> Result<(), String> {
         if self.initial_cash <= 0.0 {
@@ -156,5 +168,31 @@ impl PathResolver {
         }
 
         candidates[0].clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_engine_config_for_days() {
+        // Kịch bản 1: Cấu hình 40 ngày -> 40 * 1440 = 57,600 nến
+        let cfg_40d = EngineConfig::for_days(40);
+        assert_eq!(cfg_40d.historical_sync_days, 40);
+        assert_eq!(cfg_40d.max_live_mem_candles, 57_600);
+        assert!(cfg_40d.validate().is_ok());
+
+        // Kịch bản 2: Cấu hình 14 ngày -> 14 * 1440 = 20,160 nến
+        let cfg_14d = EngineConfig::for_days(14);
+        assert_eq!(cfg_14d.historical_sync_days, 14);
+        assert_eq!(cfg_14d.max_live_mem_candles, 20_160);
+        assert!(cfg_14d.validate().is_ok());
+
+        // Kịch bản 3: Cấu hình 0 ngày -> sàn an toàn min 1000 nến
+        let cfg_0d = EngineConfig::for_days(0);
+        assert_eq!(cfg_0d.historical_sync_days, 0);
+        assert_eq!(cfg_0d.max_live_mem_candles, 1000);
+        assert!(cfg_0d.validate().is_ok());
     }
 }

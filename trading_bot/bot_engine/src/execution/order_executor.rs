@@ -1,14 +1,25 @@
 use tracing::{info, warn, error};
 use rust_decimal::prelude::FromPrimitive;
 
-use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
-    NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum,
-    NewAlgoOrderParams, NewAlgoOrderWorkingTypeEnum, NewAlgoOrderAlgoTypeEnum,
-    NewAlgoOrderTypeEnum, NewAlgoOrderClosePositionEnum,
-    CancelAllAlgoOpenOrdersParams, NewAlgoOrderSideEnum
+use binance_sdk::derivatives_trading_usds_futures::websocket_api::{
+    WebsocketApi,
+    NewAlgoOrderParams as WsNewAlgoOrderParams,
+    NewAlgoOrderAlgoTypeEnum as WsNewAlgoOrderAlgoTypeEnum,
+    NewAlgoOrderSideEnum as WsNewAlgoOrderSideEnum,
+    NewAlgoOrderTypeEnum as WsNewAlgoOrderTypeEnum,
+    NewAlgoOrderWorkingTypeEnum as WsNewAlgoOrderWorkingTypeEnum,
+    NewAlgoOrderClosePositionEnum as WsNewAlgoOrderClosePositionEnum,
+    CancelAlgoOrderParams as WsCancelAlgoOrderParams,
+    NewOrderParams as WsNewOrderParams,
+    NewOrderSideEnum as WsNewOrderSideEnum,
+    NewOrderTypeEnum as WsNewOrderTypeEnum,
 };
 
-use binance_sdk::derivatives_trading_usds_futures::rest_api::RestApi;
+use binance_sdk::derivatives_trading_usds_futures::rest_api::{
+    RestApi,
+    CancelAllAlgoOpenOrdersParams,
+    CurrentAllAlgoOpenOrdersParams,
+};
 use binance_sdk::config::ConfigurationRestApi;
 use chrono::Utc;
 
@@ -17,16 +28,19 @@ use crate::error::BotError;
 use ferro_trade::broker::actions::Action;
 use ferro_trade::broker::policies::RiskPolicy;
 use crate::data_engine::sqlite_impl::SqliteStore;
-use binance_sdk::common::models::{RateLimitType, Interval as BinanceInterval};
 use crate::models::weight_monitor::WeightMonitor;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
 pub struct OrderExecutor {
+    #[allow(dead_code)]
     rest_client: RestApi,
+    pub ws_api: Arc<RwLock<Option<WebsocketApi>>>,
+    pub active_algo_ids: Arc<RwLock<HashMap<String, i64>>>,
     market_filter: MarketFilter,
     db_store: Arc<SqliteStore>,
+    #[allow(dead_code)]
     monitor: Arc<WeightMonitor>,
     pub active_sl_prices: Arc<RwLock<HashMap<String, f64>>>,
 }
@@ -45,13 +59,74 @@ impl OrderExecutor {
             binance_sdk::derivatives_trading_usds_futures::DerivativesTradingUsdsFuturesRestApi::production(rest_conf)
         };
 
+        // 1. Phục hồi active algo orders từ SQLite nếu có (Persistence Guard sau khi restart bot)
+        let (initial_algo_ids, initial_sl_prices) = match db_store.get_all_active_algo_orders() {
+            Ok(list) => {
+                let mut ids = HashMap::new();
+                let mut sls = HashMap::new();
+                for (sym, algo_id, sl_price) in list {
+                    ids.insert(sym.clone(), algo_id);
+                    if let Some(sl) = sl_price {
+                        sls.insert(sym, sl);
+                    }
+                }
+                (ids, sls)
+            }
+            Err(e) => {
+                tracing::error!("❌ Không thể nạp active_algo_orders từ SQLite: {:?}", e);
+                (HashMap::new(), HashMap::new())
+            }
+        };
+
         Self {
             rest_client,
+            ws_api: Arc::new(RwLock::new(None)),
+            active_algo_ids: Arc::new(RwLock::new(initial_algo_ids)),
             market_filter,
             db_store,
             monitor,
-            active_sl_prices: Arc::new(RwLock::new(HashMap::new())),
+            active_sl_prices: Arc::new(RwLock::new(initial_sl_prices)),
         }
+    }
+
+    /// Thiết lập hoặc cập nhật kết nối WebSocket API
+    pub async fn set_ws_api(&self, client: Option<WebsocketApi>) {
+        *self.ws_api.write().await = client;
+    }
+
+    /// Lấy algo_id đang hoạt động của một symbol
+    pub async fn get_active_algo_id(&self, symbol: &str) -> Option<i64> {
+        self.active_algo_ids.read().await.get(symbol).copied()
+    }
+
+    /// Lưu algo_id mới của một symbol (vào cả RAM và SQLite)
+    pub async fn set_active_algo_id(&self, symbol: &str, algo_id: i64) {
+        self.active_algo_ids.write().await.insert(symbol.to_string(), algo_id);
+        let sl = self.active_sl_prices.read().await.get(symbol).copied();
+        if let Err(e) = self.db_store.save_active_algo_order(symbol, algo_id, sl) {
+            error!("❌ [{}] Lỗi lưu active_algo_id vào SQLite: {:?}", symbol, e);
+        }
+    }
+
+    /// Xóa algo_id của một symbol (khỏi cả RAM và SQLite)
+    pub async fn clear_active_algo_id(&self, symbol: &str) {
+        self.active_algo_ids.write().await.remove(symbol);
+        if let Err(e) = self.db_store.remove_active_algo_order(symbol) {
+            error!("❌ [{}] Lỗi xóa active_algo_id khỏi SQLite: {:?}", symbol, e);
+        }
+    }
+
+    /// Chờ WebSocket API sẵn sàng (In-Flight Retry Await cho Fast Reconnect)
+    pub async fn wait_ws_ready(&self, max_wait_ms: u64) -> Option<WebsocketApi> {
+        let start = tokio::time::Instant::now();
+        let timeout = tokio::time::Duration::from_millis(max_wait_ms);
+        while start.elapsed() < timeout {
+            if let Some(ws) = self.ws_api.read().await.as_ref().cloned() {
+                return Some(ws);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
+        None
     }
 
     /// Lấy mức SL đang kích hoạt trên sàn của một symbol
@@ -59,14 +134,53 @@ impl OrderExecutor {
         self.active_sl_prices.read().await.get(symbol).copied()
     }
 
-    /// Đặt mức SL đang kích hoạt trên sàn của một symbol
+    /// Đặt mức SL đang kích hoạt trên sàn của một symbol (vào cả RAM và SQLite)
     pub async fn set_active_sl(&self, symbol: &str, sl: f64) {
         self.active_sl_prices.write().await.insert(symbol.to_string(), sl);
+        if let Some(algo_id) = self.active_algo_ids.read().await.get(symbol).copied() {
+            if let Err(e) = self.db_store.save_active_algo_order(symbol, algo_id, Some(sl)) {
+                error!("❌ [{}] Lỗi lưu active_sl vào SQLite: {:?}", symbol, e);
+            }
+        }
     }
 
     /// Xóa mức SL đang kích hoạt trên sàn của một symbol
     pub async fn clear_active_sl(&self, symbol: &str) {
         self.active_sl_prices.write().await.remove(symbol);
+    }
+
+    /// [TODO-STAB-06-RECONCILE] Truy vấn các lệnh Algo đang mở trên sàn Binance để đồng bộ vào RAM & DB
+    /// Sử dụng khi bot khởi động lại (Adopt & Protect) hoặc khi phát hiện RAM bị mất algo_id
+    pub async fn sync_active_algo_orders(&self, symbol: &str) -> Result<Option<i64>, BotError> {
+        let params = CurrentAllAlgoOpenOrdersParams::builder()
+            .symbol(symbol.to_string())
+            .build()
+            .map_err(|e| BotError::Internal(e.to_string()))?;
+
+        self.monitor.wait_if_needed(1).await;
+        match self.rest_client.current_all_algo_open_orders(params).await {
+            Ok(resp) => {
+                let orders = resp.data().await.map_err(|e| BotError::from(e))?;
+                for o in orders {
+                    if let Some(algo_id) = o.algo_id {
+                        let trigger_price: Option<f64> = o.trigger_price.as_ref().and_then(|p| p.parse().ok());
+                        info!("🔍 [{}] Đã đồng bộ Algo SL từ sàn Binance: algo_id={}, trigger_price={:?}", symbol, algo_id, trigger_price);
+                        self.set_active_algo_id(symbol, algo_id).await;
+                        if let Some(price) = trigger_price {
+                            self.set_active_sl(symbol, price).await;
+                        }
+                        return Ok(Some(algo_id));
+                    }
+                }
+                self.clear_active_algo_id(symbol).await;
+                self.clear_active_sl(symbol).await;
+                Ok(None)
+            }
+            Err(e) => {
+                warn!("⚠️ [{}] Không thể query open algo orders từ sàn Binance: {:?}", symbol, e);
+                Err(BotError::from(e))
+            }
+        }
     }
 
     /// 🛡️ MONOTONIC RATCHET GUARD & NAKED POSITION GUARD (EX-11):
@@ -172,7 +286,7 @@ impl OrderExecutor {
         
         let mut sl_price_to_set = None;
 
-        // Xử lý riêng Action::UpdateTradeSlTp
+        // Xử lý riêng Action::UpdateTradeSlTp (Trailing Stop Loss)
         if let Action::UpdateTradeSlTp { new_sl_price, .. } = &action {
             let old_sl = self.get_active_sl(symbol).await;
             let has_position = position_amt.abs() > 0.0;
@@ -187,51 +301,86 @@ impl OrderExecutor {
                 }
             };
 
-            let p_cancel = CancelAllAlgoOpenOrdersParams::builder(symbol.to_string()).build().unwrap();
-            self.monitor.wait_if_needed(1).await;
-            if let Err(e) = self.rest_client.cancel_all_algo_open_orders(p_cancel).await {
-                error!("❌ [{}] Lỗi hủy Algo Orders cũ: {}", symbol, e);
-            } else {
-                info!("🧹 [{}] Đã hủy Algo SL cũ để cập nhật mới.", symbol);
+            // 1. Chờ kết nối WebSocket API sẵn sàng (tối đa 1500ms nếu đang Fast Reconnect)
+            let ws = match self.wait_ws_ready(1500).await {
+                Some(w) => w,
+                None => {
+                    error!("❌ [{}] Không thể cập nhật Trailing SL: WebSocket API không kết nối sau 1500ms!", symbol);
+                    return Err(BotError::Internal("WebSocket Trade API unavailable".to_string()));
+                }
+            };
+
+            // 2. Hủy lệnh SL cũ qua WebSocket API (nếu có algo_id)
+            let mut old_algo_id_opt = self.get_active_algo_id(symbol).await;
+
+            // 🛡️ RECOVERY GUARD: Nếu RAM chưa có algo_id (sau khi bot restart), thử đồng bộ từ sàn Binance
+            if old_algo_id_opt.is_none() {
+                info!("🔄 [{}] RAM chưa có algo_id, đang đồng bộ Open Algo Orders từ sàn Binance...", symbol);
+                if let Ok(Some(synced_id)) = self.sync_active_algo_orders(symbol).await {
+                    old_algo_id_opt = Some(synced_id);
+                }
             }
 
-            // Chờ 150ms để Binance Futures Server cập nhật sổ lệnh hủy thành công
-            tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+            if let Some(old_algo_id) = old_algo_id_opt {
+                let p_cancel = WsCancelAlgoOrderParams::builder().algo_id(old_algo_id).build().unwrap();
+                match ws.cancel_algo_order(p_cancel).await {
+                    Ok(_) => {
+                        info!("🧹 [{}] Đã hủy Algo SL cũ (ID: {}) qua WebSocket API.", symbol, old_algo_id);
+                        self.clear_active_algo_id(symbol).await;
+                    }
+                    Err(e) => {
+                        warn!("⚠️ [{}] Lỗi hủy Algo SL cũ (ID: {}) qua WS: {}. Tiếp tục đặt SL mới.", symbol, old_algo_id, e);
+                    }
+                }
+            } else {
+                // 🛡️ NẾU VẪN KHÔNG CÓ algo_id: Dọn sạch mọi lệnh Algo mồ côi qua REST để phòng ngừa xung đột closePosition
+                let p_cancel = CancelAllAlgoOpenOrdersParams::builder(symbol.to_string()).build().unwrap();
+                self.monitor.wait_if_needed(1).await;
+                let _ = self.rest_client.cancel_all_algo_open_orders(p_cancel).await;
+                info!("🧹 [{}] Đã dọn sạch Algo Orders mồ côi qua REST trước khi đặt SL mới.", symbol);
+            }
 
-            let sl_side = if position_amt > 0.0 { NewAlgoOrderSideEnum::Sell } else { NewAlgoOrderSideEnum::Buy };
+            // 3. Đặt lệnh Trailing SL mới siêu tốc qua WebSocket API
+            let sl_side = if position_amt > 0.0 { WsNewAlgoOrderSideEnum::Sell } else { WsNewAlgoOrderSideEnum::Buy };
             let rounded_sl = self.format_price_decimal(sl_to_place);
-            let p_sl = NewAlgoOrderParams::builder(
-                NewAlgoOrderAlgoTypeEnum::Conditional,
+            let p_sl = WsNewAlgoOrderParams::builder(
+                WsNewAlgoOrderAlgoTypeEnum::Conditional,
                 symbol.to_string(),
                 sl_side,
-                NewAlgoOrderTypeEnum::StopMarket
+                WsNewAlgoOrderTypeEnum::StopMarket
             )
             .trigger_price(rounded_sl)
-            .close_position(Some(NewAlgoOrderClosePositionEnum::True))
-            .working_type(NewAlgoOrderWorkingTypeEnum::MarkPrice)
+            .close_position(Some(WsNewAlgoOrderClosePositionEnum::True))
+            .working_type(WsNewAlgoOrderWorkingTypeEnum::MarkPrice)
             .build().unwrap();
-            
-            // Thử lại tối đa 3 lần nếu dính lỗi độ trễ hủy lệnh trên Binance
+
+            // Thử lại tối đa 3 lần với WebSocket API
             let mut success = false;
             for attempt in 1..=3 {
-                self.monitor.wait_if_needed(1).await;
-                match self.rest_client.new_algo_order(p_sl.clone()).await {
-                    Ok(_) => {
+                match ws.new_algo_order(p_sl.clone()).await {
+                    Ok(resp) => {
                         let old_sl_str = old_sl.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
-                        info!("🛡️ [TRAILING SL UPDATE] Symbol: {} | SL Ratchet: {} -> {:.2}", symbol, old_sl_str, sl_to_place);
+                        info!("🛡️ [TRAILING SL UPDATE WS] Symbol: {} | SL Ratchet: {} -> {:.2}", symbol, old_sl_str, sl_to_place);
                         self.set_active_sl(symbol, sl_to_place).await;
+                        if let Ok(data) = resp.data() {
+                            if let Some(new_id) = data.algo_id {
+                                self.set_active_algo_id(symbol, new_id).await;
+                                info!("📌 [{}] Đã lưu new algo_id = {} qua WebSocket API", symbol, new_id);
+                            }
+                        }
                         success = true;
                         break;
-                    },
+                    }
                     Err(e) => {
-                        warn!("⚠️ [{}] Thử lần {}/3 đặt Trailing SL thất bại ({}), thử lại sau 150ms...", symbol, attempt, e);
-                        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+                        warn!("⚠️ [{}] Thử lần {}/3 đặt Trailing SL qua WS thất bại ({}), thử lại sau 20ms...", symbol, attempt, e);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
                     }
                 }
             }
 
             if !success {
-                error!("❌ [{}] Đã thử 3 lần nhưng không thể đặt Trailing SL mới tại: {}", symbol, rounded_sl);
+                error!("❌ [{}] Đã thử 3 lần nhưng không thể đặt Trailing SL mới qua WebSocket tại: {}", symbol, rounded_sl);
+                return Err(BotError::Internal(format!("Failed to place Trailing SL at {}", rounded_sl)));
             }
             return Ok(());
         }
@@ -247,7 +396,7 @@ impl OrderExecutor {
                     );
                 }
                 sl_price_to_set = stop;
-                (NewOrderSideEnum::Buy, false, size)
+                (WsNewOrderSideEnum::Buy, false, size)
             },
             Action::Sell { size, stop, policy, .. } => {
                 // ⚠️ SENSOR PROBE: Bắt thiếu sót đặt lệnh Take Profit trên Binance Live
@@ -259,14 +408,14 @@ impl OrderExecutor {
                     );
                 }
                 sl_price_to_set = stop;
-                (NewOrderSideEnum::Sell, false, size)
+                (WsNewOrderSideEnum::Sell, false, size)
             },
             Action::ClosePosition { .. } | Action::CloseLongs { .. } | Action::CloseShorts { .. } => {
                 // Đảo ngược vị thế hiện tại để đóng lệnh
                 if position_amt > 0.0 {
-                    (NewOrderSideEnum::Sell, true, 0.0)
+                    (WsNewOrderSideEnum::Sell, true, 0.0)
                 } else if position_amt < 0.0 {
-                    (NewOrderSideEnum::Buy, true, 0.0)
+                    (WsNewOrderSideEnum::Buy, true, 0.0)
                 } else {
                     info!("ℹ️ [{}] Nhận tín hiệu Close nhưng đang không có vị thế mở.", symbol);
                     return Ok(());
@@ -286,7 +435,7 @@ impl OrderExecutor {
             
             // Binance One-way Mode logic: to reverse a position, we must add the current position size
             match side {
-                NewOrderSideEnum::Buy => {
+                WsNewOrderSideEnum::Buy => {
                     if position_amt < 0.0 {
                         // Đang Short, muốn Buy -> Phải đóng Short trước rồi mới mở Long
                         target_qty + position_amt.abs()
@@ -294,7 +443,7 @@ impl OrderExecutor {
                         target_qty
                     }
                 }
-                NewOrderSideEnum::Sell => {
+                WsNewOrderSideEnum::Sell => {
                     if position_amt > 0.0 {
                         // Đang Long, muốn Sell -> Phải đóng Long trước rồi mới mở Short
                         target_qty + position_amt
@@ -305,37 +454,36 @@ impl OrderExecutor {
             }
         };
 
-        info!("🚀 [{}] Chuẩn bị gửi lệnh: {:?} Qty: {:.4} @ Market", symbol, side, qty);
+        info!("🚀 [{}] Chuẩn bị gửi lệnh: {:?} Qty: {:.4} @ Market (WebSocket API)", symbol, side, qty);
 
         let dec_qty = self.format_qty_decimal(qty);
 
-        let params = NewOrderParams::builder(
+        let params = WsNewOrderParams::builder(
             symbol.to_string(),
             side.clone(),
-            NewOrderTypeEnum::Market
+            WsNewOrderTypeEnum::Market
         )
         .quantity(dec_qty)
         .build().map_err(|e| BotError::Internal(e.to_string()))?;
 
-        self.monitor.wait_if_needed(1).await;
-        match self.rest_client.new_order(params).await {
+        let ws = match self.wait_ws_ready(1500).await {
+            Some(w) => w,
+            None => {
+                error!("❌ [{}] Lỗi gửi Market Order: WebSocket API không kết nối sau 1500ms!", symbol);
+                return Err(BotError::Internal("WebSocket Trade API unavailable".to_string()));
+            }
+        };
+
+        match ws.new_order(params).await {
             Ok(res) => {
-                if let Some(ref limits) = res.rate_limits {
-                    for limit in limits {
-                        if limit.rate_limit_type == RateLimitType::RequestWeight && limit.interval == BinanceInterval::Minute {
-                            self.monitor.update(limit.count);
-                        }
-                    }
-                }
-                self.monitor.report_status();
-                let data = res.data().await.map_err(|e| BotError::from(e))?;
-                info!("✅ [{}] Khớp lệnh thành công! OrderID: {:?}", symbol, data.order_id);
+                let data = res.data().map_err(|e| BotError::Internal(e.to_string()))?;
+                info!("✅ [{}] Khớp lệnh thành công qua WebSocket API! OrderID: {:?}", symbol, data.order_id);
                 
                 // Ghi log vào SQLite TradeHistory
                 let order_id_str = data.order_id.map_or("UNKNOWN".to_string(), |id| id.to_string());
                 let side_str = match side {
-                    NewOrderSideEnum::Buy => "BUY",
-                    NewOrderSideEnum::Sell => "SELL",
+                    WsNewOrderSideEnum::Buy => "BUY",
+                    WsNewOrderSideEnum::Sell => "SELL",
                 };
                 let current_time = Utc::now().timestamp_millis();
                 
@@ -350,59 +498,72 @@ impl OrderExecutor {
                     error!("❌ [{}] Lỗi ghi log giao dịch vào SQLite: {:?}", symbol, e);
                 }
 
-                // Nếu Strategy có báo StopLoss ngay lúc vào lệnh, ta đặt luôn Algo Order
+                // Nếu Strategy có báo StopLoss ngay lúc vào lệnh, ta đặt luôn Algo Order qua WebSocket
                 if let Some(sl) = sl_price_to_set {
                     let sl_side = match side {
-                        NewOrderSideEnum::Buy => NewAlgoOrderSideEnum::Sell,
-                        NewOrderSideEnum::Sell => NewAlgoOrderSideEnum::Buy,
+                        WsNewOrderSideEnum::Buy => WsNewAlgoOrderSideEnum::Sell,
+                        WsNewOrderSideEnum::Sell => WsNewAlgoOrderSideEnum::Buy,
                     };
                     let rounded_sl = self.format_price_decimal(sl);
-                    let p_sl = NewAlgoOrderParams::builder(
-                        NewAlgoOrderAlgoTypeEnum::Conditional,
+                    let p_sl = WsNewAlgoOrderParams::builder(
+                        WsNewAlgoOrderAlgoTypeEnum::Conditional,
                         symbol.to_string(),
                         sl_side,
-                        NewAlgoOrderTypeEnum::StopMarket
+                        WsNewAlgoOrderTypeEnum::StopMarket
                     )
                     .trigger_price(rounded_sl)
-                    .close_position(Some(NewAlgoOrderClosePositionEnum::True))
-                    .working_type(NewAlgoOrderWorkingTypeEnum::MarkPrice)
+                    .close_position(Some(WsNewAlgoOrderClosePositionEnum::True))
+                    .working_type(WsNewAlgoOrderWorkingTypeEnum::MarkPrice)
                     .build().unwrap();
                     
-                    // Thử lại tối đa 3 lần cho Hard SL
+                    // Thử lại tối đa 3 lần cho Hard SL qua WebSocket API
                     let mut success = false;
                     for attempt in 1..=3 {
-                        self.monitor.wait_if_needed(1).await;
-                        match self.rest_client.new_algo_order(p_sl.clone()).await {
-                            Ok(_) => {
-                                info!("🛡️ [{}] Đã đặt Hard SL bảo vệ tại: {}", symbol, rounded_sl);
+                        match ws.new_algo_order(p_sl.clone()).await {
+                            Ok(resp) => {
+                                info!("🛡️ [{}] Đã đặt Hard SL bảo vệ qua WebSocket tại: {}", symbol, rounded_sl);
                                 self.set_active_sl(symbol, sl).await;
+                                if let Ok(data) = resp.data() {
+                                    if let Some(new_id) = data.algo_id {
+                                        self.set_active_algo_id(symbol, new_id).await;
+                                    }
+                                }
                                 success = true;
                                 break;
                             },
                             Err(e) => {
-                                warn!("⚠️ [{}] Thử lần {}/3 đặt Hard SL thất bại ({}), thử lại sau 150ms...", symbol, attempt, e);
-                                tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+                                warn!("⚠️ [{}] Thử lần {}/3 đặt Hard SL qua WS thất bại ({}), thử lại sau 20ms...", symbol, attempt, e);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
                             }
                         }
                     }
 
                     if !success {
-                        error!("❌ [{}] Đã thử 3 lần nhưng không thể đặt Hard SL bảo vệ tại: {}", symbol, rounded_sl);
+                        error!("❌ [{}] Đã thử 3 lần nhưng không thể đặt Hard SL bảo vệ qua WS tại: {}", symbol, rounded_sl);
                     }
                 }
 
                 if is_close_all {
                     self.clear_active_sl(symbol).await;
-                    let p_cancel = CancelAllAlgoOpenOrdersParams::builder(symbol.to_string()).build().unwrap();
-                    self.monitor.wait_if_needed(1).await;
-                    let _ = self.rest_client.cancel_all_algo_open_orders(p_cancel).await;
+                    if let Some(old_algo_id) = self.get_active_algo_id(symbol).await {
+                        let p_cancel = WsCancelAlgoOrderParams::builder().algo_id(old_algo_id).build().unwrap();
+                        let _ = ws.cancel_algo_order(p_cancel).await;
+                        self.clear_active_algo_id(symbol).await;
+                        info!("🧹 [{}] Đã hủy Algo SL cũ (ID: {}) qua WebSocket API khi đóng vị thế.", symbol, old_algo_id);
+                    } else {
+                        // 🛡️ RAM không có algo_id (sau khi bot restart) -> Dọn sạch toàn bộ Algo Order mồ côi qua REST
+                        let p_cancel = CancelAllAlgoOpenOrdersParams::builder(symbol.to_string()).build().unwrap();
+                        self.monitor.wait_if_needed(1).await;
+                        let _ = self.rest_client.cancel_all_algo_open_orders(p_cancel).await;
+                        info!("🧹 [{}] Đã dọn sạch Algo Orders mồ côi qua REST khi đóng vị thế.", symbol);
+                    }
                 }
 
                 Ok(())
             },
             Err(e) => {
-                error!("❌ [{}] Lỗi gửi lệnh qua API: {:?}", symbol, e);
-                Err(BotError::from(e))
+                error!("❌ [{}] Lỗi gửi lệnh qua WebSocket API: {:?}", symbol, e);
+                Err(BotError::Internal(e.to_string()))
             }
         }
     }
@@ -542,5 +703,59 @@ mod tests {
         // Đang có vị thế với SL 1950.0, cố xóa SL bằng None -> Bị Naked Position Guard chặn (None)
         let res = OrderExecutor::evaluate_ratchet_sl(true, Some(1950.0), None, true);
         assert_eq!(res, None);
+    }
+
+    #[tokio::test]
+    async fn test_order_executor_wait_ws_ready_timeout() {
+        let filter = MarketFilter::default();
+        let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
+        let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store, monitor);
+
+        // Khi ws_api chưa được gán (None), wait_ws_ready phải trả về None sau thời gian chờ
+        let ws = executor.wait_ws_ready(100).await;
+        assert!(ws.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_order_executor_algo_id_tracking() {
+        let filter = MarketFilter::default();
+        let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
+        let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store, monitor);
+
+        assert_eq!(executor.get_active_algo_id("BTCUSDT").await, None);
+
+        executor.set_active_algo_id("BTCUSDT", 987654321).await;
+        assert_eq!(executor.get_active_algo_id("BTCUSDT").await, Some(987654321));
+
+        executor.clear_active_algo_id("BTCUSDT").await;
+        assert_eq!(executor.get_active_algo_id("BTCUSDT").await, None);
+    }
+
+    #[tokio::test]
+    async fn test_order_executor_persistence_recovery() {
+        let filter = MarketFilter::default();
+        let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
+        let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
+
+        // 1. Giả lập phiên chạy trước đã lưu algo_id và SL vào SQLite
+        db_store.save_active_algo_order("BTCUSDT", 11223344, Some(58_500.0)).unwrap();
+        db_store.save_active_algo_order("ETHUSDT", 55667788, Some(3_100.0)).unwrap();
+
+        // 2. Bot restart: Khởi tạo OrderExecutor mới với cùng db_store
+        let executor = OrderExecutor::new("".to_string(), "".to_string(), true, filter, db_store, monitor);
+
+        // 3. Xác minh: Executor mới lập tức khôi phục 100% algo_id và SL từ SQLite vào RAM
+        assert_eq!(executor.get_active_algo_id("BTCUSDT").await, Some(11223344));
+        assert_eq!(executor.get_active_sl("BTCUSDT").await, Some(58_500.0));
+
+        assert_eq!(executor.get_active_algo_id("ETHUSDT").await, Some(55667788));
+        assert_eq!(executor.get_active_sl("ETHUSDT").await, Some(3_100.0));
+
+        // 4. Xóa khi dời hoặc đóng lệnh -> SQLite cũng được xóa
+        executor.clear_active_algo_id("BTCUSDT").await;
+        assert_eq!(executor.get_active_algo_id("BTCUSDT").await, None);
+        assert_eq!(executor.db_store.get_active_algo_order("BTCUSDT").unwrap(), None);
     }
 }

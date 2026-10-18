@@ -19,7 +19,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Binance Official SDK (Chính chủ)
 # Kích hoạt tính năng Futures (USDS-M) cho cả REST và WebSocket
-binance-sdk = { version = "68.1.1", default-features = false, features = [
+binance-sdk = { version = "75.0.0", default-features = false, features = [
     "derivatives_trading_usds_futures",
     "rustls-tls",
 ] }

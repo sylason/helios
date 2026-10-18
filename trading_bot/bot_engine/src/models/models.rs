@@ -73,22 +73,31 @@ pub struct OptimizedDna {
 /// [THE BRAIN] Quản lý dữ liệu OHLCV và các chỉ báo của một tài sản
 pub struct Asset {
     pub symbol: String,
-    /// Bộ nhớ đệm nến 1m (Max: 43200 nến ~ 30 ngày)
+    /// Bộ nhớ đệm nến 1m (Co giãn linh động theo cấu hình)
     pub ohlcv: VecDeque<Candle>,
     /// Kho chứa các chỉ báo kỹ thuật đã tính toán (Key: Tên chỉ báo)
     pub indicators: HashMap<String, Arc<Vec<f64>>>,
+    /// [TODO-AUDIT-NEW-15] Dung lượng bộ đệm RAM tối đa linh động (mặc định: 43,200 nến = 30 ngày)
+    pub max_capacity: usize,
 }
 
 impl Asset {
     pub fn new(symbol: String) -> Self {
+        Self::new_with_capacity(symbol, 43200)
+    }
+
+    /// [TODO-AUDIT-NEW-15] Khởi tạo Asset với dung lượng bộ đệm RAM tùy biến theo cấu hình
+    pub fn new_with_capacity(symbol: String, capacity: usize) -> Self {
+        let cap = capacity.max(1000);
         Self {
             symbol,
-            ohlcv: VecDeque::with_capacity(43200),
+            ohlcv: VecDeque::with_capacity(cap),
             indicators: HashMap::new(),
+            max_capacity: cap,
         }
     }
 
-    /// Thêm nến mới và tự động xóa nến cũ nếu vượt quá 30 ngày. Chống trùng lặp.
+    /// Thêm nến mới và tự động xóa nến cũ nếu vượt quá dung lượng max_capacity. Chống trùng lặp.
     pub fn push_candle(&mut self, candle: Candle) {
         // Kiểm tra chống trùng lặp / nến cũ
         if let Some(last) = self.ohlcv.back() {
@@ -97,7 +106,7 @@ impl Asset {
             }
         }
         
-        if self.ohlcv.len() >= 43200 {
+        if self.ohlcv.len() >= self.max_capacity {
             self.ohlcv.pop_front();
         }
         self.ohlcv.push_back(candle);
@@ -175,6 +184,30 @@ mod tests {
         assert_eq!(vec_after[2].timestamp, 3000);
         assert_eq!(vec_after[3].timestamp, 4000);
         assert_eq!(vec_after[4].timestamp, 5000);
+    }
+
+    #[test]
+    fn test_asset_dynamic_capacity() {
+        // Khởi tạo Asset với dung lượng tùy biến 1000 nến
+        let mut asset = Asset::new_with_capacity("ETHUSDT".to_string(), 1000);
+        assert_eq!(asset.max_capacity, 1000);
+
+        // Bơm 1005 nến -> Buffer phải tự động pop 5 nến đầu và duy trì đúng 1000 nến
+        for i in 1..=1005 {
+            asset.push_candle(Candle {
+                symbol: "ETHUSDT".to_string(),
+                timestamp: i * 60_000,
+                open: 100.0,
+                high: 105.0,
+                low: 95.0,
+                close: 102.0,
+                volume: 50.0,
+            });
+        }
+
+        assert_eq!(asset.ohlcv.len(), 1000);
+        assert_eq!(asset.ohlcv.front().unwrap().timestamp, 6 * 60_000); // 5 nến đầu (1..5) đã bị pop
+        assert_eq!(asset.ohlcv.back().unwrap().timestamp, 1005 * 60_000);
     }
 }
 

@@ -70,6 +70,17 @@ impl SqliteStore {
             [],
         ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
 
+        // 4. Tạo bảng quản lý Active Algo Orders (Stop Loss)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS active_algo_orders (
+                symbol TEXT PRIMARY KEY,
+                algo_id BIGINT NOT NULL,
+                sl_price DOUBLE,
+                updated_at BIGINT NOT NULL
+            )",
+            [],
+        ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+
         info!("📂 SQLite initialized at: {}", db_path);
 
         Ok(Self {
@@ -87,6 +98,69 @@ impl SqliteStore {
         ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
         
         debug!("💾 [{}] Trade {} saved to DB.", symbol, order_id);
+        Ok(())
+    }
+
+    /// Lưu active algo order vào SQLite
+    pub fn save_active_algo_order(&self, symbol: &str, algo_id: i64, sl_price: Option<f64>) -> Result<(), BotError> {
+        let conn = self.conn.lock().unwrap();
+        let current_time = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "INSERT OR REPLACE INTO active_algo_orders (symbol, algo_id, sl_price, updated_at) 
+             VALUES (?1, ?2, ?3, ?4)",
+            params![symbol, algo_id, sl_price, current_time],
+        ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+        
+        debug!("💾 [{}] Active Algo ID {} (SL: {:?}) saved to DB.", symbol, algo_id, sl_price);
+        Ok(())
+    }
+
+    /// Lấy active algo order từ SQLite cho 1 symbol
+    pub fn get_active_algo_order(&self, symbol: &str) -> Result<Option<(i64, Option<f64>)>, BotError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT algo_id, sl_price FROM active_algo_orders WHERE symbol = ?1"
+        ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+        
+        let mut rows = stmt.query(params![symbol]).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+        if let Some(row) = rows.next().map_err(|e| BotError::DatabaseError(e.to_string()))? {
+            let algo_id: i64 = row.get(0).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+            let sl_price: Option<f64> = row.get(1).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+            Ok(Some((algo_id, sl_price)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Lấy tất cả active algo orders từ SQLite
+    pub fn get_all_active_algo_orders(&self) -> Result<Vec<(String, i64, Option<f64>)>, BotError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT symbol, algo_id, sl_price FROM active_algo_orders"
+        ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+        
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        }).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+
+        let mut result = Vec::new();
+        for r in rows {
+            if let Ok(item) = r {
+                result.push(item);
+            }
+        }
+        Ok(result)
+    }
+
+    /// Xóa active algo order khỏi SQLite
+    pub fn remove_active_algo_order(&self, symbol: &str) -> Result<(), BotError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM active_algo_orders WHERE symbol = ?1",
+            params![symbol],
+        ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
+        
+        debug!("💾 [{}] Active Algo order removed from DB.", symbol);
         Ok(())
     }
 }
@@ -336,5 +410,31 @@ mod tests {
         let range_after = db.get_candles_by_range("BTCUSDT", 0, 5000).await.unwrap();
         assert_eq!(range_after.len(), 1);
         assert_eq!(range_after[0].timestamp, 2000);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_active_algo_orders() {
+        let db = SqliteStore::new(":memory:").expect("Failed to create in-memory db");
+
+        // 1. Kiểm tra ban đầu rỗng
+        assert_eq!(db.get_active_algo_order("BTCUSDT").unwrap(), None);
+        assert_eq!(db.get_all_active_algo_orders().unwrap().len(), 0);
+
+        // 2. Lưu active algo order cho BTCUSDT và ETHUSDT
+        db.save_active_algo_order("BTCUSDT", 12345678, Some(59_000.0)).unwrap();
+        db.save_active_algo_order("ETHUSDT", 87654321, Some(3_200.0)).unwrap();
+
+        // 3. Đọc lại kiểm tra
+        let btc = db.get_active_algo_order("BTCUSDT").unwrap().unwrap();
+        assert_eq!(btc.0, 12345678);
+        assert_eq!(btc.1, Some(59_000.0));
+
+        let all = db.get_all_active_algo_orders().unwrap();
+        assert_eq!(all.len(), 2);
+
+        // 4. Xóa BTCUSDT
+        db.remove_active_algo_order("BTCUSDT").unwrap();
+        assert_eq!(db.get_active_algo_order("BTCUSDT").unwrap(), None);
+        assert_eq!(db.get_all_active_algo_orders().unwrap().len(), 1);
     }
 }

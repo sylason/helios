@@ -176,10 +176,10 @@ fn test_short_position_trailing() {
 
 #[test]
 fn test_zombie_stagnant_decay() {
-    // Kịch bản: Vị thế Long tại $1800, giá tạo đỉnh $1810 ở nến 0 rồi lình xình 60 nến không tạo đỉnh mới.
-    let mut prices = vec![1810.0];
+    // Kịch bản: Vị thế Long tại $1800, giá tạo đỉnh $1815 ở nến 0 rồi lình xình 60 nến quanh $1805 không tạo đỉnh mới.
+    let mut prices = vec![1815.0];
     for _ in 0..60 {
-        prices.push(1810.0);
+        prices.push(1805.0);
     }
 
     let candles = create_mock_candles(1800.0, &prices);
@@ -194,7 +194,7 @@ fn test_zombie_stagnant_decay() {
         current_sl_price: Some(1790.0),
         current_tp_price: None,
         opening_playbook_tag: Some("RANGE_OSC".to_string()),
-        highest_favorable_price: 1810.0,
+        highest_favorable_price: 1816.0,
         peak_timestamp: candles[last_bar - 60].timestamp,
     };
 

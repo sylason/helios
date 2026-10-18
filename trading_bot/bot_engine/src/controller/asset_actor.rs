@@ -145,7 +145,7 @@ impl AssetActor {
             symbol: symbol.clone(),
             strategy_id,
             state: AssetState::InitialSync,
-            asset: Asset::new(symbol),
+            asset: Asset::new_with_capacity(symbol, config.max_live_mem_candles),
             candle_repo,
             strategy_repo,
             dna_rx,
@@ -195,13 +195,16 @@ impl AssetActor {
 
     /// Thiết lập cấu hình Động cơ (EngineConfig)
     pub fn with_config(mut self, config: EngineConfig) -> Self {
+        self.asset.max_capacity = config.max_live_mem_candles;
         self.config = config;
         self
     }
 
     /// Thiết lập kích thước cửa sổ nến bộ nhớ tối đa
     pub fn with_max_mem_candles(mut self, max_candles: usize) -> Self {
-        self.config.max_live_mem_candles = max_candles;
+        let cap = max_candles.max(1000);
+        self.config.max_live_mem_candles = cap;
+        self.asset.max_capacity = cap;
         self
     }
 
@@ -572,7 +575,8 @@ impl AssetActor {
     pub async fn sync_history(&mut self) -> Result<(), BotError> {
         let now = Utc::now().timestamp_millis();
         let target_sync_ts = self.initial_sync_until.unwrap_or(now);
-        let start_time = target_sync_ts - (30 * 24 * 60 * 60 * 1000); // 30 ngày trước target_sync_ts
+        let sync_days = self.config.historical_sync_days.max(1) as i64;
+        let start_time = target_sync_ts - (sync_days * 24 * 60 * 60 * 1000); // Lấy theo historical_sync_days được cấu hình
 
         info!("📥 [{}] Syncing history until timestamp {} into Rolling Buffer...", self.symbol, target_sync_ts);
         

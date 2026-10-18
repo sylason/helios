@@ -245,40 +245,65 @@ impl WsManager {
         }
     }
 
-    /// Khởi động luồng Trade API (WebSocket API siêu tốc)
-    pub async fn start_trade_api_stream(&self) {
+    /// Khởi động luồng Trade API (WebSocket API siêu tốc) và gắn kết với OrderExecutor
+    pub async fn start_trade_api_stream(&self, executor: Arc<crate::execution::order_executor::OrderExecutor>) {
         let api_key = self.api_key.clone();
         let api_secret = self.api_secret.clone();
         let use_testnet = self.use_testnet;
 
         tokio::spawn(async move {
+            let mut reconnect_delay_ms = 100u64;
             loop {
-                let conf = if use_testnet {
-                    ConfigurationWebsocketApi::builder().ws_url("wss://testnet.binancefuture.com/ws-api/v1").api_key(api_key.clone()).api_secret(api_secret.clone()).build().unwrap()
-                } else {
-                    ConfigurationWebsocketApi::builder().api_key(api_key.clone()).api_secret(api_secret.clone()).build().unwrap()
-                };
+                let conf = ConfigurationWebsocketApi::builder()
+                    .api_key(api_key.clone())
+                    .api_secret(api_secret.clone())
+                    .build()
+                    .unwrap();
 
-                let client = DerivativesTradingUsdsFuturesWsApi::production(conf);
+                let client = if use_testnet {
+                    DerivativesTradingUsdsFuturesWsApi::testnet(conf)
+                } else {
+                    DerivativesTradingUsdsFuturesWsApi::production(conf)
+                };
 
                 info!("Đang kết nối WebSocket Trade API...");
                 match client.connect().await {
-                    Ok(_connection) => {
-                        info!("✅ Đã kết nối Trade API");
-                        // Luồng này sẽ được dùng để bắn lệnh. 
-                        // Do tính chất Request-Response của WS API, chúng ta cần lưu trữ connection này trong 1 channel
-                        // hoặc Actor để OrderExecutor có thể gửi lệnh qua.
-                        
-                        // Ở phiên bản hiện tại, chỉ loop để giữ kết nối không bị ngắt.
-                        loop {
-                            sleep(Duration::from_secs(60)).await;
-                        }
+                    Ok(connection) => {
+                        info!("✅ Đã kết nối Trade API (WebSocket API siêu tốc)");
+                        executor.set_ws_api(Some(connection.clone())).await;
+                        reconnect_delay_ms = 100; // Reset delay khi kết nối thành công
+
+                        // Đăng ký bắt sự kiện ngắt kết nối
+                        let (disconnect_tx, mut disconnect_rx) = tokio::sync::mpsc::channel(1);
+                        let sub = connection.subscribe_on_ws_events(move |event| {
+                            match event {
+                                binance_sdk::common::models::WebsocketEvent::Close(code, reason) => {
+                                    warn!("🔌 WebSocket Trade API bị ngắt: code={}, reason={}", code, reason);
+                                    let _ = disconnect_tx.try_send(());
+                                }
+                                binance_sdk::common::models::WebsocketEvent::Error(err) => {
+                                    error!("❌ WebSocket Trade API lỗi mạng: {}", err);
+                                    let _ = disconnect_tx.try_send(());
+                                }
+                                _ => {}
+                            }
+                        });
+
+                        // Chờ thông báo ngắt kết nối
+                        let _ = disconnect_rx.recv().await;
+                        connection.unsubscribe_from_ws_events(sub);
+                        executor.set_ws_api(None).await;
+                        warn!("⚠️ Đã hủy liên kết ws_api trên OrderExecutor do WebSocket bị ngắt.");
                     }
-                    Err(e) => error!("❌ Lỗi kết nối Trade API: {:?}", e),
+                    Err(e) => {
+                        error!("❌ Lỗi kết nối Trade API: {:?}", e);
+                        executor.set_ws_api(None).await;
+                    }
                 }
 
-                warn!("♻️ Đang thử kết nối lại Trade API sau 5 giây...");
-                sleep(Duration::from_secs(5)).await;
+                warn!("♻️ Đang thử Fast Reconnect Trade API sau {}ms...", reconnect_delay_ms);
+                sleep(Duration::from_millis(reconnect_delay_ms)).await;
+                reconnect_delay_ms = (reconnect_delay_ms * 2).min(1000);
             }
         });
     }
