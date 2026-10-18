@@ -30,6 +30,8 @@ pub struct BinanceLiveExecutionEngine {
     pub pending_closed_fill: Option<(f64, f64, String, i64)>,
     /// Nhãn chiến thuật đang chờ mở vị thế (phục vụ đồng bộ opening_playbook_tag khi mở lệnh live)
     pub pending_playbook_tag: Option<String>,
+    /// [TODO-AUDIT-NEW-10] Giá Stop Loss ban đầu đang chờ đồng bộ từ Action mở lệnh (chống race condition khi PositionUpdate đến trước SL order)
+    pub pending_initial_sl: Option<f64>,
 }
 
 impl BinanceLiveExecutionEngine {
@@ -51,6 +53,7 @@ impl BinanceLiveExecutionEngine {
             last_closed_pos_snapshot: None,
             pending_closed_fill: None,
             pending_playbook_tag: None,
+            pending_initial_sl: None,
         }
     }
 
@@ -179,15 +182,17 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
                     info!("🔄 [{}] LiveEngine đã đồng bộ current_sl_price = {:?}", self.core.symbol, new_sl_price);
                 }
             }
-            Action::Buy { tag, stop, .. } | Action::Sell { tag, stop, .. } => {
+            Action::Buy { tag, .. } | Action::Sell { tag, .. } => {
                 self.pending_playbook_tag = tag.clone();
+                let initial_sl = OrderExecutor::extract_sl_price(action);
+                self.pending_initial_sl = initial_sl;
                 if let Some(ref mut pos) = self.live_position {
                     pos.live_entry_bar = bar_idx;
                     if tag.is_some() {
                         pos.opening_playbook_tag = tag.clone();
                     }
-                    if stop.is_some() {
-                        pos.current_sl_price = *stop;
+                    if initial_sl.is_some() {
+                        pos.current_sl_price = initial_sl;
                     }
                 }
             }
@@ -238,8 +243,13 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
                             if live_pos.current_sl_price.is_none() {
                                 let mut sl = self.executor.get_active_sl(symbol).await;
                                 if sl.is_none() {
-                                    let _ = self.executor.sync_active_algo_orders(symbol).await;
-                                    sl = self.executor.get_active_sl(symbol).await;
+                                    // 🛡️ [TODO-AUDIT-NEW-10] Ưu tiên lấy pending_initial_sl trước khi gọi REST sync
+                                    if self.pending_initial_sl.is_some() {
+                                        sl = self.pending_initial_sl;
+                                    } else {
+                                        let _ = self.executor.sync_active_algo_orders(symbol).await;
+                                        sl = self.executor.get_active_sl(symbol).await;
+                                    }
                                 }
                                 live_pos.current_sl_price = sl;
                             }
@@ -258,8 +268,13 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
 
                             let mut active_sl = self.executor.get_active_sl(symbol).await;
                             if active_sl.is_none() {
-                                let _ = self.executor.sync_active_algo_orders(symbol).await;
-                                active_sl = self.executor.get_active_sl(symbol).await;
+                                // 🛡️ [TODO-AUDIT-NEW-10] Ưu tiên lấy pending_initial_sl trước khi gọi REST sync
+                                if self.pending_initial_sl.is_some() {
+                                    active_sl = self.pending_initial_sl;
+                                } else {
+                                    let _ = self.executor.sync_active_algo_orders(symbol).await;
+                                    active_sl = self.executor.get_active_sl(symbol).await;
+                                }
                             }
                             let tag = self.pending_playbook_tag.clone().or_else(|| Some("TREND_PB".to_string()));
 
@@ -278,6 +293,7 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
                         }
                     } else {
                         self.pending_playbook_tag = None;
+                        self.pending_initial_sl = None;
                         if let Some(pos) = self.live_position.take() {
                             self.last_closed_pos_snapshot = Some(pos);
                             self.try_assemble_closed_trade();
@@ -494,5 +510,52 @@ mod tests {
         let pos = engine.get_position().unwrap();
         assert_eq!(pos.current_sl_price, Some(48_000.0));
         assert_eq!(pos.opening_playbook_tag, Some("TREND_PB".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_live_engine_initial_sl_from_policy() {
+        let mut engine = create_test_engine();
+
+        // 1. Strategy phát Action::Buy với RiskPolicy::FixedPrice mang sl_price, stop là None
+        let action = Action::Buy {
+            size: 1.0,
+            limit: None,
+            stop: None,
+            policy: Some(ferro_trade::broker::policies::RiskPolicy::FixedPrice {
+                sl_price: Some(58_500.0),
+                tp_price: None,
+            }),
+            tag: Some("TREND_PB".to_string()),
+        };
+
+        // 2. Gọi execute_action_ctx
+        let _ = engine.execute_action_ctx(&action, 60_000.0, 1000, 10).await;
+
+        // Xác minh pending_initial_sl đã được ghi nhận ngay lập tức
+        assert_eq!(engine.pending_initial_sl, Some(58_500.0));
+        assert_eq!(engine.pending_playbook_tag, Some("TREND_PB".to_string()));
+
+        // 3. Giả lập PositionUpdate từ sàn Binance đến trước phản hồi algo order
+        engine.on_account_event(&AccountEvent::PositionUpdate {
+            symbol: "BTCUSDT".into(),
+            position_amt: 1.0,
+            entry_price: 60_000.0,
+            unrealized_profit: 0.0,
+        }).await;
+
+        // 4. Xác minh vị thế live nhận đúng pending_initial_sl mà không bị mù hay None
+        let pos = engine.get_position().unwrap();
+        assert_eq!(pos.current_sl_price, Some(58_500.0));
+        assert_eq!(pos.opening_playbook_tag, Some("TREND_PB".to_string()));
+
+        // 5. Khi vị thế đóng về 0.0 -> pending_initial_sl được dọn dẹp sạch sẽ
+        engine.on_account_event(&AccountEvent::PositionUpdate {
+            symbol: "BTCUSDT".into(),
+            position_amt: 0.0,
+            entry_price: 60_000.0,
+            unrealized_profit: 0.0,
+        }).await;
+        assert_eq!(engine.pending_initial_sl, None);
+        assert!(engine.get_position().is_none());
     }
 }

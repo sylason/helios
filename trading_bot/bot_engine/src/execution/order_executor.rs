@@ -19,6 +19,9 @@ use binance_sdk::derivatives_trading_usds_futures::rest_api::{
     RestApi,
     CancelAllAlgoOpenOrdersParams,
     CurrentAllAlgoOpenOrdersParams,
+    NewOrderParams as RestNewOrderParams,
+    NewOrderSideEnum as RestNewOrderSideEnum,
+    NewOrderTypeEnum as RestNewOrderTypeEnum,
 };
 use binance_sdk::config::ConfigurationRestApi;
 use chrono::Utc;
@@ -238,6 +241,23 @@ impl OrderExecutor {
         }
     }
 
+    /// [TODO-AUDIT-NEW-10] Trích xuất giá Stop Loss từ Action
+    /// Ưu tiên trích xuất từ RiskPolicy::FixedPrice { sl_price, .. } (chuẩn Helios V3),
+    /// fallback sang trường stop trực tiếp hoặc new_sl_price của UpdateTradeSlTp.
+    pub fn extract_sl_price(action: &Action) -> Option<f64> {
+        match action {
+            Action::Buy { stop, policy, .. } | Action::Sell { stop, policy, .. } => {
+                if let Some(RiskPolicy::FixedPrice { sl_price: Some(sl), .. }) = policy {
+                    Some(*sl)
+                } else {
+                    *stop
+                }
+            }
+            Action::UpdateTradeSlTp { new_sl_price, .. } => *new_sl_price,
+            _ => None,
+        }
+    }
+
     /// Tính toán khối lượng giao dịch hợp lệ
     pub fn calculate_order_size(&self, risk_usdt: f64, current_price: f64, leverage: f64) -> Result<f64, BotError> {
         if current_price <= 0.0 {
@@ -385,8 +405,9 @@ impl OrderExecutor {
             return Ok(());
         }
 
+        let initial_sl = Self::extract_sl_price(&action);
         let (side, is_close_all, risk_percentage) = match action {
-            Action::Buy { size, stop, policy, .. } => {
+            Action::Buy { size, policy, .. } => {
                 // ⚠️ SENSOR PROBE: Bắt thiếu sót đặt lệnh Take Profit trên Binance Live
                 if let Some(RiskPolicy::FixedPrice { tp_price: Some(tp), .. }) = &policy {
                     warn!(
@@ -395,10 +416,10 @@ impl OrderExecutor {
                         symbol, tp
                     );
                 }
-                sl_price_to_set = stop;
+                sl_price_to_set = initial_sl;
                 (WsNewOrderSideEnum::Buy, false, size)
             },
-            Action::Sell { size, stop, policy, .. } => {
+            Action::Sell { size, policy, .. } => {
                 // ⚠️ SENSOR PROBE: Bắt thiếu sót đặt lệnh Take Profit trên Binance Live
                 if let Some(RiskPolicy::FixedPrice { tp_price: Some(tp), .. }) = &policy {
                     warn!(
@@ -407,7 +428,7 @@ impl OrderExecutor {
                         symbol, tp
                     );
                 }
-                sl_price_to_set = stop;
+                sl_price_to_set = initial_sl;
                 (WsNewOrderSideEnum::Sell, false, size)
             },
             Action::ClosePosition { .. } | Action::CloseLongs { .. } | Action::CloseShorts { .. } => {
@@ -516,9 +537,11 @@ impl OrderExecutor {
                     .working_type(WsNewAlgoOrderWorkingTypeEnum::MarkPrice)
                     .build().unwrap();
                     
-                    // Thử lại tối đa 3 lần cho Hard SL qua WebSocket API
+                    // [TODO-AUDIT-NEW-10] Thử lại tối đa 7 lần cho Hard SL qua WebSocket API với exponential backoff
+                    const SL_RETRY_DELAYS_MS: [u64; 7] = [10, 20, 40, 80, 160, 320, 500];
                     let mut success = false;
-                    for attempt in 1..=3 {
+                    for (attempt_idx, &delay_ms) in SL_RETRY_DELAYS_MS.iter().enumerate() {
+                        let attempt = attempt_idx + 1;
                         match ws.new_algo_order(p_sl.clone()).await {
                             Ok(resp) => {
                                 info!("🛡️ [{}] Đã đặt Hard SL bảo vệ qua WebSocket tại: {}", symbol, rounded_sl);
@@ -532,14 +555,91 @@ impl OrderExecutor {
                                 break;
                             },
                             Err(e) => {
-                                warn!("⚠️ [{}] Thử lần {}/3 đặt Hard SL qua WS thất bại ({}), thử lại sau 20ms...", symbol, attempt, e);
-                                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+                                let err_str = e.to_string();
+                                warn!("⚠️ [{}] Thử lần {}/7 đặt Hard SL qua WS thất bại ({}), thử lại sau {}ms...", symbol, attempt, err_str, delay_ms);
+
+                                // Nếu dính lỗi trùng lệnh hoặc đã tồn tại algo order (-2021 hoặc -4061)
+                                if err_str.contains("-4061") || err_str.contains("already exists") {
+                                    warn!("🔄 [{}] Phát hiện lỗi trùng lệnh Algo (-4061), đồng bộ và hủy lệnh cũ trước khi thử lại...", symbol);
+                                    if let Ok(Some(existing_id)) = self.sync_active_algo_orders(symbol).await {
+                                        let p_cancel = WsCancelAlgoOrderParams::builder().algo_id(existing_id).build().unwrap();
+                                        let _ = ws.cancel_algo_order(p_cancel).await;
+                                        self.clear_active_algo_id(symbol).await;
+                                    }
+                                }
+
+                                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
                             }
                         }
                     }
 
                     if !success {
-                        error!("❌ [{}] Đã thử 3 lần nhưng không thể đặt Hard SL bảo vệ qua WS tại: {}", symbol, rounded_sl);
+                        error!(
+                            "🚨 [CRITICAL ALERT] [{}] Đã thử 7 lần nhưng THẤT BẠI đặt Hard SL tại {}! Kích hoạt EMERGENCY PANIC CLOSE để triệt tiêu Naked Position!",
+                            symbol, rounded_sl
+                        );
+
+                        // Đảo chiều side để đóng vị thế khẩn cấp
+                        let close_side = match side {
+                            WsNewOrderSideEnum::Buy => WsNewOrderSideEnum::Sell,
+                            WsNewOrderSideEnum::Sell => WsNewOrderSideEnum::Buy,
+                        };
+
+                        let close_params = WsNewOrderParams::builder(
+                            symbol.to_string(),
+                            close_side,
+                            WsNewOrderTypeEnum::Market
+                        )
+                        .quantity(dec_qty)
+                        .build().map_err(|e| BotError::Internal(e.to_string()))?;
+
+                        let mut closed_successfully = false;
+                        if let Some(ws_panic) = self.wait_ws_ready(1000).await {
+                            match ws_panic.new_order(close_params).await {
+                                Ok(res) => {
+                                    if let Ok(data) = res.data() {
+                                        error!("🚨 [{}] EMERGENCY PANIC CLOSE THÀNH CÔNG qua WebSocket! OrderID: {:?}", symbol, data.order_id);
+                                        closed_successfully = true;
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("⚠️ [{}] Lỗi gửi Panic Close qua WebSocket: {:?}. Sẵn sàng kích hoạt REST fallback...", symbol, e);
+                                }
+                            }
+                        }
+
+                        // Last-resort fallback: REST API nếu WebSocket thất bại
+                        if !closed_successfully {
+                            warn!("⚠️ [{}] Kích hoạt Last-Resort REST Panic Close...", symbol);
+                            let rest_side = match side {
+                                WsNewOrderSideEnum::Buy => RestNewOrderSideEnum::Sell,
+                                WsNewOrderSideEnum::Sell => RestNewOrderSideEnum::Buy,
+                            };
+                            let rest_params = RestNewOrderParams::builder(
+                                symbol.to_string(),
+                                rest_side,
+                                RestNewOrderTypeEnum::Market
+                            )
+                            .quantity(dec_qty)
+                            .build().map_err(|e| BotError::Internal(e.to_string()))?;
+
+                            self.monitor.wait_if_needed(1).await;
+                            match self.rest_client.new_order(rest_params).await {
+                                Ok(res) => {
+                                    if let Ok(data) = res.data().await {
+                                        error!("🚨 [{}] LAST-RESORT REST PANIC CLOSE THÀNH CÔNG! OrderID: {:?}", symbol, data.order_id);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("💥 [CATASTROPHIC FAILURE] [{}] KHÔNG THỂ PANIC CLOSE QUA CẢ WS LẪN REST: {:?}", symbol, e);
+                                }
+                            }
+                        }
+
+                        return Err(BotError::Internal(format!(
+                            "EMERGENCY PANIC CLOSE TRIGGERED: Failed to place Hard SL for {} at {}",
+                            symbol, rounded_sl
+                        )));
                     }
                 }
 
@@ -757,5 +857,56 @@ mod tests {
         executor.clear_active_algo_id("BTCUSDT").await;
         assert_eq!(executor.get_active_algo_id("BTCUSDT").await, None);
         assert_eq!(executor.db_store.get_active_algo_order("BTCUSDT").unwrap(), None);
+    }
+
+    #[test]
+    fn test_extract_sl_price_from_action() {
+        // 1. Helios V3 style: Action::Buy với RiskPolicy::FixedPrice mang sl_price, stop là None
+        let buy_action_v3 = Action::Buy {
+            size: 1.0,
+            limit: None,
+            stop: None,
+            policy: Some(RiskPolicy::FixedPrice {
+                sl_price: Some(1950.0),
+                tp_price: Some(2100.0),
+            }),
+            tag: Some("TREND_PB".to_string()),
+        };
+        assert_eq!(OrderExecutor::extract_sl_price(&buy_action_v3), Some(1950.0));
+
+        // 2. Helios V3 style: Action::Sell với RiskPolicy::FixedPrice mang sl_price
+        let sell_action_v3 = Action::Sell {
+            size: 1.0,
+            limit: None,
+            stop: None,
+            policy: Some(RiskPolicy::FixedPrice {
+                sl_price: Some(2050.0),
+                tp_price: None,
+            }),
+            tag: Some("REVERSAL".to_string()),
+        };
+        assert_eq!(OrderExecutor::extract_sl_price(&sell_action_v3), Some(2050.0));
+
+        // 3. Fallback style: stop field trực tiếp khi policy là None
+        let legacy_action = Action::Buy {
+            size: 1.0,
+            limit: None,
+            stop: Some(1940.0),
+            policy: None,
+            tag: None,
+        };
+        assert_eq!(OrderExecutor::extract_sl_price(&legacy_action), Some(1940.0));
+
+        // 4. Trailing SL style: Action::UpdateTradeSlTp
+        let update_action = Action::UpdateTradeSlTp {
+            trade_id: 1,
+            new_sl_price: Some(1980.0),
+            new_tp_price: None,
+        };
+        assert_eq!(OrderExecutor::extract_sl_price(&update_action), Some(1980.0));
+
+        // 5. Action ClosePosition -> None
+        let close_action = Action::ClosePosition { portion: 1.0 };
+        assert_eq!(OrderExecutor::extract_sl_price(&close_action), None);
     }
 }
