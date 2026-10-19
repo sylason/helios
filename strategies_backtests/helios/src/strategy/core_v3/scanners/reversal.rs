@@ -29,6 +29,7 @@ use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::normalization::{sat_unbounded, convex_combine};
+use crate::strategy::core_v3::risk::RiskManager;
 
 pub struct ReversalScanner;
 
@@ -122,21 +123,24 @@ impl TacticalScanner for ReversalScanner {
         let wick_buffer = current_atr * wick_buffer_mult;
         let suggested_tp = Some(kama_mid);
 
-        match signal_type {
-            SignalType::Long => Some(Proposal {
-                signal_type: SignalType::Long,
-                raw_score: score.min(1.0),
-                scanner_id: self.id(),
-                suggested_sl: Some(low_price - wick_buffer),
-                suggested_tp,
-            }),
-            SignalType::Short => Some(Proposal {
-                signal_type: SignalType::Short,
-                raw_score: score.min(1.0),
-                scanner_id: self.id(),
-                suggested_sl: Some(high_price + wick_buffer),
-                suggested_tp,
-            }),
-        }
+        let raw_sl = match signal_type {
+            SignalType::Long => low_price - wick_buffer,
+            SignalType::Short => high_price + wick_buffer,
+        };
+        let sanitized_sl = RiskManager::sanitize_structural_sl(
+            signal_type == SignalType::Long,
+            close_price,
+            raw_sl,
+            0.0015,
+            wick_buffer,
+        );
+
+        Some(Proposal {
+            signal_type,
+            raw_score: score.min(1.0),
+            scanner_id: self.id(),
+            suggested_sl: Some(sanitized_sl),
+            suggested_tp,
+        })
     }
 }

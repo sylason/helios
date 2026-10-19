@@ -24,6 +24,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
+use crate::strategy::core_v3::risk::RiskManager;
 
 pub struct AnomalyScanner;
 
@@ -68,11 +69,13 @@ impl TacticalScanner for AnomalyScanner {
             let score_long = 0.60 * f_wick_long + 0.40 * f_z;
 
             if score_long >= min_score {
+                let raw_sl = low - wick_buffer;
+                let sanitized_sl = RiskManager::sanitize_structural_sl(true, close, raw_sl, 0.0015, wick_buffer);
                 return Some(Proposal {
                     signal_type: SignalType::Long,
                     raw_score: score_long.min(1.0),
                     scanner_id: self.id(),
-                    suggested_sl: Some(low - wick_buffer),
+                    suggested_sl: Some(sanitized_sl),
                     suggested_tp: None,
                 });
             }
@@ -83,11 +86,13 @@ impl TacticalScanner for AnomalyScanner {
             let score_short = 0.60 * f_wick_short + 0.40 * f_z;
 
             if score_short >= min_score {
+                let raw_sl = high + wick_buffer;
+                let sanitized_sl = RiskManager::sanitize_structural_sl(false, close, raw_sl, 0.0015, wick_buffer);
                 return Some(Proposal {
                     signal_type: SignalType::Short,
                     raw_score: score_short.min(1.0),
                     scanner_id: self.id(),
-                    suggested_sl: Some(high + wick_buffer),
+                    suggested_sl: Some(sanitized_sl),
                     suggested_tp: None,
                 });
             }

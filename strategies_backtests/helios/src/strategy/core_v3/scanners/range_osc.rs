@@ -26,6 +26,7 @@ use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::normalization::sat_unbounded;
+use crate::strategy::core_v3::risk::RiskManager;
 
 pub struct RangeOscScanner;
 
@@ -147,10 +148,8 @@ impl TacticalScanner for RangeOscScanner {
 
             // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên dưới dải Bollinger Bands
             let base_support = low.min(bb_l);
-            let mut sl = base_support - buffer;
-            if sl >= close {
-                sl = close - buffer.max(current_atr * 0.20);
-            }
+            let fallback_buf = buffer.max(current_atr * 0.20);
+            let sl = RiskManager::sanitize_structural_sl(true, close, base_support - buffer, 0.0015, fallback_buf);
 
             Some(Proposal {
                 signal_type: SignalType::Long,
@@ -182,10 +181,8 @@ impl TacticalScanner for RangeOscScanner {
 
             // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên trên dải Bollinger Bands
             let base_resistance = high.max(bb_u);
-            let mut sl = base_resistance + buffer;
-            if sl <= close {
-                sl = close + buffer.max(current_atr * 0.20);
-            }
+            let fallback_buf = buffer.max(current_atr * 0.20);
+            let sl = RiskManager::sanitize_structural_sl(false, close, base_resistance + buffer, 0.0015, fallback_buf);
 
             Some(Proposal {
                 signal_type: SignalType::Short,

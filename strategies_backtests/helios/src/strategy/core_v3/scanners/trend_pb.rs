@@ -28,6 +28,7 @@ use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::normalization::{sat_unbounded, sat_proximity, convex_combine};
+use crate::strategy::core_v3::risk::RiskManager;
 
 pub struct TrendPBScanner;
 
@@ -129,11 +130,8 @@ impl TacticalScanner for TrendPBScanner {
             let score_long = convex_combine(&[f_slope, f_stoch, f_clv], &[0.40, 0.30, 0.30]);
 
             if score_long >= pb_cfg.min_activation_score {
-                // 🛡️ Structural SL neo chặt chẽ theo đáy nến vi mô hiện tại + đệm ATR (Khử 100% KAMA Suction Trap)
-                let mut sl = low - buffer;
-                if sl >= close {
-                    sl = close - buffer.max(close * 0.002);
-                }
+                // 🛡️ Structural SL neo chặt chẽ theo đáy nến vi mô hiện tại + đệm ATR chuẩn hóa
+                let sl = RiskManager::sanitize_structural_sl(true, close, low - buffer, 0.0015, buffer);
 
                 return Some(Proposal {
                     signal_type: SignalType::Long,
@@ -182,11 +180,8 @@ impl TacticalScanner for TrendPBScanner {
             let score_short = convex_combine(&[f_slope, f_stoch, f_clv], &[0.40, 0.30, 0.30]);
 
             if score_short >= pb_cfg.min_activation_score {
-                // 🛡️ Structural SL neo chặt chẽ theo đỉnh nến vi mô hiện tại + đệm ATR (Khử 100% KAMA Suction Trap)
-                let mut sl = high + buffer;
-                if sl <= close {
-                    sl = close + buffer.max(close * 0.002);
-                }
+                // 🛡️ Structural SL neo chặt chẽ theo đỉnh nến vi mô hiện tại + đệm ATR chuẩn hóa
+                let sl = RiskManager::sanitize_structural_sl(false, close, high + buffer, 0.0015, buffer);
 
                 return Some(Proposal {
                     signal_type: SignalType::Short,

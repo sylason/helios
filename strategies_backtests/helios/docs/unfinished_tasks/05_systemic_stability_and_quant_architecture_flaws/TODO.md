@@ -159,9 +159,17 @@
 - [x] **TODO-AUDIT-NEW-04: Phá Bẫy Catch-22 VETO Triệt Tiêu Nến Đẹp của Arbiter**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:254-280`
   - **Mô tả:** Xóa bỏ Binary Veto khi SL $> 15\%$ ROE. Thay bằng tự động gọi `clamp_sl_price` kẹp SL về trần an toàn và co giãn khối lượng (Dynamic Sizing: $\text{scale} = 15\% / \text{suggested\_roe}$).
-- [ ] **TODO-AUDIT-NEW-05: Vá Lỗ Hổng Inverted SL Bằng Tham Số `is_long`**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:84-138`
-  - **Mô tả:** Bổ sung `is_long: bool` vào `validate_structural_sl`. Long bắt buộc $SL < Price$, Short bắt buộc $SL > Price$.
+- [x] **TODO-AUDIT-NEW-05: Vá Lỗ Hổng Inverted SL Bằng Tham Số `is_long` & Chuẩn Hóa Stop Loss Toàn Hệ Thống (`TODO-ARB-02-R2`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `arbiter.rs`, `scanners/*.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100% QUA 3 BƯỚC] 
+    1. Bổ sung `is_long: bool` và variant `InvertedPrice` vào `validate_structural_sl`; Arbiter VETO tức thì proposal dị tật.
+    2. Kiến tạo hàm tĩnh chuẩn hóa `RiskManager::sanitize_structural_sl` nắn hình học nến vi mô cho Stop Loss (Long $SL < Entry$, Short $SL > Entry$, tự động fallback an toàn nếu Doji/lỗi số học).
+    3. Tích hợp `sanitize_structural_sl` vào toàn bộ 6 Scanners (`reversal`, `anomaly`, `trend_pb`, `absorption`, `momentum_ignition`, `range_osc`), xóa bỏ 100% code kẹp thủ công phân mảnh vi phạm DRY.
+  - **Unit Tests:**
+    - [x] `test_validate_structural_sl_directional_and_inverted`
+    - [x] `test_arbiter_vetos_inverted_sl_proposal`
+    - [x] `test_sanitize_structural_sl_exhaustive`
+    - [x] `test_absorption_sl_spring_geometry`
 - [x] **TODO-AUDIT-NEW-06: Khử Lỗi Mù SL Của Strategy (Phantom SL Desync)**
   - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:117-160`
   - **Mô tả:** Cập nhật ngay `live_position.current_sl_price = Some(new_sl)` khi dời SL để Strategy không bị mù trạng thái sàn và ngừng spam lệnh dời SL mỗi nến. (Đã hoàn thành và kiểm thử trong `test_live_engine_syncs_current_sl_price`).

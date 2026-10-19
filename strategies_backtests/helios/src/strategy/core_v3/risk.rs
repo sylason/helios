@@ -168,6 +168,57 @@ impl RiskManager {
         ) == SlValidationResult::Acceptable
     }
 
+    /// 🛡️ [TODO-AUDIT-NEW-05 BƯỚC 2]: Chuẩn hóa và nắn Stop Loss cấu trúc đề xuất từ Scanner.
+    /// Đảm bảo tính nhất quán hình học vi mô tuyệt đối trên toàn bộ 6 Tactical Scanners:
+    /// - Long: Luôn nằm dưới entry_price một khoảng tối thiểu min_dist_pct.
+    /// - Short: Luôn nằm trên entry_price một khoảng tối thiểu min_dist_pct.
+    /// - Triệt tiêu 100% nguy cơ Inverted SL do nến Doji, râu ngắn, ATR âm hoặc dữ liệu NaN.
+    pub fn sanitize_structural_sl(
+        is_long: bool,
+        entry_price: f64,
+        raw_sl: f64,
+        min_dist_pct: f64,
+        fallback_buffer: f64,
+    ) -> f64 {
+        if entry_price <= 0.0 || entry_price.is_nan() {
+            return 0.0;
+        }
+
+        let min_dist = if min_dist_pct <= 0.0 || min_dist_pct.is_nan() {
+            0.0015 // Sàn an toàn tối thiểu 0.15% giá
+        } else {
+            min_dist_pct
+        };
+
+        let safe_buffer = if fallback_buffer <= 0.0 || fallback_buffer.is_nan() {
+            entry_price * min_dist
+        } else {
+            fallback_buffer.max(entry_price * min_dist)
+        };
+
+        if is_long {
+            let max_allowed_sl = entry_price * (1.0 - min_dist);
+            let candidate_sl = if raw_sl.is_nan() || raw_sl <= 0.0 || raw_sl >= entry_price {
+                entry_price - safe_buffer
+            } else {
+                raw_sl.min(max_allowed_sl)
+            };
+
+            // Chốt chặn an toàn tuyệt đối: không để giá âm và không để vượt quá max_allowed_sl
+            candidate_sl.clamp(0.0001, max_allowed_sl)
+        } else {
+            let min_allowed_sl = entry_price * (1.0 + min_dist);
+            let candidate_sl = if raw_sl.is_nan() || raw_sl <= 0.0 || raw_sl <= entry_price {
+                entry_price + safe_buffer
+            } else {
+                raw_sl.max(min_allowed_sl)
+            };
+
+            // Chốt chặn an toàn tuyệt đối: không để giá rơi xuống dưới min_allowed_sl
+            candidate_sl.max(min_allowed_sl)
+        }
+    }
+
     /// Tính toán Size dựa trên Fixed Percentage (Fraction của Ký quỹ) nhưng đảm bảo Min Order Size.
     /// Trả về một giá trị < 1.0 (ví dụ 0.1 = 10%) để `ferro_trade` dùng làm Initial Margin.
     pub fn calculate_size(equity: f64, risk_pct: f64, min_order_usd: f64, leverage: f64, max_cap_fraction: f64) -> f64 {
@@ -1547,6 +1598,51 @@ mod tests {
             false, price, 100.50, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
         );
         assert_eq!(res_short_ok, SlValidationResult::Acceptable, "Short với SL an toàn 100.50 PHẢI được chấp thuận!");
+    }
+
+    #[test]
+    fn test_sanitize_structural_sl_exhaustive() {
+        let entry_price = 100.0;
+        let min_dist = 0.002; // 0.20% giá = 0.20 giá
+        let fallback_buffer = 0.50; // 0.50 giá (theo ATR)
+
+        // 1. Kịch bản LONG:
+        // 1.1. raw_sl hợp lệ và xa hơn min_dist: raw_sl = 99.0 < 99.80 -> Giữ nguyên 99.0
+        assert_eq!(RiskManager::sanitize_structural_sl(true, entry_price, 99.0, min_dist, fallback_buffer), 99.0);
+
+        // 1.2. raw_sl quá sát entry_price: raw_sl = 99.95 > 99.80 -> Nắn về max_allowed = 99.80
+        assert_eq!(RiskManager::sanitize_structural_sl(true, entry_price, 99.95, min_dist, fallback_buffer), 99.80);
+
+        // 1.3. raw_sl bằng đúng entry_price (Doji): raw_sl = 100.0 -> Fallback về entry - fallback_buffer = 99.50
+        assert_eq!(RiskManager::sanitize_structural_sl(true, entry_price, 100.0, min_dist, fallback_buffer), 99.50);
+
+        // 1.4. raw_sl ngược chiều (Inverted): raw_sl = 105.0 -> Fallback về 99.50
+        assert_eq!(RiskManager::sanitize_structural_sl(true, entry_price, 105.0, min_dist, fallback_buffer), 99.50);
+
+        // 1.5. raw_sl bị NaN hoặc âm: -> Fallback về 99.50
+        assert_eq!(RiskManager::sanitize_structural_sl(true, entry_price, f64::NAN, min_dist, fallback_buffer), 99.50);
+        assert_eq!(RiskManager::sanitize_structural_sl(true, entry_price, -10.0, min_dist, fallback_buffer), 99.50);
+
+        // 2. Kịch bản SHORT:
+        // 2.1. raw_sl hợp lệ và xa hơn min_dist: raw_sl = 101.0 > 100.20 -> Giữ nguyên 101.0
+        assert_eq!(RiskManager::sanitize_structural_sl(false, entry_price, 101.0, min_dist, fallback_buffer), 101.0);
+
+        // 2.2. raw_sl quá sát entry_price: raw_sl = 100.05 < 100.20 -> Nắn về min_allowed = 100.20
+        assert_eq!(RiskManager::sanitize_structural_sl(false, entry_price, 100.05, min_dist, fallback_buffer), 100.20);
+
+        // 2.3. raw_sl bằng đúng entry_price (Doji): raw_sl = 100.0 -> Fallback về entry + fallback_buffer = 100.50
+        assert_eq!(RiskManager::sanitize_structural_sl(false, entry_price, 100.0, min_dist, fallback_buffer), 100.50);
+
+        // 2.4. raw_sl ngược chiều (Inverted): raw_sl = 95.0 -> Fallback về 100.50
+        assert_eq!(RiskManager::sanitize_structural_sl(false, entry_price, 95.0, min_dist, fallback_buffer), 100.50);
+
+        // 2.5. raw_sl bị NaN hoặc âm: -> Fallback về 100.50
+        assert_eq!(RiskManager::sanitize_structural_sl(false, entry_price, f64::NAN, min_dist, fallback_buffer), 100.50);
+        assert_eq!(RiskManager::sanitize_structural_sl(false, entry_price, -10.0, min_dist, fallback_buffer), 100.50);
+
+        // 3. Fallback buffer bất thường (bằng 0 hoặc âm): Tự động nắn theo min_dist
+        assert_eq!(RiskManager::sanitize_structural_sl(true, entry_price, 105.0, min_dist, 0.0), 99.80);
+        assert_eq!(RiskManager::sanitize_structural_sl(false, entry_price, 95.0, min_dist, -1.0), 100.20);
     }
 
     #[test]

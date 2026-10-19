@@ -24,6 +24,7 @@ use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::normalization::{sat_unbounded, sat_penetration, convex_combine};
+use crate::strategy::core_v3::risk::RiskManager;
 
 pub struct MomentumIgnitionScanner;
 
@@ -139,22 +140,17 @@ impl TacticalScanner for MomentumIgnitionScanner {
         let buffer_mult = if mom_cfg.struct_sl_buffer_atr <= 0.0 { 0.50 } else { mom_cfg.struct_sl_buffer_atr.max(0.10) };
         let buffer = atr * buffer_mult;
 
-        let sl = match signal_type {
-            SignalType::Long => {
-                let mut s = low - buffer;
-                if s >= close {
-                    s = close - buffer;
-                }
-                s
-            }
-            SignalType::Short => {
-                let mut s = high + buffer;
-                if s <= close {
-                    s = close + buffer;
-                }
-                s
-            }
+        let raw_sl = match signal_type {
+            SignalType::Long => low - buffer,
+            SignalType::Short => high + buffer,
         };
+        let sl = RiskManager::sanitize_structural_sl(
+            signal_type == SignalType::Long,
+            close,
+            raw_sl,
+            0.0015,
+            buffer,
+        );
 
         Some(Proposal {
             signal_type,

@@ -28,6 +28,7 @@ use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::core_v3::normalization::{sat_unbounded, sat_ratio_damped, convex_combine};
+use crate::strategy::core_v3::risk::RiskManager;
 
 pub struct AbsorptionScanner;
 
@@ -123,24 +124,17 @@ impl TacticalScanner for AbsorptionScanner {
 
             // 🛡️ TASK-SEN-02: Structural SL neo trực tiếp theo đáy nến Spring (Long) hoặc đỉnh Upthrust (Short) vi mô
             // Xóa bỏ hoàn toàn .min(bb_lower) và .max(bb_upper) để không bị kéo giãn SL theo dải BB khung 1h/4h
-            let sl = match signal_type {
-                SignalType::Long => {
-                    let base_support = low;
-                    let mut s = base_support - buffer;
-                    if s >= close {
-                        s = close - buffer;
-                    }
-                    s
-                }
-                SignalType::Short => {
-                    let base_resistance = high;
-                    let mut s = base_resistance + buffer;
-                    if s <= close {
-                        s = close + buffer;
-                    }
-                    s
-                }
+            let raw_sl = match signal_type {
+                SignalType::Long => low - buffer,
+                SignalType::Short => high + buffer,
             };
+            let sl = RiskManager::sanitize_structural_sl(
+                signal_type == SignalType::Long,
+                close,
+                raw_sl,
+                0.0015,
+                buffer,
+            );
 
             return Some(Proposal {
                 signal_type,
@@ -157,6 +151,7 @@ impl TacticalScanner for AbsorptionScanner {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     #[test]
     fn test_absorption_sl_spring_geometry() {
         // Giả lập nến Spring vi mô 1m:
@@ -169,12 +164,9 @@ mod tests {
         // Giả sử dải Bollinger Bands khung lớn 1h (bb_lower = 2400.0) nằm rất xa
         let bb_lower_macro: f64 = 2400.0;
 
-        // CÔNG THỨC MỚI: SL neo trực tiếp vào low của nến Spring
-        let base_support = low;
-        let mut sl_new = base_support - buffer;
-        if sl_new >= close {
-            sl_new = close - buffer;
-        }
+        // CÔNG THỨC MỚI: SL neo trực tiếp vào low của nến Spring và được chuẩn hóa qua RiskManager
+        let raw_sl = low - buffer;
+        let sl_new = RiskManager::sanitize_structural_sl(true, close, raw_sl, 0.0015, buffer);
 
         // CÔNG THỨC CŨ (BỊ BẪY BBANDS SUCTION):
         let base_support_old = low.min(bb_lower_macro); // = 2400.0
