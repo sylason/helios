@@ -1003,6 +1003,19 @@ mod tests {
         assert!(has_min_conf, "defs phải chứa min_confidence_threshold trong ArbiterConfig!");
         assert!(has_chaos_veto, "defs phải chứa chaos_veto_threshold trong ArbiterConfig!");
         assert!(has_min_natr, "defs phải chứa min_natr_threshold trong ArbiterConfig!");
+        // 🛡️ TODO-AUDIT-NEW-61 (H-CFG-06): Khóa dải DNA phủ Forex -> Memecoin, 150 nấc đều không lệch biên
+        let min_natr_def = defs.iter().find(|(name, _)| name.contains("min_natr_threshold")).map(|(_, d)| d);
+        match min_natr_def {
+            Some(ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step }) => {
+                assert!((min - 0.0002).abs() < 1e-12, "min_natr_threshold.min phải = 0.0002, nhận {}", min);
+                assert!((max - 0.0300).abs() < 1e-12, "min_natr_threshold.max phải = 0.0300, nhận {}", max);
+                let s = step.expect("min_natr_threshold phải có step");
+                assert!((s - 0.0002).abs() < 1e-12, "min_natr_threshold.step phải = 0.0002, nhận {}", s);
+                let n_steps = (max - min) / s;
+                assert!((n_steps - n_steps.round()).abs() < 1e-9, "Dải phải chia hết cho step (chống Discrete Binning Bias)");
+            }
+            other => panic!("min_natr_threshold phải là ParamDefinition::Range, nhận {:?}", other),
+        }
         assert!(has_pb_boundary_z, "defs phải chứa tactical_sniper.pullback.max_boundary_z!");
         assert!(has_pb_squeeze, "defs phải chứa tactical_sniper.pullback.max_squeeze_intensity!");
         assert!(!has_max_chaos, "defs KHÔNG được chứa max_chaos_penalty (đã loại bỏ gen theo Pure Confidence FLAW-RISK.11)!");

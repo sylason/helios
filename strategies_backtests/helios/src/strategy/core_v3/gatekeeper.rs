@@ -455,6 +455,79 @@ mod tests {
     }
 
     #[test]
+    fn test_gatekeeper_permits_forex_low_volatility() {
+        // 🛡️ TODO-AUDIT-NEW-61 (H-CFG-06): Forex biến động thấp KHÔNG được bị VETO oan.
+        // Phí Forex: taker 0.005%, slippage 0.005% => roundtrip = (2*0.005% + 0.005%) = 0.015%
+        // DNA min_natr_threshold = 0.0002 (cận dưới mới) => alpha 0.02% => required = 0.035%
+        let mut config = HeliosConfigV3::default();
+        config.risk_management.risk_base.taker_fee_rate = 0.00005;
+        config.risk_management.risk_base.slippage_allowance_pct = 0.00005;
+        config.arbiter.min_natr_threshold = 0.0002;
+
+        let mut env = MockTickEnv::new(20);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        sensors.natr = Arc::new(vec![0.04; 20]);       // EUR/USD Macro NATR 0.04% >= 0.035%
+        sensors.micro_natr = Arc::new(vec![0.02; 20]); // Micro NATR 0.02% >= sàn Taker 0.005%
+        sensors.atr_sl = Arc::new(vec![0.0004; 20]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; 20]);
+        sensors.adx = Arc::new(vec![30.0; 20]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; 20]);
+        matrix.chaos_index = Arc::new(vec![0.30; 20]);
+
+        let tick = env.tick(10);
+        let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
+        assert!(eval.passed, "Forex NATR 0.04% phải PASS khi alpha DNA = 0.02%!");
+        assert_eq!(eval.veto_reason, None);
+        assert_eq!(eval.regime, MarketRegime::Trending);
+        assert!((eval.required_min_natr_pct - 0.035).abs() < 1e-9, "required = 0.015% phí + 0.02% alpha");
+
+        // 🧪 Nhóm đối chứng: cận dưới DNA cũ (0.0008) => required = 0.095% => VETO oan 100% nến Forex
+        config.arbiter.min_natr_threshold = 0.0008;
+        let tick_old = env.tick(10);
+        let eval_old = RegimeGatekeeper::evaluate(&tick_old, &sensors, &matrix, &config);
+        assert!(!eval_old.passed, "Dải DNA cũ phải tái hiện bẫy tê liệt Forex");
+        assert_eq!(eval_old.veto_reason, Some(GateVetoReason::MacroFlatline));
+        assert_eq!(eval_old.regime, MarketRegime::VolatilityFlatline);
+    }
+
+    #[test]
+    fn test_gatekeeper_filters_memecoin_high_noise() {
+        // 🛡️ TODO-AUDIT-NEW-61 (H-CFG-06): Memecoin đi ngang nhiễu (NATR 0.85%) phải bị lọc
+        // khi GA đặt alpha 1.50% (vượt trần cũ 0.30%). Phí mặc định => roundtrip 0.10% => required = 1.60%
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_natr_threshold = 0.0150;
+        let roundtrip_fee_pct = (config.risk_management.risk_base.taker_fee_rate * 2.0
+            + config.risk_management.risk_base.slippage_allowance_pct) * 100.0;
+        let expected_required = roundtrip_fee_pct + 1.50;
+
+        let mut env = MockTickEnv::new(20);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        sensors.natr = Arc::new(vec![0.85; 20]);       // Vùng chop nhiễu của Memecoin
+        sensors.micro_natr = Arc::new(vec![0.30; 20]);
+        sensors.atr_sl = Arc::new(vec![0.01; 20]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; 20]);
+        sensors.adx = Arc::new(vec![30.0; 20]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; 20]);
+        matrix.chaos_index = Arc::new(vec![0.30; 20]);
+
+        let tick = env.tick(10);
+        let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
+        assert!(!eval.passed, "Memecoin NATR 0.85% < required phải bị VETO!");
+        assert_eq!(eval.veto_reason, Some(GateVetoReason::MacroFlatline));
+        assert_eq!(eval.regime, MarketRegime::VolatilityFlatline);
+        assert!((eval.required_min_natr_pct - expected_required).abs() < 1e-9);
+
+        // 🧪 Nhóm đối chứng: pha bứt phá thật (NATR 2.00% > required) => PASS
+        sensors.natr = Arc::new(vec![2.00; 20]);
+        let tick_burst = env.tick(10);
+        let eval_burst = RegimeGatekeeper::evaluate(&tick_burst, &sensors, &matrix, &config);
+        assert!(eval_burst.passed, "Memecoin NATR 2.00% vượt sàn phải PASS");
+        assert_eq!(eval_burst.regime, MarketRegime::Trending);
+    }
+
+    #[test]
     fn test_gatekeeper_micro_flatline_veto() {
         // 🛡️ CHỐNG BẪY MÙ 4H (NEW-NATR-4H-BLIND):
         // Dù Macro NATR 4h rất cao (1.50%), nhưng nếu nến vi mô phẳng lì que tăm (0.02% < 0.04%) thì PHẢI VETO!

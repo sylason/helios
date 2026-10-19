@@ -399,9 +399,14 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:1071-1080`
   - **Mô tả:** Tách dải tìm kiếm 3 tầng độc lập tăng dần: $tsl\_tight \in [0.4, 1.8] < tsl\_normal \in [1.2, 3.2] < tsl\_loose \in [2.5, 6.0]$, chấm dứt nghịch lý GA siết chặt siêu sóng và thả rông thị trường range.
 
-- [ ] **TODO-AUDIT-NEW-61: Mở Rộng Dải Sàn Biến Động `min_natr_threshold` Cho Đa Tài Sản (`H-CFG-06`, `TODO-CFG-02`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:441`
+- [x] **TODO-AUDIT-NEW-61: Mở Rộng Dải Sàn Biến Động `min_natr_threshold` Cho Đa Tài Sản (`H-CFG-06`, `TODO-CFG-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:497-503`
   - **Mô tả:** Mở rộng dải DNA $[0.0001, 0.0100]$ (step 0.0002) để không VETO oan các cặp Forex biến động thấp và lọc sạch nhiễu của Altcoins/Memecoins biến động cao.
+  - **✅ Đã chốt & triển khai:** `#[dna(min = 0.0002, max = 0.0300, step = 0.0002)]` — 150 nấc đều ($0.02\% \to 3.00\%$). Note sơ bộ $[0.0001, 0.0100]$ step 0.0002 bị loại vì $0.0099/0.0002 = 49.5$ bước (lệch biên xác suất) và trần 1.00% chưa phủ Memecoin. Giữ nguyên default `0.0012`. `gatekeeper.rs` không cần sửa vì sàn phí `roundtrip_fee_pct` là chốt chặn độc lập.
+  - **Unit Tests:**
+    - [x] `test_gatekeeper_permits_forex_low_volatility` (kèm đối chứng dải cũ 0.0008 → MacroFlatline)
+    - [x] `test_gatekeeper_filters_memecoin_high_noise` (kèm đối chứng NATR 2.00% → PASS)
+    - [x] `test_dna_width_and_parameter_defs_integrity` (khóa dải + kiểm tra chia hết step)
 
 - [ ] **TODO-AUDIT-NEW-62: Dọn Dẹp Dead Fields, Biến Bù Nhìn & Struct Mồ Côi Trong `config.rs` (`H-CFG-07`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:461-477, 1090, 1338-1347`
