@@ -27,6 +27,8 @@ pub enum SlValidationResult {
     },
     /// Giá hoặc Stop Loss không hợp lệ (NaN hoặc <= 0)
     InvalidPrice,
+    /// 🛑 [TODO-AUDIT-NEW-05]: Stop Loss bị ngược chiều vị thế (Long có SL >= Price, hoặc Short có SL <= Price)
+    InvertedPrice,
 }
 
 impl RiskManager {
@@ -82,6 +84,7 @@ impl RiskManager {
 
     /// Thẩm định Stop Loss đề xuất từ Scanner với nhận thức đầy đủ về MMR và Giá Thanh Lý.
     pub fn validate_structural_sl(
+        is_long: bool,
         price: f64,
         sl: f64,
         max_roe_cap: f64,
@@ -94,8 +97,19 @@ impl RiskManager {
         if price <= 0.0 || sl <= 0.0 || price.is_nan() || sl.is_nan() {
             return SlValidationResult::InvalidPrice;
         }
+
+        // 🛡️ [TODO-AUDIT-NEW-05]: Kiểm tra hình học có hướng - Triệt tiêu lỗi Inverted SL
+        if (is_long && sl >= price) || (!is_long && sl <= price) {
+            return SlValidationResult::InvertedPrice;
+        }
+
         let lev = if leverage <= 0.0 { 1.0 } else { leverage };
-        let dist_pct = (price - sl).abs() / price;
+        // Tính khoảng cách có hướng thuần khiết, loại bỏ hoàn toàn phép tính .abs() che giấu sai lệch
+        let dist_pct = if is_long {
+            (price - sl) / price
+        } else {
+            (sl - price) / price
+        };
 
         let effective_mmr = if mmr <= 0.0 { 0.01 } else { mmr };
         let fee = if taker_fee_rate < 0.0 { 0.0004 } else { taker_fee_rate };
@@ -139,6 +153,7 @@ impl RiskManager {
 
     /// Kiểm tra xem mức Stop Loss cấu trúc đề xuất (suggested_sl) có nằm trong giới hạn an toàn không.
     pub fn is_structural_sl_acceptable(
+        is_long: bool,
         price: f64,
         sl: f64,
         max_roe_cap: f64,
@@ -149,7 +164,7 @@ impl RiskManager {
         min_initial_sl_pct: f64,
     ) -> bool {
         Self::validate_structural_sl(
-            price, sl, max_roe_cap, leverage, mmr, taker_fee_rate, buffer_ratio, min_initial_sl_pct,
+            is_long, price, sl, max_roe_cap, leverage, mmr, taker_fee_rate, buffer_ratio, min_initial_sl_pct,
         ) == SlValidationResult::Acceptable
     }
 
@@ -1161,27 +1176,27 @@ mod tests {
         // 1. SL cách 10.0 giá = 0.5% giá = 10% ROE <= 15% ROE -> Chấp nhận
         let safe_sl = 1990.0;
         assert!(RiskManager::is_structural_sl_acceptable(
-            price, safe_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+            true, price, safe_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
         ));
 
         // 2. SL cách đúng 15.0 giá = 0.75% giá = 15% ROE -> Chấp nhận
         let exact_sl = 1985.0;
         assert!(RiskManager::is_structural_sl_acceptable(
-            price, exact_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+            true, price, exact_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
         ));
 
         // 3. SL cách 20.0 giá = 1.0% giá = 20% ROE > 15% ROE -> Từ chối (VETO)
         let deep_sl = 1980.0;
         assert!(!RiskManager::is_structural_sl_acceptable(
-            price, deep_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+            true, price, deep_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
         ));
 
         // 4. Edge cases NaN / 0
         assert!(!RiskManager::is_structural_sl_acceptable(
-            0.0, safe_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+            true, 0.0, safe_sl, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
         ));
         assert!(!RiskManager::is_structural_sl_acceptable(
-            price, f64::NAN, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
+            true, price, f64::NAN, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct
         ));
     }
 
@@ -1407,7 +1422,7 @@ mod tests {
         // Kiểm tra thẩm định SL đề xuất (ví dụ SL cách 0.10% = 10% ROE)
         let suggested_sl = entry_price * (1.0 - 0.0010);
         let res = RiskManager::validate_structural_sl(
-            entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+            true, entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
         );
         match res {
             SlValidationResult::LiquidationRiskVeto { suggested_dist_pct, safe_liq_dist_pct, mmr: res_mmr } => {
@@ -1440,14 +1455,14 @@ mod tests {
         // SL đề xuất 0.50% giá (10% ROE) -> Acceptable
         let suggested_sl = entry_price * (1.0 - 0.0050);
         let res = RiskManager::validate_structural_sl(
-            entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+            true, entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
         );
         assert_eq!(res, SlValidationResult::Acceptable, "SL 10% ROE tại 20x phải được chấp thuận!");
 
         // SL đề xuất 0.90% giá (18% ROE) -> StructuralRiskVeto (Vượt 15% ROE)
         let suggested_sl_wide = entry_price * (1.0 - 0.0090);
         let res_wide = RiskManager::validate_structural_sl(
-            entry_price, suggested_sl_wide, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+            true, entry_price, suggested_sl_wide, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
         );
         match res_wide {
             SlValidationResult::StructuralRiskVeto { suggested_roe, max_roe } => {
@@ -1476,12 +1491,62 @@ mod tests {
 
         let suggested_sl = entry_price * (1.0 - 0.0020);
         let res = RiskManager::validate_structural_sl(
-            entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+            true, entry_price, suggested_sl, max_roe_cap, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
         );
         match res {
             SlValidationResult::LiquidationRiskVeto { .. } => {}
             _ => panic!("Altcoin MMR 2.5% tại 40x phải bị LiquidationRiskVeto!"),
         }
+    }
+
+    #[test]
+    fn test_validate_structural_sl_directional_and_inverted() {
+        // 🛡️ [TODO-AUDIT-NEW-05]: Kiểm tra toàn diện tính định hướng có hướng và bắt lỗi Inverted Stop Loss
+        let price = 100.0;
+        let max_roe = 0.15;
+        let leverage = 20.0; // trần SL = 15% / 20 = 0.75% giá = 0.75 giá
+        let mmr = 0.01;
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
+        let min_initial_sl_pct = 0.0015;
+
+        // 1. Kịch bản LONG:
+        // 1.1. Inverted SL: SL > Price (ví dụ 105.0) -> InvertedPrice
+        let res_long_inv1 = RiskManager::validate_structural_sl(
+            true, price, 105.0, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert_eq!(res_long_inv1, SlValidationResult::InvertedPrice, "Long với SL > Price PHẢI trả về InvertedPrice!");
+
+        // 1.2. Inverted SL: SL == Price (100.0) -> InvertedPrice
+        let res_long_inv2 = RiskManager::validate_structural_sl(
+            true, price, 100.0, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert_eq!(res_long_inv2, SlValidationResult::InvertedPrice, "Long với SL == Price PHẢI trả về InvertedPrice!");
+
+        // 1.3. SL hợp lệ trong khoảng an toàn: SL = 99.50 (cách 0.5% = 10% ROE <= 15% ROE) -> Acceptable
+        let res_long_ok = RiskManager::validate_structural_sl(
+            true, price, 99.50, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert_eq!(res_long_ok, SlValidationResult::Acceptable, "Long với SL an toàn 99.50 PHẢI được chấp thuận!");
+
+        // 2. Kịch bản SHORT:
+        // 2.1. Inverted SL: SL < Price (ví dụ 95.0) -> InvertedPrice
+        let res_short_inv1 = RiskManager::validate_structural_sl(
+            false, price, 95.0, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert_eq!(res_short_inv1, SlValidationResult::InvertedPrice, "Short với SL < Price PHẢI trả về InvertedPrice!");
+
+        // 2.2. Inverted SL: SL == Price (100.0) -> InvertedPrice
+        let res_short_inv2 = RiskManager::validate_structural_sl(
+            false, price, 100.0, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert_eq!(res_short_inv2, SlValidationResult::InvertedPrice, "Short với SL == Price PHẢI trả về InvertedPrice!");
+
+        // 2.3. SL hợp lệ trong khoảng an toàn: SL = 100.50 (cách 0.5% = 10% ROE <= 15% ROE) -> Acceptable
+        let res_short_ok = RiskManager::validate_structural_sl(
+            false, price, 100.50, max_roe, leverage, mmr, taker_fee, buffer_ratio, min_initial_sl_pct,
+        );
+        assert_eq!(res_short_ok, SlValidationResult::Acceptable, "Short với SL an toàn 100.50 PHẢI được chấp thuận!");
     }
 
     #[test]

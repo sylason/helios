@@ -293,8 +293,10 @@ impl HeliosArbiter {
                     // 🛑 CHỐT CHẶN VETO RỦI RO CẤU TRÚC & THANH LÝ SÀN (SNIPER & LIQUIDATION GUARD)
                     let risk_base = &config.risk_management.risk_base;
                     let stop_mgmt = &config.risk_management.stop_management;
+                    let is_long = proposal.signal_type == SignalType::Long;
                     let validation_res = if let Some(sl) = proposal.suggested_sl {
                         RiskManager::validate_structural_sl(
+                            is_long,
                             current_price,
                             sl,
                             playbook_max_sl_roe,
@@ -355,7 +357,7 @@ impl HeliosArbiter {
                                         suggested_roe * 100.0,
                                         max_roe * 100.0
                                     ),
-                                )
+                                    )
                             } else {
                                 (
                                     confidence,
@@ -371,6 +373,14 @@ impl HeliosArbiter {
                                 false,
                                 Some(AuctionStatus::StructuralRiskVeto),
                                 "Invalid price or suggested SL (NaN or non-positive)".to_string(),
+                            )
+                        }
+                        SlValidationResult::InvertedPrice => {
+                            (
+                                confidence,
+                                false,
+                                Some(AuctionStatus::StructuralRiskVeto),
+                                "Inverted SL: suggested SL violates position direction (Long SL >= price or Short SL <= price)".to_string(),
                             )
                         }
                         SlValidationResult::Acceptable => {
@@ -1268,5 +1278,103 @@ mod tests {
         assert_eq!(trend_candidate.status, AuctionStatus::RunnerUp);
         assert!(trend_candidate.reason.contains("Subordinate to winner on same side"));
         assert!(trend_candidate.reason.contains("0.750 < 0.880"));
+    }
+
+    #[test]
+    fn test_arbiter_vetos_inverted_sl_proposal() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        // 🛡️ [TODO-AUDIT-NEW-05]: Kiểm chứng Arbiter VETO dứt khoát proposal có SL ngược chiều (Inverted SL)
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.risk_management.risk_base.leverage = 20.0;
+        config.tactical_sniper.pullback.max_initial_sl_pct = 0.15;
+        config.tactical_sniper.momentum.max_initial_sl_pct = 0.15;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]);
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![32.0; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.45; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.20; len]);
+
+        // Đề xuất 1: Long nhưng SL = 2005.0 (> Entry 2000.0) -> Dị tật Inverted SL
+        let inverted_long_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.90, // Điểm rất cao nhưng SL dị tật
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(2005.0),
+            suggested_tp: None,
+        };
+
+        // Đề xuất 2: Short nhưng SL = 1995.0 (< Entry 2000.0) -> Dị tật Inverted SL
+        let inverted_short_prop = Proposal {
+            signal_type: SignalType::Short,
+            raw_score: 0.85,
+            scanner_id: ScannerId::MomentumIgnition,
+            suggested_sl: Some(1995.0),
+            suggested_tp: None,
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::TrendPullback,
+            proposal: Some(inverted_long_prop),
+        }));
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::MomentumIgnition,
+            proposal: Some(inverted_short_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+
+        // KẾT QUẢ KỲ VỌNG:
+        // 1. Toàn bộ phiên đấu thầu bị từ chối phê duyệt (is_approved = false)
+        assert!(!decision.is_approved, "Arbiter tuyệt đối không được phê duyệt khi mọi proposal đều bị Inverted SL!");
+        assert_eq!(decision.winning_scanner, None);
+
+        // 2. Cả 2 đề xuất đều bị gán StructuralRiskVeto trong Auction Ledger
+        assert_eq!(decision.auction_ledger.len(), 2);
+        for candidate in &decision.auction_ledger {
+            assert_eq!(candidate.status, AuctionStatus::StructuralRiskVeto);
+            assert!(
+                candidate.reason.contains("Inverted SL: suggested SL violates position direction"),
+                "Lý do VETO phải chỉ rõ Inverted SL: {}",
+                candidate.reason
+            );
+        }
     }
 }
