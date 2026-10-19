@@ -77,10 +77,11 @@ impl MarketMatrixV3 {
         // sqz_raw bản thân đã là đại lượng phi thứ nguyên tuyệt đối [0.0, 1.0], gán trực tiếp không qua rolling_percentile.
         let squeeze_intensity = sqz_raw;
 
-        // 🚀 1. DỐC KAMA CHUẨN HÓA THEO ATR (PHI THỨ NGUYÊN - ASSET AGNOSTIC)
+        // 🚀 1. DỐC KAMA CHUẨN HÓA THEO ATR QUA TANH SCALING (TODO-AUDIT-NEW-20 / TODO-MAT-02)
+        // Khôi phục gradient trơn mượt phi tuyến tính, triệt tiêu hiện tượng kẹt trần và mù giảm tốc của clamp(-1, 1).
         let scale_atr = if config.matrix.kama_slope_scale_atr <= 0.0 { 0.20 } else { config.matrix.kama_slope_scale_atr };
         let kama_slope_atr: Vec<f64> = sensors.kama_slope_adj.iter().map(|&s| {
-            if s.is_finite() { (s / scale_atr).clamp(-1.0, 1.0) } else { 0.0 }
+            if s.is_finite() { (s / scale_atr).tanh() } else { 0.0 }
         }).collect();
 
         // 🚀 2. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW O(1) LIÊN TỤC (TODO-AUDIT-NEW-157 & TODO-AUDIT-NEW-158)
@@ -247,7 +248,8 @@ mod tests {
             let slope_eth = matrix_eth.kama_slope_atr[i];
             let slope_doge = matrix_doge.kama_slope_atr[i];
             assert_eq!(slope_eth, slope_doge, "kama_slope_atr phải giống nhau bất kể thị giá");
-            assert!((slope_eth - 0.50).abs() < 1e-6, "0.10 / 0.20 = 0.50");
+            let expected_tanh = (0.50_f64).tanh();
+            assert!((slope_eth - expected_tanh).abs() < 1e-6, "kama_slope_atr phải là tanh(0.50) ≈ {:.6}", expected_tanh);
         }
     }
 
@@ -613,5 +615,51 @@ mod tests {
                 i, actual
             );
         }
+    }
+
+    #[test]
+    fn test_kama_slope_atr_tanh_scaling_preserves_gradient_under_extreme_trend() {
+        // 🚀 [TODO-AUDIT-NEW-20 / TODO-MAT-02]: Kiểm chứng Tanh scaling bảo toàn gradient liên tục khi xu hướng tăng tốc
+        // Triệt tiêu hoàn toàn hiện tượng kẹt trần 1.0 và mù giảm tốc của hàm clamp(-1.0, 1.0)
+        let mut sensors = HeliosSensors::default();
+        let len = 4;
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![105.0; len]);
+        sensors.lows = Arc::new(vec![95.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+        sensors.adx = Arc::new(vec![30.0; len]);
+
+        // Giả lập 4 mức độ dốc KAMA chuẩn hóa theo ATR khác nhau:
+        // scale_atr = 0.20
+        // s = [0.20, 0.40, 0.80, 0.40] => ratio = [1.0, 2.0, 4.0, 2.0]
+        // Với clamp(-1, 1): ratio >= 1.0 đều bị kẹp cứng thành 1.0 (mất sạch gradient và mù khi sóng giảm từ 4.0 về 2.0)
+        // Với tanh():
+        // tanh(1.0) ≈ 0.761594
+        // tanh(2.0) ≈ 0.964028
+        // tanh(4.0) ≈ 0.999329
+        // tanh(2.0) ≈ 0.964028
+        sensors.kama_slope_adj = Arc::new(vec![0.20, 0.40, 0.80, 0.40]);
+
+        let mut config = HeliosConfigV3::default();
+        config.matrix.kama_slope_scale_atr = 0.20;
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        let s0 = matrix.kama_slope_atr[0];
+        let s1 = matrix.kama_slope_atr[1];
+        let s2 = matrix.kama_slope_atr[2];
+        let s3 = matrix.kama_slope_atr[3];
+
+        // 1. Kiểm chứng giá trị không bị kẹp trần 1.0 và luôn nằm nghiêm ngặt trong (-1.0, 1.0)
+        assert!(s0 < 1.0 && s1 < 1.0 && s2 < 1.0 && s3 < 1.0, "Tanh scaling không bao giờ bị bão hòa cứng tại 1.0!");
+        assert!(s0 > -1.0 && s1 > -1.0 && s2 > -1.0 && s3 > -1.0, "Tanh scaling luôn nằm trong (-1.0, 1.0)!");
+
+        // 2. Kiểm chứng bảo toàn gradient dương: Khi dốc tăng từ 0.20 -> 0.40 -> 0.80, slope_atr phải tăng đơn điệu
+        assert!(s1 > s0, "s1 ({:.6}) phải lớn hơn s0 ({:.6}) khi độ dốc tăng từ 1.0x lên 2.0x ATR", s1, s0);
+        assert!(s2 > s1, "s2 ({:.6}) phải lớn hơn s1 ({:.6}) khi độ dốc tăng từ 2.0x lên 4.0x ATR (clamp cũ sẽ bị kẹt bằng nhau!)", s2, s1);
+
+        // 3. Kiểm chứng triệt tiêu mù giảm tốc: Khi độ dốc giảm từ 0.80 về 0.40 (4.0x -> 2.0x ATR), slope_atr phải giảm ngay lập tức
+        assert!(s3 < s2, "s3 ({:.6}) phải nhỏ hơn s2 ({:.6}) khi độ dốc hạ nhiệt (clamp cũ vẫn kẹt tại 1.0 khiến hệ thống mù giảm tốc!)", s3, s2);
+        assert!((s3 - s1).abs() < 1e-6, "s3 và s1 có cùng độ dốc 0.40 nên giá trị phải khớp tuyệt đối");
     }
 }

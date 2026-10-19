@@ -415,8 +415,8 @@ impl Default for VolZScoreParams {
 
 #[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct MatrixConfig {
-    /// 🚀 Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR (0.05 -> 0.50, Step 0.01 -> 46 nấc)
-    #[dna(min = 0.05, max = 0.50, step = 0.01)]
+    /// 🚀 Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR qua Tanh scaling (0.02 -> 1.00, Step 0.02 -> 50 nấc)
+    #[dna(min = 0.02, max = 1.00, step = 0.02)]
     #[serde(default = "default_kama_slope_scale_atr")]
     pub kama_slope_scale_atr: f64,
 }

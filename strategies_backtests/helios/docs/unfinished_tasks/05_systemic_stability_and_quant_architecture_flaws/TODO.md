@@ -214,9 +214,9 @@
 - [x] **TODO-AUDIT-NEW-19: Khử Triệt Để Bẫy Tụt Về 0.50 Của Squeeze Intensity (`TODO-MAT-01`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:55-63, 81`
   - **Mô tả:** Loại bỏ hoàn toàn bước bọc qua `rolling_percentile`. Gán trực tiếp giá trị thực phi thứ nguyên $\text{sqz\_raw} = \frac{1}{1 + (BB/KC)^2} \in [0.0, 1.0]$, bảo toàn độ nén thực khi thị trường tích lũy kéo dài.
-- [ ] **TODO-AUDIT-NEW-20: Triển Khai Tanh Scaling Cho KAMA Slope Chuẩn Hóa Theo ATR (`TODO-MAT-02`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:87-90`
-  - **Mô tả:** Thay thế phép kẹp cứng `.clamp(-1.0, 1.0)` bằng hàm hyperbol trơn $\tanh(s / \text{scale\_atr})$, giữ nguyên gradient nhạy cảm khi trend mở rộng mạnh.
+- [x] **TODO-AUDIT-NEW-20: Triển Khai Tanh Scaling Cho KAMA Slope Chuẩn Hóa Theo ATR (`TODO-MAT-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:81-84`, `config.rs:416-422`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]: Thay thế phép kẹp cứng `.clamp(-1.0, 1.0)` bằng hàm hyperbol trơn $\tanh(s / \text{scale\_atr})$, mở rộng dải DNA `kama_slope_scale_atr` `[0.02, 1.00, step = 0.02]` (50 nấc giá trị). Khôi phục gradient trơn mượt phi tuyến tính, triệt tiêu hoàn toàn hiện tượng kẹt trần và mù giảm tốc khi sóng hạ nhiệt. Đã kiểm chứng qua unit tests `test_kama_slope_atr_scale_asset_agnostic` và `test_kama_slope_atr_tanh_scaling_preserves_gradient_under_extreme_trend`.
 - [ ] **TODO-AUDIT-NEW-21: Đồng Bộ Float Comparator Trong Chuẩn Hóa Phân Vị (`TODO-SEN-11`)**
   - **File:** `strategies_backtests/helios/src/utils/normalization.rs:77, 88, 98`
   - **Mô tả:** Thống nhất cách so sánh float giữa `dedup_by` và `binary_search_by` với cùng dung sai $\epsilon = 10^{-7}$, triệt tiêu hoàn toàn lỗi trả về `NaN` cho các nến hợp lệ.
