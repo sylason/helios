@@ -273,13 +273,23 @@
 
 ### PHẦN 12: KIỂM TOÁN TỪNG CHIẾN ĐỘI SCANNER (SCANNER AUDIT & QUANT METHODOLOGY)
 
-- [ ] **TODO-AUDIT-NEW-34: Tháo Gỡ Nghịch Lý Hình Học Nến (%B vs CLV) Trong Absorption Scanner (`ABS-GEOM-PARADOX`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-101`
-  - **Mô tả:** Tách bạch điều kiện quét râu (`Low <= BB_Lower` hoặc Swing Low) với điều kiện rút chân (`CLV >= min_clv`), loại bỏ việc ép `Close` phải đóng sát đáy `%B <= max_bound` đang tự triệt tiêu các nến Spring kinh điển.
+- [x] **TODO-AUDIT-NEW-34: Tháo Gỡ Nghịch Lý Hình Học Nến (%B vs CLV) Trong Absorption Scanner (`ABS-GEOM-PARADOX`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-105`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH BƯỚC 1] Tách bạch điều kiện quét râu (`pct_b_low <= max_bound`) với điều kiện rút chân (`CLV >= min_clv`), loại bỏ việc ép `Close` phải đóng sát đáy `%B <= max_bound` đang tự triệt tiêu các nến Spring kinh điển. Đảm bảo nến đóng kiểm soát ở nửa dưới dải nén (`pct_b_close <= max_bound + spring_tol && close <= bb_middle`).
+  - **Unit Tests:**
+    - [x] `test_absorption_spring_geometry_wick_deep_close_controlled`
+    - [x] `test_absorption_blocks_chasing_when_close_crosses_middle`
+    - [x] `test_absorption_blocks_marubozu_knife_at_lower_band`
+    - [x] `test_absorption_upthrust_short_symmetric`
+    - [x] `test_absorption_blocks_deep_underground_breakdown`
+    - [x] `test_absorption_blocks_runaway_breakout`
 
-- [ ] **TODO-AUDIT-NEW-35: Khắc Phục Lệch Pha MTF Giữa Nến Vi Mô 1m & Dải Bollinger MTF 15m (`ABS-MTF-SCALE`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-85`
-  - **Mô tả:** Thay vì so sánh giá đóng cửa nến 1m với dải Bollinger 15m khổng lồ khiến nến 1m không bao giờ chạm tới biên dưới trừ khi xả lũ, chuyển sang so sánh vị trí tương đối theo Swing Low vi mô hoặc dải nén vi mô tương thích.
+- [x] **TODO-AUDIT-NEW-35: Khắc Phục Lệch Pha MTF Giữa Nến Vi Mô 1m & Dải Bollinger MTF 15m (`ABS-MTF-SCALE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-105`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH BƯỚC 1] Thay vì so sánh giá đóng cửa nến 1m với dải Bollinger 15m khổng lồ, chuyển sang đo lường tọa độ râu nến nhúng sâu vào vùng đáy tích lũy `pct_b_low <= max_bound` (khi Squeeze dải BB 15m co thắt biên độ tương thích), kết hợp loại bỏ hoàn toàn bộ lọc trễ pha `vwma < bb_middle` theo `TODO-SCN-02`.
+  - **Unit Tests:**
+    - [x] `test_absorption_valid_accumulation_in_neutral_range`
+    - [x] `test_absorption_spring_geometry_wick_deep_close_controlled`
 
 - [ ] **TODO-AUDIT-NEW-36: Hiệu Chuẩn Điểm Tự Tin Anti-Inflation & Loại Bỏ VWMA Trễ Pha (`ABS-SCORE-INFLATION`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:67-76`, `normalization.rs:25-37`

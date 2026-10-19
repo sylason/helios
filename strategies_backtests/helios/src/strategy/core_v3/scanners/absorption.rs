@@ -47,12 +47,11 @@ impl TacticalScanner for AbsorptionScanner {
         
         let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
         let squeeze = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0);
-        let vwma = sensors.vwma.get(i).copied().unwrap_or(f64::NAN);
         let bb_middle = sensors.bb_middle.get(i).copied().unwrap_or(f64::NAN);
         let bb_lower = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
         let bb_upper = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
 
-        if vwma.is_nan() || bb_middle.is_nan() || bb_lower.is_nan() || bb_upper.is_nan() || raw_vol_z.is_nan() || squeeze.is_nan() {
+        if bb_middle.is_nan() || bb_lower.is_nan() || bb_upper.is_nan() || raw_vol_z.is_nan() || squeeze.is_nan() {
             return None;
         }
 
@@ -76,26 +75,42 @@ impl TacticalScanner for AbsorptionScanner {
         let raw_score = convex_combine(&[f_sqz, f_vol], &[w_sqz, 1.0 - w_sqz]);
 
         if raw_score >= abs_cfg.min_activation_score {
-            // 🛡️ PHƯƠNG ÁN B: Dynamic Quant (%B + CLV Spring/Upthrust)
+            // 🛡️ TODO-AUDIT-NEW-34 & NEW-35: Dynamic Quant (%B Râu nến + CLV Spring/Upthrust)
+            // Khắc phục triệt để nghịch lý hình học nến và lệch pha MTF nến 1m vs BB 15m.
+            // Loại bỏ hoàn toàn bộ lọc trễ pha vwma < bb_middle theo TODO-SCN-02.
             let bb_width = (bb_upper - bb_lower).max(1e-5);
-            let pct_b = (close - bb_lower) / bb_width;
+            let pct_b_close = (close - bb_lower) / bb_width;
+            let pct_b_low   = (low - bb_lower) / bb_width;
+            let pct_b_high  = (high - bb_lower) / bb_width;
             let clv = (2.0 * close - high - low) / candle_range;
 
             let spring_tol = abs_cfg.spring_tolerance.max(0.0);
             let min_clv = abs_cfg.min_clv.max(0.0);
             let max_bound = if abs_cfg.max_boundary_pct_b <= 0.0 { 0.40 } else { abs_cfg.max_boundary_pct_b.clamp(0.05, 0.50) };
 
-            // - Long (Accumulation Spring):
-            //   + Vị trí: Biên dưới dải nén (%B <= max_bound), cho phép nhúng râu (%B >= -spring_tol)
+            // - Long (Accumulation Spring / Liquidity Sweep):
+            //   + Quét râu: Râu nến (low) nhúng sâu vào vùng đáy tích lũy: pct_b_low <= max_bound
             //   + Lực nến: CLV >= min_clv (rút chân tăng chứng minh cá mập gom hấp thụ)
-            //   + Dòng tiền: VWMA < BB Middle (giá trị gia quyền khối lượng ở vùng giá thấp)
-            // - Short (Distribution Upthrust):
-            //   + Vị trí: Biên trên dải nén (%B >= 1.0 - max_bound), cho phép quét đỉnh (%B <= 1.0 + spring_tol)
+            //   + Chặn sàn phá vỡ thật: pct_b_close >= -spring_tol (đóng cửa phải giữ vững hoặc sát biên dung sai)
+            //   + Chặn trần mua đu đỉnh: pct_b_close <= (max_bound + spring_tol) && close <= bb_middle
+            // - Short (Distribution Upthrust / Liquidity Sweep):
+            //   + Quét râu: Râu nến (high) nhô cao vào vùng đỉnh phân phối: pct_b_high >= (1.0 - max_bound)
             //   + Lực nến: CLV <= -min_clv (đè đầu giảm chứng minh cá mập xả hàng)
-            //   + Dòng tiền: VWMA > BB Middle (giá trị gia quyền khối lượng ở vùng giá cao)
-            let signal_type = if pct_b >= -spring_tol && pct_b <= max_bound && clv >= min_clv && vwma < bb_middle {
+            //   + Chặn trần phá vỡ thật: pct_b_close <= (1.0 + spring_tol) (đóng cửa phải giữ vững hoặc sát biên dung sai)
+            //   + Chặn sàn bán đu đáy: pct_b_close >= (1.0 - max_bound - spring_tol) && close >= bb_middle
+            let signal_type = if pct_b_low <= max_bound 
+                && clv >= min_clv 
+                && pct_b_close >= -spring_tol 
+                && pct_b_close <= (max_bound + spring_tol) 
+                && close <= bb_middle 
+            {
                 SignalType::Long
-            } else if pct_b >= (1.0 - max_bound) && pct_b <= (1.0 + spring_tol) && clv <= -min_clv && vwma > bb_middle {
+            } else if pct_b_high >= (1.0 - max_bound) 
+                && clv <= -min_clv 
+                && pct_b_close <= (1.0 + spring_tol) 
+                && pct_b_close >= (1.0 - max_bound - spring_tol) 
+                && close >= bb_middle 
+            {
                 SignalType::Short
             } else {
                 return None;

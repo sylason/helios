@@ -1516,6 +1516,398 @@ mod tests {
     }
 
     #[test]
+    fn test_absorption_spring_geometry_wick_deep_close_controlled() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use crate::strategy::core_v3::arbiter::{TacticalScanner, SignalType};
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Nến Spring vi mô 1m: low 1985 (nhúng sâu đáy %B_low = 5/40 = 0.125 <= 0.40), rút chân mạnh lên 1995 (CLV = +0.818 >= 0.20)
+        // Giá đóng cửa 1995 <= bb_middle (2000) và %B_close = 15/40 = 0.375 <= 0.40 + 0.10
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1990.0; len]),
+            high: std::sync::Arc::new(vec![1996.0; len]),
+            low: std::sync::Arc::new(vec![1985.0; len]),
+            close: std::sync::Arc::new(vec![1995.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
+        config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+        config.tactical_sniper.absorption.spring_tolerance = 0.10;
+        config.tactical_sniper.absorption.min_clv = 0.20;
+        config.tactical_sniper.absorption.max_boundary_pct_b = 0.40;
+
+        let mut sensors = HeliosSensors::default();
+        // Giả lập VWMA = 2005.0 > bb_middle = 2000.0 (Ngược với logic VWMA cũ!)
+        // Chứng minh: Việc bỏ VWMA giúp mở khóa cây nến Spring hoàn hảo này mà không bị VETO vô lý!
+        sensors.vwma = std::sync::Arc::new(vec![2005.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "AbsorptionScanner PHẢI phê duyệt nến Spring khi râu quét sâu và rút chân mạnh, bất chấp VWMA!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+        assert!(p.suggested_sl.unwrap() < 1995.0, "SL phải nhỏ hơn giá đóng cửa!");
+    }
+
+    #[test]
+    fn test_absorption_blocks_chasing_when_close_crosses_middle() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Nến rút chân tăng thốc quá đà, giá đóng cửa vượt quá nửa trên dải nén (close 2005 > bb_middle 2000)
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1985.0; len]),
+            high: std::sync::Arc::new(vec![2006.0; len]),
+            low: std::sync::Arc::new(vec![1982.0; len]),
+            close: std::sync::Arc::new(vec![2005.0; len]), // Đu đỉnh nến vượt quá BB middle
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG khi giá đóng cửa vượt quá BB Middle (chống mua đu đỉnh)!");
+    }
+
+    #[test]
+    fn test_absorption_blocks_marubozu_knife_at_lower_band() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Nến đỏ đặc ruột cắm đầu rơi tự do (Marubozu), low chạm 1982 (%B_low <= 0.40) nhưng close = 1982 (CLV = -1.0)
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1995.0; len]),
+            high: std::sync::Arc::new(vec![1995.0; len]),
+            low: std::sync::Arc::new(vec![1982.0; len]),
+            close: std::sync::Arc::new(vec![1982.0; len]), // CLV = -1.0, không có rút chân!
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.min_clv = 0.20;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG nến đỏ Marubozu xả đặc ruột (chống bắt dao rơi)!");
+    }
+
+    #[test]
+    fn test_absorption_upthrust_short_symmetric() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use crate::strategy::core_v3::arbiter::{TacticalScanner, SignalType};
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Nến Upthrust vi mô 1m: high 2015 (nhô cao đỉnh %B_high = 35/40 = 0.875 >= 0.60), đè đầu giảm mạnh xuống close 2003 (CLV = -0.846 <= -0.20)
+        // Giá đóng cửa 2003 >= bb_middle (2000) và %B_close = 23/40 = 0.575 >= 1.0 - 0.40 - 0.10 = 0.50
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2010.0; len]),
+            high: std::sync::Arc::new(vec![2015.0; len]),
+            low: std::sync::Arc::new(vec![2002.0; len]),
+            close: std::sync::Arc::new(vec![2003.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
+        config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+        config.tactical_sniper.absorption.spring_tolerance = 0.10;
+        config.tactical_sniper.absorption.min_clv = 0.20;
+        config.tactical_sniper.absorption.max_boundary_pct_b = 0.40;
+
+        let mut sensors = HeliosSensors::default();
+        // Giả lập VWMA = 1995.0 < bb_middle = 2000.0 (Ngược với logic VWMA cũ cho Short)
+        sensors.vwma = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.02; len]);
+
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "AbsorptionScanner PHẢI phê duyệt Short Upthrust đối xứng!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Short);
+        assert!(p.suggested_sl.unwrap() > 2003.0, "SL Short phải lớn hơn giá đóng cửa!");
+    }
+
+    #[test]
+    fn test_absorption_blocks_deep_underground_breakdown() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Cây nến xả lũ cực mạnh (Waterfall): bb_lower = 1980.0, bb_upper = 2020.0 (width = 40.0)
+        // spring_tolerance = 0.10 -> sàn dưới tối đa là bb_lower - 0.10 * 40 = 1976.0 (pct_b = -0.10)
+        // Nến này rơi xuống low = 1950 (pct_b_low = -0.75 <= 0.40), rút nhẹ lên close = 1965 (pct_b_close = -0.375 < -0.10)
+        // Mặc dù rút chân có CLV = (2*1965 - 1975 - 1950) / 25 = 5/25 = +0.20 >= min_clv, nhưng đóng cửa thủng sâu dưới sàn!
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1975.0; len]),
+            high: std::sync::Arc::new(vec![1975.0; len]),
+            low: std::sync::Arc::new(vec![1950.0; len]),
+            close: std::sync::Arc::new(vec![1965.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
+        config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+        config.tactical_sniper.absorption.spring_tolerance = 0.10;
+        config.tactical_sniper.absorption.min_clv = 0.20;
+        config.tactical_sniper.absorption.max_boundary_pct_b = 0.40;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG khi nến đóng sâu dưới sàn hỗ trợ (True Breakdown pct_b_close < -spring_tol)!");
+    }
+
+    #[test]
+    fn test_absorption_blocks_runaway_breakout() {
+        use crate::strategy::core_v3::scanners::absorption::AbsorptionScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Cây nến bứt phá điên cuồng (Runaway Pump): bb_lower = 1980.0, bb_upper = 2020.0 (width = 40.0)
+        // spring_tolerance = 0.10 -> trần trên tối đa là bb_upper + 0.10 * 40 = 2024.0 (pct_b = 1.10)
+        // Nến này phóng lên high = 2050 (pct_b_high = 1.75 >= 0.60), thụt nhẹ đỉnh về close = 2035 (pct_b_close = 1.375 > 1.10)
+        // Mặc dù thụt đỉnh có CLV = (2*2035 - 2050 - 2025) / 25 = -5/25 = -0.20 <= -min_clv, nhưng đóng cửa vượt trần trên trời!
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2025.0; len]),
+            high: std::sync::Arc::new(vec![2050.0; len]),
+            low: std::sync::Arc::new(vec![2025.0; len]),
+            close: std::sync::Arc::new(vec![2035.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.squeeze_threshold = 0.5;
+        config.tactical_sniper.absorption.vol_z_threshold = 0.5;
+        config.tactical_sniper.absorption.min_activation_score = 0.1;
+        config.tactical_sniper.absorption.struct_sl_buffer_atr = 0.5;
+        config.tactical_sniper.absorption.max_adverse_slope = 0.15;
+        config.tactical_sniper.absorption.spring_tolerance = 0.10;
+        config.tactical_sniper.absorption.min_clv = 0.20;
+        config.tactical_sniper.absorption.max_boundary_pct_b = 0.40;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+
+        let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.02; len]);
+
+        let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG khi nến bứt phá đóng vượt trần kháng cự (Runaway Breakout pct_b_close > 1.0 + spring_tol)!");
+    }
+
+    #[test]
     fn test_range_osc_band_walking_drift_blocked() {
         use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
         use crate::strategy::core_v3::arbiter::TacticalScanner;

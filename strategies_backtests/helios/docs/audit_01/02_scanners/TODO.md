@@ -26,16 +26,16 @@
 
 ---
 
-### 2. [ ] `TODO-SCN-02`: Khử BBands MTF Suction Trap & Giải Cứu Tần Suất (`Absorption`)
+### 2. [x] `TODO-SCN-02`: Khử BBands MTF Suction Trap & Giải Cứu Tần Suất (`Absorption`)
 - **Tài liệu chi tiết:** [§4 trong 04_absorption_deep_dive.md](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/audit_01/02_scanners/04_absorption_deep_dive.md#4-đề-xuất-cải-tiến-cốt-lõi-cho-absorption)
-- **Vị trí code:** [`scanners/absorption.rs:95-98, 126-141`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L126)
+- **Vị trí code:** [`scanners/absorption.rs:79-105, 127-137`](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs#L127)
 - **Các bước triển khai:**
-  - [ ] **Bước 2.1:** Sửa hình học SL: Bỏ `.min(bb_lower)` và `.max(bb_upper)`. Neo trực tiếp theo đáy/đỉnh nến hấp thụ: `low - buffer` (Long) và `high + buffer` (Short).
-  - [ ] **Bước 2.2:** Nới lỏng điều kiện %B: Cho phép nến hấp thụ đóng ở nửa dưới dải nén (`pct_b <= max_bound.max(0.50)` cho Long và `pct_b >= (1.0 - max_bound).min(0.50)` cho Short).
-  - [ ] **Bước 2.3:** Bỏ điều kiện cứng phụ thuộc `vwma < bb_middle` (giảm over-constrain).
+  - [x] **Bước 2.1:** Sửa hình học SL: Bỏ `.min(bb_lower)` và `.max(bb_upper)`. Neo trực tiếp theo đáy/đỉnh nến hấp thụ: `low - buffer` (Long) và `high + buffer` (Short), nắn qua `RiskManager::sanitize_structural_sl`.
+  - [x] **Bước 2.2:** Nới lỏng điều kiện %B: Tách râu nến quét đáy `pct_b_low <= max_bound`, lực rút chân $CLV \ge min\_clv$, và nến đóng ở nửa dưới dải nén (`pct_b_close <= max_bound + spring_tol && close <= bb_middle`).
+  - [x] **Bước 2.3:** Bỏ điều kiện cứng phụ thuộc `vwma < bb_middle` (giảm over-constrain, triệt tiêu bẫy trễ pha).
 - **Tiêu chí nghiệm thu (Unit Tests):**
-  - [ ] Test `test_absorption_sl_tight_within_roe_cap`: Mức SL đề xuất luôn nằm trong phạm vi $\le 10\%$ ROE (đòn bẩy 20x).
-  - [ ] Test `test_absorption_trigger_without_vwma_lock`: Nến nỗ lực gom volume lớn tại biên dưới kích hoạt thành công proposal.
+  - [x] Test `test_absorption_sl_spring_geometry`: Mức SL đề xuất luôn nằm trong phạm vi an toàn $\le 10\%$ ROE (đòn bẩy 20x).
+  - [x] Test `test_absorption_spring_geometry_wick_deep_close_controlled`: Nến Spring nhúng sâu rút chân mạnh kích hoạt thành công bất chấp `vwma`.
 
 ---
 
