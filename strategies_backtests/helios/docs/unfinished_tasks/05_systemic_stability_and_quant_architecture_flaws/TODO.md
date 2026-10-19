@@ -575,9 +575,9 @@
 ## 🏛️ PHẦN 18: KIỂM TOÁN HẠ TẦNG ĐỘNG CƠ KHỚP LỆNH GIẢ LẬP (`paper_engine.rs` & `paper_trader.rs`)
 > *Nguồn tài liệu:* [`53_paper_execution_engine_and_paper_trader_flaws.md`](notes/53_paper_execution_engine_and_paper_trader_flaws.md)
 
-- [ ] **TODO-AUDIT-NEW-104: Đồng Bộ Hóa PnL Thả Nổi Vào `PaperExecutionEngine::get_equity()` (`TB-PPR-01`)**
-  - **File:** `trading_bot/bot_engine/src/execution/paper_engine.rs:113-115`
-  - **Mô tả:** Lưu trữ `last_close` trong `on_candle_ctx` và tính toán vốn Marked-to-Market (`get_total_equity(last_close)`) khi có vị thế đang mở, giải phóng hệ thống khỏi bẫy "mù" PnL thả nổi.
+- [x] **TODO-AUDIT-NEW-104: Đồng Bộ Hóa PnL Thả Nổi Vào `PaperExecutionEngine::get_equity()` (`TB-PPR-01`)**
+  - **File:** `trading_bot/bot_engine/src/execution/paper_engine.rs:14-38, 56-61, 115-136, 185-275`
+  - **Mô tả:** Lưu trữ `last_close` trong `execute_action_ctx` và `on_candle_ctx`, đồng bộ hóa vốn Marked-to-Market (`get_total_equity(last_close)`) có kẹp sàn Isolated Margin (`.max(0.0)`) và cơ chế fallback an toàn khi giá không hợp lệ (NaN, <= 0), kèm unit test suite 100% pass.
 
 - [ ] **TODO-AUDIT-NEW-105: Triển Khai Liquidation Watchdog Mô Phỏng Cháy Tài Khoản (`TB-PPR-02`)**
   - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:477-575`
