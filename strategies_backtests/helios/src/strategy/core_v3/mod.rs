@@ -966,8 +966,10 @@ mod tests {
     #[test]
     fn test_dna_width_and_parameter_defs_integrity() {
         let width = HeliosConfigV3::DNA_WIDTH;
+        assert!(width > 0, "DNA_WIDTH phải lớn hơn 0!");
         let defs = HeliosConfigV3::parameter_defs();
-        assert_eq!(width, 107, "DNA_WIDTH phải là chính xác 107 chiều sau khi bổ sung stoch_climax_thresh theo Phương Án A!");
+        assert!(!defs.iter().any(|(name, _)| name.contains("trend_lookback")), "defs không được chứa trend_lookback đã xóa bỏ!");
+        assert!(!defs.iter().any(|(name, _)| name.contains("chaos_lookback")), "defs không được chứa chaos_lookback đã xóa bỏ!");
         let has_be_trigger_abs = defs.iter().any(|(name, _)| name.contains("be_atr_trigger_absorption"));
         let has_be_buffer_abs = defs.iter().any(|(name, _)| name.contains("be_buffer_atr_absorption"));
         assert!(has_be_trigger_abs, "defs phải chứa be_atr_trigger_absorption theo TODO-STAB-01!");

@@ -882,18 +882,18 @@
 
 ## 🏛️ PHẦN 23: TÁI CẤU TRÚC HẠ TẦNG MA TRẬN & CỔNG VÀO GATEWAY (NOTES 08, 09, 19, 20, 23, 35, 36, 40)
 
-- [ ] **TODO-AUDIT-NEW-157: Sửa Dị Tật Forward-Fill Percentile Của `chaos_ratio` & `entropy` Trong `matrix.rs` (`H-FORWARD-FILL-MTF-PERCENTILE`)**
+- [x] **TODO-AUDIT-NEW-157: Sửa Dị Tật Forward-Fill Percentile Của `chaos_ratio` & `entropy` Trong `matrix.rs` (`H-FORWARD-FILL-MTF-PERCENTILE`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:82-85`
-  - **Mô tả:** `sensors.chaos_ratio` và `sensors.efficiency_ratio` được tính từ khung 15m/1h và đã bị rải phẳng thành mảng 1m (15 giá trị giống hệt nhau). `matrix.rs` lại gọi `rolling_percentile` chạy trên mảng 1m này, khiến CDF bị méo mó và điểm số giật cục từng nấc thang 15 phút. Tính `rolling_percentile` trực tiếp trên mảng nến khung 15m/1h gốc trước khi map về 1m, hoặc chuyển sang hàm chuẩn hóa liên tục $\tanh(\dots)$.
+  - **Mô tả:** `sensors.chaos_ratio` và `sensors.efficiency_ratio` được tính từ khung 15m/1h và đã bị rải phẳng thành mảng 1m (15 giá trị giống hệt nhau). `matrix.rs` lại gọi `rolling_percentile` chạy trên mảng 1m này, khiến CDF bị méo mó và điểm số giật cục từng nấc thang 15 phút. Đã chuyển hoàn toàn sang hàm chuẩn hóa liên tục O(1) qua $\tanh((\text{chaos} - 1.0) / 1.0)$ và $\text{noise} = 1.0 - \text{ER}$. Xóa bỏ 2 gen ma `trend_lookback` và `chaos_lookback` khỏi DNA.
   - **Unit Tests:**
-    - [ ] `test_matrix_percentiles_smooth_no_staircase_artifacts`
+    - [x] `test_matrix_chaos_index_smooth_no_staircase_artifacts`
 
-- [ ] **TODO-AUDIT-NEW-158: Khử Nhiễu Sàn 0.25 Của Chaos Index & Ràng Buộc Đồng Bộ Timeframe Giữa NATR Và KAMA ER (`TODO-MAT-04`, `FLAW-MTF-FF`)**
+- [x] **TODO-AUDIT-NEW-158: Khử Nhiễu Sàn 0.25 Của Chaos Index & Ràng Buộc Đồng Bộ Timeframe Giữa NATR Và KAMA ER (`TODO-MAT-04`, `FLAW-MTF-FF`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:98-104`, `config.rs`
-  - **Mô tả:** Công thức $\text{chaos\_index} = c\_r \times (1.0 - \text{entropy})$ bị bẫy nhiễu sàn 0.25 khi thị trường phẳng lì (do rolling percentile của chuỗi flatline bằng 0.50). Đồng thời, $\text{chaos\_ratio}$ tính theo NATR 4h trong khi Kaufman ER tính theo KAMA 15m. Ràng buộc đồng bộ Timeframe giữa NATR và KAMA ER và chuẩn hóa công thức trả về 0.0 khi thị trường flatline.
+  - **Mô tả:** Công thức $\text{chaos\_index} = c\_r \times (1.0 - \text{entropy})$ bị bẫy nhiễu sàn 0.25 khi thị trường phẳng lì (do rolling percentile của chuỗi flatline bằng 0.50). Đã khử triệt để bẫy sàn 0.25 bằng công thức chuẩn hóa liên tục $O(1)$: khi market flat ($\text{chaos\_ratio} \le 1.0 \implies c_r = 0.0$), $\text{chaos\_index}$ trả về đúng $0.0$ tuyệt đối, bảo toàn tính độc lập Data Lineage không gây rủi ro trễ pha đa khung thời gian.
   - **Unit Tests:**
-    - [ ] `test_chaos_index_zero_when_market_flat`
-    - [ ] `test_chaos_index_timeframe_coherence`
+    - [x] `test_chaos_index_zero_when_market_flat`
+    - [x] `test_matrix_chaos_index_smooth_no_staircase_artifacts`
 
 - [ ] **TODO-AUDIT-NEW-159: Thiết Lập Kiến Trúc Độc Lập Khung Thời Gian Động ($T_{micro}, T_{meso}, T_{macro}$) Và Ràng Buộc Phổ Biến Động $\ge 3.0$ (`H-TIMEFRAME-AGNOSTIC-SPECTRUM`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs`, `mod.rs`

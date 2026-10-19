@@ -15,7 +15,7 @@
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.1. Tasks Đã Hoàn Thành (`[x]`) | 28 | 28 | 0 | 100.0% | Đã pass test và merge vào source code |
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.2. Tasks ĐÃ ĐƯỢC CHUYỂN HÓA Vào `TODO.md` | 37 | 0 | 37 | 0.0% | Đã có mã đại diện chi tiết trong TODO.md |
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.3. Tasks Còn Mở Đặc Thù Audit 01 | 36 | 0 | 36 | 0.0% | Lỗ hổng kỹ thuật & toán học kế thừa |
-| **II. Chiến Dịch Tái Cấu Trúc Toàn Hệ Thống (`TODO.md`)** | **226** | **0** | **226** | **0.0%** | Phân bổ vào 13 Cụm Tác Chiến Subsystem (A → M) |
+| **II. Chiến Dịch Tái Cấu Trúc Toàn Hệ Thống (`TODO.md`)** | **226** | **17** | **209** | **7.5%** | Phân bổ vào 13 Cụm Tác Chiến Subsystem (A → M) |
 
 > **Phân bổ Độ ưu tiên trong `TODO.md` (226 Tasks):**  
 > - 🔴 **P0 (Cốt tử & Sinh tồn):** `30 tasks` (Lookahead bias, Cháy tài khoản, Deadlock, Treo worker Tokio, Naked SL gap 150ms, Bán tháo Clean slate, Ban IP...)  
@@ -187,7 +187,7 @@
 | 27 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-143`** | Nâng Cấp Macro `dna_signature()` Băm Cả Dải Min/Max/Step & Triệt Tiêu Lỗi XOR Collision (`H-CFG-10`) | [TODO.md#L753](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L753) | `ferro_trade/ferro_trade_derive/src/lib.rs:100-132, 260-273` |
 
 ### 📦 Cụm B: Cảm Biến, Chuẩn Hóa & Ma Trận Trạng Thái (`helios::matrix & sensors`)
-**Quy mô:** `8 tasks` (Hoàn thành: `1`, P0: `0`, P1: `6`, P2: `2`, P3: `0`)
+**Quy mô:** `8 tasks` (Hoàn thành: `3`, P0: `0`, P1: `6`, P2: `2`, P3: `0`)
 
 | STT | Ưu Tiên | Trạng Thái | Mã Task | Tên Nhiệm Vụ | Link Reference Trong `TODO.md` | File Mã Nguồn Mục Tiêu |
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
@@ -196,8 +196,8 @@
 | 03 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-20`** | Triển Khai Tanh Scaling Cho KAMA Slope Chuẩn Hóa Theo ATR (`TODO-MAT-02`) | [TODO.md#L198](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L198) | `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:87-90` |
 | 04 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-21`** | Đồng Bộ Float Comparator Trong Chuẩn Hóa Phân Vị (`TODO-SEN-11`) | [TODO.md#L201](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L201) | `strategies_backtests/helios/src/utils/normalization.rs:77, 88, 98` |
 | 05 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-46`** | Bổ Sung Tầng Đạo Hàm Động Lực Học (Velocity & Acceleration) Trong Matrix (`MAT-KINEMATICS`) | [TODO.md#L297](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L297) | `strategies_backtests/helios/src/strategy/core_v3/matrix.rs`, `sensors.rs` |
-| 06 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-157`** | Sửa Dị Tật Forward-Fill Percentile Của `chaos_ratio` & `entropy` Trong `matrix.rs` (`H-FORWARD-FILL-MTF-PERCENTILE`) | [TODO.md#L854](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L854) | `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:82-85` |
-| 07 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-158`** | Khử Nhiễu Sàn 0.25 Của Chaos Index & Ràng Buộc Đồng Bộ Timeframe Giữa NATR Và KAMA ER (`TODO-MAT-04`, `FLAW-MTF-FF`) | [TODO.md#L860](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L860) | `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:98-104`, `config.rs` |
+| 06 | `P1` | `[x]` | **`TODO-AUDIT-NEW-157`** | Sửa Dị Tật Forward-Fill Percentile Của `chaos_ratio` & `entropy` Trong `matrix.rs` (`H-FORWARD-FILL-MTF-PERCENTILE`) | [TODO.md#L885](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L885) | `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:82-85` |
+| 07 | `P1` | `[x]` | **`TODO-AUDIT-NEW-158`** | Khử Nhiễu Sàn 0.25 Của Chaos Index & Ràng Buộc Đồng Bộ Timeframe Giữa NATR Và KAMA ER (`TODO-MAT-04`, `FLAW-MTF-FF`) | [TODO.md#L891](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L891) | `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:98-104`, `config.rs` |
 | 08 | `P2` | `[ ]` | **`TODO-AUDIT-NEW-162`** | Bộ Lọc Khử Ô Nhiễm Phương Sai Z-Score Bằng Robust Dispersion / Winsorization / MAD (`SENS-ROBUST-ZSCORE`) | [TODO.md#L886](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L886) | `strategies_backtests/helios/src/utils/normalization.rs`, `sensors.rs`, `matrix.rs` |
 
 ### 📦 Cụm C: Cổng Vào Chiến Lược & Phân Cực Chế Độ Thị Trường (`helios::gatekeeper`)

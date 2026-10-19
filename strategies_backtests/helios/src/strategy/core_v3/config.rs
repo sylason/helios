@@ -415,20 +415,7 @@ impl Default for VolZScoreParams {
 
 #[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct MatrixConfig {
-    /// 1. Chu kỳ quan sát xu hướng vĩ mô (100 -> 1000 nến, Step 30 -> 31 nấc)
-    #[dna(min = 100.0, max = 1000.0, step = 30.0)]
-    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
-    pub trend_lookback: usize,
-    
-    /// 2. Chu kỳ quan sát độ bão hỗn loạn Chaos (100 -> 1000 nến, Step 30 -> 31 nấc)
-    #[dna(min = 100.0, max = 1000.0, step = 30.0)]
-    #[serde(
-        alias = "squeeze_lookback",
-        deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64"
-    )]
-    pub chaos_lookback: usize,
-
-    /// 3. Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR (0.05 -> 0.50, Step 0.01 -> 46 nấc)
+    /// 🚀 Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR (0.05 -> 0.50, Step 0.01 -> 46 nấc)
     #[dna(min = 0.05, max = 0.50, step = 0.01)]
     #[serde(default = "default_kama_slope_scale_atr")]
     pub kama_slope_scale_atr: f64,
@@ -437,8 +424,6 @@ pub struct MatrixConfig {
 impl Default for MatrixConfig {
     fn default() -> Self {
         Self {
-            trend_lookback: 300,
-            chaos_lookback: 300,
             kama_slope_scale_atr: default_kama_slope_scale_atr(),
         }
     }
@@ -1496,8 +1481,7 @@ mod tests {
         assert!(config.indicators.vwma.period > 0);
         assert!(config.indicators.price_z_score.lookback > 0);
         assert!(config.indicators.vol_z_score.lookback > 0);
-        assert!(config.matrix.trend_lookback > 0);
-        assert!(config.matrix.chaos_lookback > 0);
+        assert!(config.matrix.kama_slope_scale_atr > 0.0);
         assert!(config.tactical_sniper.pullback.max_initial_sl_pct > 0.0);
         assert!(config.tactical_sniper.momentum.max_initial_sl_pct > 0.0);
         assert!(config.tactical_sniper.reversal.max_initial_sl_pct > 0.0);

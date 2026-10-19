@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 use crate::strategy::sensors::HeliosSensors;
-use crate::utils::normalization;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 
 /// [LEVEL 2: MARKET MATRIX V3.3]
@@ -62,10 +61,6 @@ impl MarketMatrixV3 {
             sqz_raw.push(sqz_continuous);
         }
 
-        // TÍNH TOÁN CÁC DÒNG CHUẨN HÓA V3.3
-        let chaos_lb = if config.matrix.chaos_lookback == 0 { 20 } else { config.matrix.chaos_lookback };
-        let trend_lb = if config.matrix.trend_lookback == 0 { 20 } else { config.matrix.trend_lookback };
-
         // 🚀 TASK-MAT-03 & TASK-MAT-06: Chuẩn hóa tuyến tính thuần khiết ADX / 100.0 (Occam's Scalpel)
         let mut trend_strength = Vec::with_capacity(len);
         for i in 0..len {
@@ -81,9 +76,6 @@ impl MarketMatrixV3 {
         // 🚀 [TODO-AUDIT-NEW-19 / TODO-MAT-01]: Thoát bẫy thoái hóa phân vị 0.50 (Stationary Percentile Drift).
         // sqz_raw bản thân đã là đại lượng phi thứ nguyên tuyệt đối [0.0, 1.0], gán trực tiếp không qua rolling_percentile.
         let squeeze_intensity = sqz_raw;
-        // 🛡️ TASK-MAT-07: chaos_ratio và entropy là biến nội bộ tạm thời để tính chaos_index
-        let chaos_ratio = normalization::rolling_percentile(&sensors.chaos_ratio, chaos_lb);
-        let entropy = normalization::rolling_percentile(&sensors.efficiency_ratio, trend_lb);
 
         // 🚀 1. DỐC KAMA CHUẨN HÓA THEO ATR (PHI THỨ NGUYÊN - ASSET AGNOSTIC)
         let scale_atr = if config.matrix.kama_slope_scale_atr <= 0.0 { 0.20 } else { config.matrix.kama_slope_scale_atr };
@@ -91,16 +83,26 @@ impl MarketMatrixV3 {
             if s.is_finite() { (s / scale_atr).clamp(-1.0, 1.0) } else { 0.0 }
         }).collect();
 
-        // 🚀 2. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW (chaos_index = c_r * (1.0 - entropy))
+        // 🚀 2. CHỈ SỐ BÃO HỖN LOẠN WHIPSAW O(1) LIÊN TỤC (TODO-AUDIT-NEW-157 & TODO-AUDIT-NEW-158)
+        // Triệt tiêu hoàn toàn dị tật forward-fill MTF percentile và bẫy nhiễu sàn 0.25 khi flatline.
+        // Hằng số vật lý: 1.0 đơn vị biến động vượt chuẩn (tương đương biến động tăng thêm 100% so với SMA50)
+        const CHAOS_EXCESS_BASE_SCALE: f64 = 1.0;
+
         let mut chaos_index = Vec::with_capacity(len);
         for i in 0..len {
-            let c_r_raw = chaos_ratio.get(i).copied().unwrap_or(f64::NAN);
-            let ent_raw = entropy.get(i).copied().unwrap_or(f64::NAN);
+            let raw_chaos = sensors.chaos_ratio.get(i).copied().unwrap_or(f64::NAN);
+            let raw_er = sensors.efficiency_ratio.get(i).copied().unwrap_or(f64::NAN);
 
-            let ch = if c_r_raw.is_finite() && ent_raw.is_finite() {
-                let c_r = c_r_raw.clamp(0.0, 1.0);
-                let noise = (1.0 - ent_raw.clamp(0.0, 1.0)).clamp(0.0, 1.0);
-                c_r * noise
+            let ch = if raw_chaos.is_finite() && raw_er.is_finite() {
+                // c_r: Độ to của sóng vượt mức trung bình lịch sử 50 nến (chaos_ratio = NATR / SMA50)
+                let excess_vol = (raw_chaos - 1.0).max(0.0);
+                let c_r = (excess_vol / CHAOS_EXCESS_BASE_SCALE).tanh();
+
+                // noise: Tỷ lệ giật lắc không định hướng (1.0 - Kaufman ER)
+                let noise = (1.0 - raw_er.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+
+                // Bão Whipsaw = Sóng to vượt chuẩn * Hướng đi giật cục
+                (c_r * noise).clamp(0.0, 1.0)
             } else {
                 0.0
             };
@@ -365,8 +367,7 @@ mod tests {
         sensors.kc_upper = Arc::new(kc_u);
         sensors.kc_lower = Arc::new(kc_l);
 
-        let mut config = HeliosConfigV3::default();
-        config.matrix.chaos_lookback = 20;
+        let config = HeliosConfigV3::default();
 
         let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
 
@@ -517,8 +518,7 @@ mod tests {
         sensors.bb_lower = Arc::new(vec![99.0; len]);
         sensors.bb_middle = Arc::new(vec![100.0; len]);
 
-        let mut config = HeliosConfigV3::default();
-        config.matrix.chaos_lookback = 20;
+        let config = HeliosConfigV3::default();
 
         let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         let expected_sqz = 1.0 / (1.0 + 0.04);
@@ -529,6 +529,88 @@ mod tests {
                 (actual - expected_sqz).abs() < 1e-4,
                 "Nến {} phải giữ nguyên độ nén thực tế ({:.4}), không được thoái hóa về 0.50! Thực tế: {:.4}",
                 i, expected_sqz, actual
+            );
+        }
+    }
+
+    #[test]
+    fn test_matrix_chaos_index_smooth_no_staircase_artifacts() {
+        let len = 40;
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![105.0; len]);
+        sensors.lows = Arc::new(vec![95.0; len]);
+        sensors.volumes = Arc::new(vec![1000.0; len]);
+        sensors.adx = Arc::new(vec![25.0; len]);
+        sensors.kama_slope_adj = Arc::new(vec![0.0; len]);
+        sensors.bb_middle_slope_adj = Arc::new(vec![0.0; len]);
+        sensors.bb_upper = Arc::new(vec![105.0; len]);
+        sensors.bb_lower = Arc::new(vec![95.0; len]);
+        sensors.kc_upper = Arc::new(vec![105.0; len]);
+        sensors.kc_lower = Arc::new(vec![95.0; len]);
+
+        // chaos_ratio tăng dần liên tục từ 1.0 đến 2.95
+        let chaos_r: Vec<f64> = (0..len).map(|i| 1.0 + i as f64 * 0.05).collect();
+        // efficiency_ratio cố định tại 0.20 (noise = 0.80)
+        let er_vals: Vec<f64> = vec![0.20; len];
+
+        sensors.chaos_ratio = Arc::new(chaos_r);
+        sensors.efficiency_ratio = Arc::new(er_vals);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // Nến 0: chaos_ratio = 1.0 <= 1.0 => c_r = 0.0 => chaos_index = 0.0
+        assert_eq!(matrix.chaos_index[0], 0.0, "Nến 0 có chaos_ratio = 1.0 phải cho chaos_index = 0.0");
+
+        // Các nến sau: chaos_index phải tăng dần đều và mượt mà, không giật cục bậc thang
+        for i in 1..len {
+            let prev = matrix.chaos_index[i - 1];
+            let curr = matrix.chaos_index[i];
+            assert!(
+                curr > prev,
+                "chaos_index tại nến {} ({:.4}) phải lớn hơn nến {} ({:.4}) khi sóng to dần!",
+                i, curr, i - 1, prev
+            );
+            assert!(
+                curr <= 1.0,
+                "chaos_index ({:.4}) không được vượt trần 1.0!",
+                curr
+            );
+        }
+    }
+
+    #[test]
+    fn test_chaos_index_zero_when_market_flat() {
+        let len = 50;
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = Arc::new(vec![100.0; len]);
+        sensors.highs = Arc::new(vec![101.0; len]);
+        sensors.lows = Arc::new(vec![99.0; len]);
+        sensors.volumes = Arc::new(vec![500.0; len]);
+        sensors.adx = Arc::new(vec![10.0; len]);
+        sensors.kama_slope_adj = Arc::new(vec![0.0; len]);
+        sensors.bb_middle_slope_adj = Arc::new(vec![0.0; len]);
+        sensors.bb_upper = Arc::new(vec![101.0; len]);
+        sensors.bb_lower = Arc::new(vec![99.0; len]);
+        sensors.kc_upper = Arc::new(vec![101.0; len]);
+        sensors.kc_lower = Arc::new(vec![99.0; len]);
+
+        // Thị trường phẳng lì: chaos_ratio = 0.50 (sóng nhỏ hơn mức trung bình 50 nến)
+        // và efficiency_ratio = 0.05 (giật nhẹ tại chỗ)
+        sensors.chaos_ratio = Arc::new(vec![0.50; len]);
+        sensors.efficiency_ratio = Arc::new(vec![0.05; len]);
+
+        let config = HeliosConfigV3::default();
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        // Khử triệt để bẫy sàn 0.25 của thuật toán cũ: Tất cả các nến flatline phải trả về đúng 0.0!
+        for i in 0..len {
+            let actual = matrix.chaos_index[i];
+            assert_eq!(
+                actual, 0.0,
+                "Nến {} trong thị trường phẳng lì phải có chaos_index = 0.0, không được dính nhiễu sàn 0.25! Thực tế: {}",
+                i, actual
             );
         }
     }
