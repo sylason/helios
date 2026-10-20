@@ -114,7 +114,7 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống mua đu đỉnh phân phối
+            // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống mua đu đỉnh Climax phân phối (Z > max_boundary_z)
             if z_score > pb_cfg.max_boundary_z {
                 return None;
             }
@@ -172,7 +172,7 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống bán đuổi đáy hoảng loạn
+            // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống bán đuổi đáy Climax hoảng loạn (Z < -max_boundary_z)
             if z_score < -pb_cfg.max_boundary_z {
                 return None;
             }
@@ -889,5 +889,122 @@ mod tests {
             let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config_4h);
             assert!(prop.is_some(), "KAMA 4h MTF Equiv ATR scaling PHẢI bảo vệ pullback rộng -25 điểm (delta_kama = -0.36) không bị VETO oan!");
         }
+    }
+
+    #[test]
+    fn test_trend_pb_allows_entry_in_strong_macro_uptrend() {
+        let len = 50;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2010.0; len];
+        let mut lows = vec![1998.0; len];
+        let mut closes = vec![2005.0; len];
+        // Nến nảy hồi thuận xu hướng: High = 2010, Low = 2000, Close = 2006
+        // CLV = (2 * 2006 - 2010 - 2000) / (2010 - 2000) = (4012 - 4010) / 10 = +0.20 >= min_clv (0.20)
+        opens[i] = 2002.0;
+        highs[i] = 2010.0;
+        lows[i] = 2000.0;
+        closes[i] = 2006.0;
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default(); // default max_boundary_z = 1.60
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        // Stoch uốn cong ngóc đầu lên từ đáy: prev = 20.0, curr = 25.0
+        let mut stoch_k = vec![30.0; len];
+        stoch_k[i - 1] = 20.0;
+        stoch_k[i] = 25.0;
+        sensors.stoch_trend_k = std::sync::Arc::new(stoch_k);
+        sensors.stoch_trend_d = std::sync::Arc::new(vec![22.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![52.0; len]);
+        // Z-score trong sóng tăng 4h mạnh tự nhiên đạt +1.20 (vượt trần cũ 0.80 nhưng dưới trần mới 1.60)
+        sensors.z_score = std::sync::Arc::new(vec![1.20; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.25; len]); // Uptrend mạnh
+
+        // 1. Khẳng định: TrendPB PHẢI cho phép mở Long trong sóng tăng mạnh khi Z = 1.20 <= 1.60
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "TrendPB PHẢI cấp Proposal Long khi nhịp hồi trong sóng tăng mạnh có Z = 1.20 <= 1.60!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+
+        // 2. Khẳng định: Khi Z-score vọt lên đỉnh Climax phân phối (+1.80 > 1.60), Boundary Guard PHẢI VETO
+        let mut sensors_climax = sensors.clone();
+        sensors_climax.z_score = std::sync::Arc::new(vec![1.80; len]);
+        let prop_climax = TrendPBScanner.scan(&tick, &sensors_climax, &matrix, &config);
+        assert!(prop_climax.is_none(), "Boundary Guard PHẢI chặn đứng đu đỉnh Climax khi Z = 1.80 > 1.60!");
+    }
+
+    #[test]
+    fn test_trend_pb_allows_short_entry_in_strong_macro_downtrend() {
+        let len = 50;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2002.0; len];
+        let mut lows = vec![1990.0; len];
+        let mut closes = vec![1995.0; len];
+        // Nến hồi lên rồi đè đầu cắm xuống thuận xu hướng giảm:
+        // High = 2000, Low = 1990, Close = 1994
+        // CLV = (2 * 1994 - 2000 - 1990) / (2000 - 1990) = (3988 - 3990) / 10 = -0.20 <= -min_clv (-0.20)
+        opens[i] = 1998.0;
+        highs[i] = 2000.0;
+        lows[i] = 1990.0;
+        closes[i] = 1994.0;
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default(); // default max_boundary_z = 1.60
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        // Stoch uốn cong chúc đầu xuống từ đỉnh: prev = 80.0, curr = 75.0
+        let mut stoch_k = vec![70.0; len];
+        stoch_k[i - 1] = 80.0;
+        stoch_k[i] = 75.0;
+        sensors.stoch_trend_k = std::sync::Arc::new(stoch_k);
+        sensors.stoch_trend_d = std::sync::Arc::new(vec![78.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![48.0; len]);
+        // Z-score trong sóng giảm 4h mạnh tự nhiên đạt -1.20 (vượt trần âm cũ -0.80 nhưng trên trần mới -1.60)
+        sensors.z_score = std::sync::Arc::new(vec![-1.20; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.25; len]); // Downtrend mạnh
+
+        // 1. Khẳng định: TrendPB PHẢI cho phép mở Short trong sóng giảm mạnh khi Z = -1.20 >= -1.60
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "TrendPB PHẢI cấp Proposal Short khi nhịp hồi trong sóng giảm mạnh có Z = -1.20 >= -1.60!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Short);
+
+        // 2. Khẳng định: Khi Z-score sập sâu xuống đáy Climax hoảng loạn (-1.80 < -1.60), Boundary Guard PHẢI VETO
+        let mut sensors_climax = sensors.clone();
+        sensors_climax.z_score = std::sync::Arc::new(vec![-1.80; len]);
+        let prop_climax = TrendPBScanner.scan(&tick, &sensors_climax, &matrix, &config);
+        assert!(prop_climax.is_none(), "Boundary Guard PHẢI chặn đứng bán đuổi đáy Climax khi Z = -1.80 < -1.60!");
     }
 }

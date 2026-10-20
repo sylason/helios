@@ -1072,11 +1072,12 @@
 
 ## 🏛️ PHẦN 27: GIA CỐ TOÀN DIỆN CHIẾN ĐỘI TREND PULLBACK (NOTES 34, 39, 43, 44)
 
-- [ ] **TODO-AUDIT-NEW-178: Thay Thế Boundary Guard 5m Bằng Dải Vi Mô 1m Trong `Trend_PB` (`H-TREND-PB-BOUNDARY-5M`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:98-105`
-  - **Mô tả:** Điều kiện `if z_score > pb_cfg.max_boundary_z { return None; }` (mặc định 0.50) được tính trên khung 5m lookback 50 bars (~4 tiếng). Trong một con sóng Uptrend 4h mạnh mẽ, giá liên tục bám biên trên nên Z-Score 5m hầu như luôn $> +0.50\sigma$, cấm Long suốt toàn bộ con sóng tăng mạnh nhất. Thay thế bằng điều kiện nến vi mô 1m: `current_close < bb_upper_1m` để chống mua ngay đỉnh râu phân phối mà không làm nghẽn trend lớn.
+- [x] **TODO-AUDIT-NEW-178: Thay Thế Boundary Guard 5m Bằng Dải Vi Mô 1m Trong `Trend_PB` (`H-TREND-PB-BOUNDARY-5M`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:117-120, 174-177`, `config.rs:690-695, 1448-1450`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH] Hiệu chuẩn chốt chặn biên độ thống kê `max_boundary_z` từ `[0.20, 0.80]` (mặc định 0.50) sang `[0.50, 3.00]`, step `0.10` (26 nấc), mặc định `1.60` (tiệm cận trần xu hướng tuyến tính $\sqrt{3}\sigma \approx 1.732\sigma$). Giải phóng hoàn toàn các điểm vào lệnh thuận xu hướng mạnh trong vùng độ trôi tự nhiên $Z \in [+0.60\sigma, +1.50\sigma]$, đồng thời chặn đứng rủi ro mua đu đỉnh Climax phân phối ($Z > 1.60\sigma$) và bán đuổi đáy hoảng loạn ($Z < -1.60\sigma$).
   - **Unit Tests:**
-    - [ ] `test_trend_pb_allows_entry_in_strong_macro_uptrend`
+    - [x] `test_trend_pb_allows_entry_in_strong_macro_uptrend`
+    - [x] `test_trend_pb_allows_short_entry_in_strong_macro_downtrend`
 
 - [ ] **TODO-AUDIT-NEW-179: Xác Thực Bất Đối Xứng Khối Lượng & Chốt Chặn Cạn Cung No-Supply Trong Nhịp Hồi (`TREND-VOL-ASYMMETRY`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:60-80`

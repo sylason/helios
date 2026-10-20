@@ -687,9 +687,10 @@ pub struct TacticalPullbackParams {
     #[serde(default = "default_pullback_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
 
-    /// 🛡️ CHỐT CHẶN BIÊN ĐỘ Z-SCORE (0.20 -> 0.80, Step 0.05 -> 13 nấc)
-    /// Long cấm khi Z > +max_z (đu đỉnh), Short cấm khi Z < -max_z (đu đáy).
-    #[dna(min = 0.20, max = 0.80, step = 0.05)]
+    /// 🛡️ CHỐT CHẶN BIÊN ĐỘ Z-SCORE (0.50 -> 3.00, Step 0.10 -> 26 nấc)
+    /// Long cấm khi Z > +max_z (đu đỉnh Climax), Short cấm khi Z < -max_z (đu đáy hoảng loạn).
+    /// Mặc định 1.60 sigma tiệm cận trần xu hướng tuyến tính sqrt(3) ≈ 1.732 sigma.
+    #[dna(min = 0.50, max = 3.00, step = 0.10)]
     #[serde(default = "default_pullback_max_boundary_z")]
     pub max_boundary_z: f64,
 
@@ -1446,7 +1447,7 @@ fn default_pullback_invalidation_buffer_atr() -> f64 {
 }
 
 fn default_pullback_max_boundary_z() -> f64 {
-    0.50
+    1.60
 }
 
 fn default_pullback_max_squeeze_intensity() -> f64 {
