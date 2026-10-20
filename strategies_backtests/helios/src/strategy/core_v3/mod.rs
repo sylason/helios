@@ -695,10 +695,78 @@ mod tests {
             position: Position::default(),
         };
 
-        // CLV = (2*1995 - 2000 - 1950) / 50 = +0.80 >= 0.20 -> Chấp thuận vào lệnh Long!
+        // CLV = (2*1995 - 2000 - 1950) / 50 = +0.80 >= 0.20, Lower Wick = (1980 - 1950)/50 = 60% >= 20% -> Chấp thuận vào lệnh Long!
         let prop_hammer = ReversalScanner.scan(&tick_hammer, &sensors, &matrix, &config);
         assert!(prop_hammer.is_some(), "ReversalScanner PHẢI kích hoạt khi nến có râu rút chân Hammer!");
         assert_eq!(prop_hammer.unwrap().signal_type, SignalType::Long);
+    }
+
+    #[test]
+    fn test_reversal_rejects_poor_low_without_excess_wick() {
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // KỊCH BẢN: Nến xanh tăng đóng cao nhưng đáy phẳng lì Poor Low (Open = Low = 1990, Close = 1996, High = 2000)
+        // Range = 10, CLV = (2*1996 - 2000 - 1990)/10 = +0.20 (thỏa mãn min_clv = 0.20)
+        // Nhưng Lower Wick = min(1990, 1996) - 1990 = 0.0 -> Wick Ratio = 0.0% < 20% -> PHẢI VETO!
+        let opens = vec![1990.0; len];
+        let highs = vec![2000.0; len];
+        let lows = vec![1990.0; len];
+        let closes_poor_low = vec![1996.0; len];
+        let volumes = vec![1000.0; len];
+        let datetimes = vec![0i64; len];
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes_poor_low),
+            volume: std::sync::Arc::new(volumes),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick_poor_low = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![-3.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2040.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![25.0; len]);
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.reversal.z_score_threshold = 2.5;
+        config.tactical_sniper.reversal.min_activation_score = 0.50;
+        config.tactical_sniper.reversal.min_reversal_clv = 0.20;
+        config.tactical_sniper.reversal.min_excess_wick_ratio = 0.20;
+        config.tactical_sniper.reversal.mfi_reversal_thresh = 30.0;
+
+        let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
+
+        let prop = ReversalScanner.scan(&tick_poor_low, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "ReversalScanner PHẢI từ chối nến Poor Low đáy phẳng lì không có râu nến từ chối!");
     }
 
     #[test]

@@ -854,6 +854,11 @@ pub struct TacticalReversalParams {
     #[serde(default = "default_reversal_min_clv")]
     pub min_reversal_clv: f64,
 
+    /// 🛡️ Ngưỡng tỷ lệ râu nến từ chối cực trị tối thiểu (Excess Wick: 0.10 -> 0.50, Step 0.05 -> 9 nấc)
+    #[dna(min = 0.10, max = 0.50, step = 0.05)]
+    #[serde(default = "default_reversal_min_excess_wick_ratio")]
+    pub min_excess_wick_ratio: f64,
+
     /// 💧 Ngưỡng kiệt sức dòng tiền MFI (15.0 -> 45.0, Step 5.0 -> 7 nấc)
     /// Long yêu cầu MFI <= thresh, Short yêu cầu MFI >= 100 - thresh
     #[dna(min = 15.0, max = 45.0, step = 5.0)]
@@ -881,6 +886,7 @@ impl Default for TacticalReversalParams {
             wick_sl_buffer_atr: 1.0,
             min_activation_score: default_min_activation_score(),
             min_reversal_clv: default_reversal_min_clv(),
+            min_excess_wick_ratio: default_reversal_min_excess_wick_ratio(),
             mfi_reversal_thresh: default_reversal_mfi_thresh(),
             w_z_score: default_reversal_w_z_score(),
             w_displacement: default_reversal_w_displacement(),
@@ -1413,6 +1419,10 @@ fn default_reversal_climax_vol_threshold() -> f64 {
 }
 
 fn default_reversal_min_clv() -> f64 {
+    0.20
+}
+
+fn default_reversal_min_excess_wick_ratio() -> f64 {
     0.20
 }
 

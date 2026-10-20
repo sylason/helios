@@ -73,23 +73,29 @@ impl TacticalScanner for ReversalScanner {
 
         // 🛡️ Task REV-03: Chốt Chặn Nến Xác Nhận Đảo Chiều (Anti-Falling Knife CLV Guard)
         // Tính Close Location Value phi thứ nguyên [-1.0, +1.0]
+        let open_price = tick.opens()[i];
         let candle_range = (high_price - low_price).max(1e-5);
         let clv = (2.0 * close_price - high_price - low_price) / candle_range;
         let min_clv = if rev_cfg.min_reversal_clv <= 0.0 { 0.20 } else { rev_cfg.min_reversal_clv.clamp(0.05, 0.90) };
+        let min_wick_ratio = if rev_cfg.min_excess_wick_ratio <= 0.0 { 0.20 } else { rev_cfg.min_excess_wick_ratio.clamp(0.05, 0.60) };
+
+        // 🛡️ Task REV-190 (REV-EXCESS-WICK-GATE): Đo chiều dài râu nến từ chối cực trị (Excess Wick)
+        let lower_wick_ratio = (open_price.min(close_price) - low_price).max(0.0) / candle_range;
+        let upper_wick_ratio = (high_price - open_price.max(close_price)).max(0.0) / candle_range;
 
         // 🛡️ Task REV-04: Bộ Lọc Dòng Tiền Kiệt Sức MFI (Money Flow Exhaustion Filter)
         let mfi_thresh = if rev_cfg.mfi_reversal_thresh <= 0.0 { 30.0 } else { rev_cfg.mfi_reversal_thresh.clamp(10.0, 50.0) };
 
-        // Xác định hướng tín hiệu và kiểm tra đồng thời CLV + MFI
+        // Xác định hướng tín hiệu và kiểm tra đồng thời CLV + Excess Wick + MFI
         let signal_type = if z_score < 0.0 && close_price < kama_mid {
-            // Long Reversal: Cần nến rút chân (CLV >= min_clv) và dòng tiền bán kiệt sức (MFI <= mfi_thresh)
-            if clv < min_clv || mfi > mfi_thresh {
+            // Long Reversal: Cần nến rút chân (CLV >= min_clv), râu dưới từ chối rõ rệt (lower_wick_ratio >= min_wick_ratio) và dòng tiền bán kiệt sức (MFI <= mfi_thresh)
+            if clv < min_clv || lower_wick_ratio < min_wick_ratio || mfi > mfi_thresh {
                 return None;
             }
             SignalType::Long
         } else if z_score > 0.0 && close_price > kama_mid {
-            // Short Reversal: Cần nến đè đầu (CLV <= -min_clv) và dòng tiền mua quá tải (MFI >= 100 - mfi_thresh)
-            if clv > -min_clv || mfi < (100.0 - mfi_thresh) {
+            // Short Reversal: Cần nến đè đầu (CLV <= -min_clv), râu trên từ chối rõ rệt (upper_wick_ratio >= min_wick_ratio) và dòng tiền mua quá tải (MFI >= 100 - mfi_thresh)
+            if clv > -min_clv || upper_wick_ratio < min_wick_ratio || mfi < (100.0 - mfi_thresh) {
                 return None;
             }
             SignalType::Short

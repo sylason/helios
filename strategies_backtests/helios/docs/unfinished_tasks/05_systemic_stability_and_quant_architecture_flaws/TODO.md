@@ -1146,12 +1146,12 @@
     - [ ] `test_reversal_structural_invalidation_on_sc_breakdown`
     - [ ] `test_reversal_aborts_on_failed_secondary_test`
 
-- [ ] **TODO-AUDIT-NEW-190: Bổ Sung Tiêu Chuẩn Râu Nến Từ Chối Giá Cực Trị (Excess Wick Requirement $CLV \ge 0.50$, Cấm Bắt Đáy Poor Low) (`REV-EXCESS-WICK-GATE`)**
+- [x] **TODO-AUDIT-NEW-190: Bổ Sung Tiêu Chuẩn Râu Nến Từ Chối Giá Cực Trị (Excess Wick Requirement $CLV \ge 0.50$, Cấm Bắt Đáy Poor Low) (`REV-EXCESS-WICK-GATE`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`
   - **Mô tả:** Cấm bắt đáy khi nhịp chạm biên cực trị tạo thành một đáy phẳng lì không có râu nến từ chối ($Poor\ Low / Zero\ Excess$). Bắt buộc nến chạm biên phải có râu dưới rút chân tối thiểu $CLV \ge 0.50$ và chiều dài râu dưới $\ge 0.25 \times \text{Body}$ để chứng minh phiên đấu giá tại đáy đã hoàn tất.
   - **Unit Tests:**
-    - [ ] `test_reversal_rejects_poor_low_without_excess_wick`
-    - [ ] `test_reversal_approves_when_clv_ge_0_50_with_strong_wick`
+    - [x] `test_reversal_rejects_poor_low_without_excess_wick`
+    - [x] `test_reversal_approves_when_clv_ge_0_50_with_strong_wick`
 
 - [ ] **TODO-AUDIT-NEW-191: Cổng Chặn Sức Mạnh Xu Hướng Vĩ Mô (Macro Trend Invalidation Gate Cho Reversal: Cấm Long Khi KAMA 1h Dốc Mạnh Và ADX 1h > 35) (`REV-MACRO-GATE`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:85-102`
