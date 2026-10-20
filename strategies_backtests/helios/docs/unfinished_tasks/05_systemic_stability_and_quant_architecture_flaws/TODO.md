@@ -615,9 +615,9 @@
   - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:440-450`, `paper_engine.rs:42-60`
   - **Mô tả:** Làm tròn khối lượng vị thế theo `step_size` chuẩn sàn và từ chối các lệnh có giá trị danh nghĩa dưới \$21 (`min_notional`), đảm bảo 100% lệnh Paper tương thích hoàn hảo với Binance API.
 
-- [ ] **TODO-AUDIT-NEW-107: Bổ Sung Mô Hình Trượt Giá & Chênh Lệch Spread Cho Lệnh Market (`TB-PPR-04`)**
+- [~] **TODO-AUDIT-NEW-107: Bổ Sung Mô Hình Trượt Giá & Chênh Lệch Spread Cho Lệnh Market (`TB-PPR-04`) [PENDING - TẠM GÁC]**
   - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:450`
-  - **Mô tả:** Trừ hao trượt giá thực tế ($0.05\% - 0.10\%$ giá vào lệnh) đối với lệnh Market, loại bỏ ảo tưởng hiệu suất màu hồng do khớp lệnh không ma sát tạo ra.
+  - **Mô tả:** Trừ hao trượt giá thực tế ($0.05\% - 0.10\%$ giá vào lệnh) đối với lệnh Market. *(Hiện trạng: Tạm hoãn đánh giá để tránh áp đặt số phạt tĩnh chủ quan làm lệch pha 1:1 với backtest khi chưa có luồng dữ liệu WebSocket Orderbook Depth L2, tập trung chẩn đoán sự ổn định hệ thống trước).*
 
 - [ ] **TODO-AUDIT-NEW-108: Sửa Sai Lệch Telemetry EventBus: Cập Nhật `available_balance` & `unrealized_profit` (`TB-PPR-05`)**
   - **File:** `trading_bot/bot_engine/src/execution/paper_trader.rs:179-188`

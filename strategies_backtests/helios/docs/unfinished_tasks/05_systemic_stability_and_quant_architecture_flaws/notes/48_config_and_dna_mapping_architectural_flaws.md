@@ -150,8 +150,8 @@ Tuy nhiên, kiểm toán chuyên sâu theo nguyên lý First-Principles đã ph�
 
 ### 🟠 Flaw 6 (H-CFG-06): Bẫy Sàn Biến Động Vi Mô Cố Định `min_natr_threshold` (Tê Liệt Forex, Bị Nhiễu Memecoin)
 - **Tình trạng:** ✅ **ĐÃ FIX (`TODO-AUDIT-NEW-61`, 2026-10-19)** — dải DNA mới `#[dna(min = 0.0002, max = 0.0300, step = 0.0002)]` (150 nấc). *(Trước đó: CHƯA FIX - TỒN TẠI TỪ AUDIT CŨ `TODO-CFG-02`)*.
-- **Vị trí mã nguồn:** [`core_v3/config.rs:441`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L441).
-- **Hiện trạng:**
+- **Vị trí mã nguồn:** [`core_v3/config.rs:497-503`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/config.rs#L497-L503) *(trước đây L441)*.
+- **Hiện trạng (trước khi fix):**
   ```rust
   #[dna(min = 0.0008, max = 0.0030, step = 0.0002)]
   pub min_natr_threshold: f64,
