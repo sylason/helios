@@ -935,12 +935,16 @@
   - **Unit Tests:**
     - [ ] `test_arbiter_runs_cleanly_without_anomaly_scanner_proposals`
 
-- [ ] **TODO-AUDIT-NEW-161: Kiến Thiết Cầu Dao Khẩn Cấp Flash Crash & Liquidity Shock Circuit Breaker Tại Gateway (`GATE-FLASH-CRASH-BREAKER`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `matrix.rs`
-  - **Mô tả:** Khi phát hiện các cú sốc cực đoan: Nến rơi/giật $> 3.5\text{ ATR}$ trong 1 nến, $Z_{\text{vol}} \ge 4.5$, hoặc trượt giá rỗng thanh khoản $\implies$ Gateway lập tức kích hoạt trạng thái `EmergencyFreeze` phong tỏa mở vị thế mới trên toàn bộ các scanner trong 15–30 phút, bảo toàn 100% vốn an toàn qua cơn bão.
+- [x] **TODO-AUDIT-NEW-161: Kiến Thiết Cầu Dao Khẩn Cấp Flash Crash & Liquidity Shock Circuit Breaker Tại Gateway (`GATE-FLASH-CRASH-BREAKER`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `config.rs`, `telemetry/defense_ledger.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH: 12/12 Audit PASS, 21 Gatekeeper Tests PASS, DNA 106 -> 110 chiều]. Triển khai cơ chế nhận diện 2 tầng nến sốc (Bão thanh lý xả lũ: `span >= 3.5 ATR` & `Z_vol >= 4.0` hoặc Rỗng sổ lệnh `span >= 4.5 ATR`). Kích hoạt phong tỏa mở vị thế mới `GateVetoReason::FlashCrashFreeze` trong cửa sổ trượt $K$ nến phi trạng thái $O(K)$, bảo vệ an toàn 100% vốn trước râu nến quét thanh khoản tử thần.
   - **Unit Tests:**
-    - [ ] `test_gatekeeper_triggers_emergency_freeze_on_flash_crash_candle`
-    - [ ] `test_gatekeeper_cools_down_and_resumes_cleanly_after_shock`
+    - [x] `test_gatekeeper_triggers_emergency_freeze_on_flash_crash_candle`
+    - [x] `test_gatekeeper_triggers_on_liquidity_vacuum_without_volume`
+    - [x] `test_gatekeeper_cools_down_and_resumes_cleanly_after_shock`
+    - [x] `test_gatekeeper_ignores_normal_breakout_candle`
+    - [x] `test_gatekeeper_flash_crash_freeze_edge_detection`
+    - [x] `test_dna_width_and_parameter_defs_integrity` (110 chiều)
 
 - [ ] **TODO-AUDIT-NEW-162: Bộ Lọc Khử Ô Nhiễm Phương Sai Z-Score Bằng Robust Dispersion / Winsorization / MAD (`SENS-ROBUST-ZSCORE`)**
   - **File:** `strategies_backtests/helios/src/utils/normalization.rs`, `sensors.rs`, `matrix.rs`

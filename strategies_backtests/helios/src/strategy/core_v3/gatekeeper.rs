@@ -25,6 +25,8 @@ use crate::strategy::core_v3::config::HeliosConfigV3;
 /// Lý do Cầu Dao Gatekeeper phủ quyết không cho phép mở vị thế
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateVetoReason {
+    /// ⚡ Cầu dao khẩn cấp đóng băng sau cú sốc nến Flash Crash / Cạn kiệt thanh khoản
+    FlashCrashFreeze,
     /// Bão biến động hỗn loạn (Chaos Index >= threshold hoặc đang trong dải trễ Hysteresis)
     ChaosWhipsaw,
     /// Sàn biến động vĩ mô không bù nổi chi phí vị thế (Macro NATR < Roundtrip Fee + Min Alpha)
@@ -38,6 +40,7 @@ pub enum GateVetoReason {
 impl GateVetoReason {
     pub fn as_str(&self) -> &'static str {
         match self {
+            GateVetoReason::FlashCrashFreeze => "FLASH_CRASH_FREEZE",
             GateVetoReason::ChaosWhipsaw => "CHAOS_WHIPSAW",
             GateVetoReason::MacroFlatline => "MACRO_FLATLINE",
             GateVetoReason::MicroFlatline => "MICRO_FLATLINE",
@@ -89,6 +92,8 @@ pub struct GateEvaluation {
     pub micro_natr_pct: f64,
     /// Trạng thái khóa trễ Hysteresis có đang hoạt động hay không
     pub is_hysteresis_active: bool,
+    /// ⚡ Trạng thái đóng băng khẩn cấp do sốc Flash Crash / Liquidity Vacuum
+    pub is_shock_freeze_active: bool,
     /// 📉 Ngưỡng NATR vĩ mô tối thiểu yêu cầu (%) = fee_floor_pct + min_alpha_pct
     pub required_min_natr_pct: f64,
     /// 💰 Sàn chi phí 2 chiều thực tế (%) = 2*taker_fee + slippage
@@ -137,6 +142,7 @@ impl RegimeGatekeeper {
                 market_natr_pct: 0.0,
                 micro_natr_pct: 0.0,
                 is_hysteresis_active: false,
+                is_shock_freeze_active: false,
                 required_min_natr_pct: 0.0,
                 fee_floor_pct: 0.0,
                 micro_fee_floor_pct: 0.0,
@@ -173,6 +179,7 @@ impl RegimeGatekeeper {
                 market_natr_pct: 0.0,
                 micro_natr_pct: 0.0,
                 is_hysteresis_active: false,
+                is_shock_freeze_active: false,
                 required_min_natr_pct: 0.0,
                 fee_floor_pct: 0.0,
                 micro_fee_floor_pct: 0.0,
@@ -192,6 +199,7 @@ impl RegimeGatekeeper {
                 market_natr_pct,
                 micro_natr_pct,
                 is_hysteresis_active: false,
+                is_shock_freeze_active: false,
                 required_min_natr_pct,
                 fee_floor_pct: roundtrip_fee_pct,
                 micro_fee_floor_pct,
@@ -211,6 +219,49 @@ impl RegimeGatekeeper {
                 market_natr_pct,
                 micro_natr_pct,
                 is_hysteresis_active: false,
+                is_shock_freeze_active: false,
+                required_min_natr_pct,
+                fee_floor_pct: roundtrip_fee_pct,
+                micro_fee_floor_pct,
+                min_alpha_pct,
+                chaos_threshold: t_enter,
+            };
+        }
+
+        // 2.3. Cầu Dao Khẩn Cấp Flash Crash & Liquidity Vacuum Circuit Breaker (TODO-AUDIT-NEW-161)
+        let cb_cfg = &config.circuit_breaker;
+        let freeze_bars = cb_cfg.freeze_bars.max(1);
+        let start_shock_idx = i.saturating_sub(freeze_bars.saturating_sub(1));
+        let mut shock_detected = false;
+
+        for j in (start_shock_idx..=i).rev() {
+            let high = tick.highs().get(j).copied().unwrap_or(0.0);
+            let low = tick.lows().get(j).copied().unwrap_or(0.0);
+            let atr = sensors.atr_sl.get(j).copied().unwrap_or(0.0);
+            let vol_z = sensors.vol_z_score.get(j).copied().unwrap_or(0.0);
+
+            if atr > 1e-9 && high >= low {
+                let span_ratio = (high - low) / atr;
+                let is_vol_shock = span_ratio >= cb_cfg.atr_shock_threshold && vol_z >= cb_cfg.vol_z_shock_threshold;
+                let is_vacuum_shock = span_ratio >= cb_cfg.vacuum_atr_threshold;
+
+                if is_vol_shock || is_vacuum_shock {
+                    shock_detected = true;
+                    break;
+                }
+            }
+        }
+
+        if shock_detected {
+            return GateEvaluation {
+                regime: MarketRegime::TurbulentChaos,
+                passed: false,
+                veto_reason: Some(GateVetoReason::FlashCrashFreeze),
+                current_chaos,
+                market_natr_pct,
+                micro_natr_pct,
+                is_hysteresis_active: true,
+                is_shock_freeze_active: true,
                 required_min_natr_pct,
                 fee_floor_pct: roundtrip_fee_pct,
                 micro_fee_floor_pct,
@@ -233,6 +284,7 @@ impl RegimeGatekeeper {
                 market_natr_pct,
                 micro_natr_pct,
                 is_hysteresis_active: true,
+                is_shock_freeze_active: false,
                 required_min_natr_pct,
                 fee_floor_pct: roundtrip_fee_pct,
                 micro_fee_floor_pct,
@@ -266,6 +318,7 @@ impl RegimeGatekeeper {
                     market_natr_pct,
                     micro_natr_pct,
                     is_hysteresis_active: true,
+                    is_shock_freeze_active: false,
                     required_min_natr_pct,
                     fee_floor_pct: roundtrip_fee_pct,
                     micro_fee_floor_pct,
@@ -286,6 +339,7 @@ impl RegimeGatekeeper {
                 market_natr_pct,
                 micro_natr_pct,
                 is_hysteresis_active: false,
+                is_shock_freeze_active: false,
                 required_min_natr_pct,
                 fee_floor_pct: roundtrip_fee_pct,
                 micro_fee_floor_pct,
@@ -302,6 +356,7 @@ impl RegimeGatekeeper {
             market_natr_pct,
             micro_natr_pct,
             is_hysteresis_active: false,
+            is_shock_freeze_active: false,
             required_min_natr_pct,
             fee_floor_pct: roundtrip_fee_pct,
             micro_fee_floor_pct,
@@ -320,6 +375,7 @@ impl RegimeGatekeeper {
     ) -> MarketRegime {
         if let Some(reason) = veto_reason {
             return match reason {
+                GateVetoReason::FlashCrashFreeze => MarketRegime::TurbulentChaos,
                 GateVetoReason::MacroFlatline | GateVetoReason::MicroFlatline => MarketRegime::VolatilityFlatline,
                 GateVetoReason::ChaosWhipsaw => MarketRegime::TurbulentChaos,
                 GateVetoReason::DataAnomaly => MarketRegime::DataAnomaly,
@@ -378,12 +434,16 @@ mod tests {
 
     impl MockTickEnv {
         fn new(len: usize) -> Self {
+            Self::with_prices(len, 2000.0, 2005.0, 1995.0, 2000.0)
+        }
+
+        fn with_prices(len: usize, open: f64, high: f64, low: f64, close: f64) -> Self {
             let raw_cache = RawDataCache {
                 datetime: Arc::new(vec![0i64; len]),
-                open: Arc::new(vec![2000.0; len]),
-                high: Arc::new(vec![2010.0; len]),
-                low: Arc::new(vec![1990.0; len]),
-                close: Arc::new(vec![2000.0; len]),
+                open: Arc::new(vec![open; len]),
+                high: Arc::new(vec![high; len]),
+                low: Arc::new(vec![low; len]),
+                close: Arc::new(vec![close; len]),
                 volume: Arc::new(vec![1000.0; len]),
                 custom_columns: HashMap::new(),
             };
@@ -412,7 +472,7 @@ mod tests {
     #[test]
     fn test_gatekeeper_normal_market_passes() {
         let config = HeliosConfigV3::default();
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.5, 1999.5, 2000.0);
         let tick = env.tick(10);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
@@ -437,7 +497,7 @@ mod tests {
     #[test]
     fn test_gatekeeper_macro_flatline_veto() {
         let config = HeliosConfigV3::default();
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.5, 1999.5, 2000.0);
         let tick = env.tick(10);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
@@ -464,7 +524,7 @@ mod tests {
         config.risk_management.risk_base.slippage_allowance_pct = 0.00005;
         config.arbiter.min_natr_threshold = 0.0002;
 
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 1.0000, 1.0002, 0.9998, 1.0000);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
         sensors.natr = Arc::new(vec![0.04; 20]);       // EUR/USD Macro NATR 0.04% >= 0.035%
@@ -501,7 +561,7 @@ mod tests {
             + config.risk_management.risk_base.slippage_allowance_pct) * 100.0;
         let expected_required = roundtrip_fee_pct + 1.50;
 
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.005, 1999.995, 2000.0);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
         sensors.natr = Arc::new(vec![0.85; 20]);       // Vùng chop nhiễu của Memecoin
@@ -532,7 +592,7 @@ mod tests {
         // 🛡️ CHỐNG BẪY MÙ 4H (NEW-NATR-4H-BLIND):
         // Dù Macro NATR 4h rất cao (1.50%), nhưng nếu nến vi mô phẳng lì que tăm (0.02% < 0.04%) thì PHẢI VETO!
         let config = HeliosConfigV3::default();
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.5, 1999.5, 2000.0);
         let tick = env.tick(10);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
@@ -554,7 +614,7 @@ mod tests {
         // 🛡️ CHỐNG BẪY LỆCH NGỮ NGHĨA: Nến vi mô tích lũy co hẹp (0.05% >= 0.04% sàn Taker)
         // và phiên thị trường NATR MTF lành mạnh (0.45%) thì KHÔNG ĐƯỢC VETO!
         let config = HeliosConfigV3::default();
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.5, 1999.5, 2000.0);
         let tick = env.tick(10);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
@@ -596,7 +656,7 @@ mod tests {
     #[test]
     fn test_gatekeeper_chaos_immediate_veto() {
         let config = HeliosConfigV3::default();
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.5, 1999.5, 2000.0);
         let tick = env.tick(10);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
@@ -615,7 +675,7 @@ mod tests {
     #[test]
     fn test_gatekeeper_chaos_hysteresis_lock() {
         let config = HeliosConfigV3::default();
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.005, 1999.995, 2000.0);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
 
@@ -641,7 +701,7 @@ mod tests {
     #[test]
     fn test_gatekeeper_chaos_hysteresis_release() {
         let config = HeliosConfigV3::default();
-        let mut env = MockTickEnv::new(20);
+        let mut env = MockTickEnv::with_prices(20, 2000.0, 2000.005, 1999.995, 2000.0);
         let mut sensors = HeliosSensors::default();
         let mut matrix = MarketMatrixV3::default();
 
@@ -772,5 +832,267 @@ mod tests {
         matrix.squeeze_intensity = Arc::new(vec![0.50; 10]);
         let regime = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
         assert_eq!(regime, MarketRegime::DataAnomaly);
+    }
+
+    // =========================================================================
+    // ⚡ BỘ UNIT TESTS CẦU DAO KHẨN CẤP FLASH CRASH BREAKER (TODO-AUDIT-NEW-161)
+    // =========================================================================
+
+    #[test]
+    fn test_gatekeeper_triggers_emergency_freeze_on_flash_crash_candle() {
+        // ⚡ Nến rơi/giật 4.0 ATR và Z_vol = 4.5 >= 4.0 => Phải ngắt mạch khẩn cấp FlashCrashFreeze
+        let config = HeliosConfigV3::default();
+        let len = 30;
+        let opens = vec![2000.0; len];
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1995.0; len];
+        let closes = vec![2000.0; len];
+        let vols = vec![1000.0; len];
+
+        // Cây nến sốc tại i = 10: high - low = 40.0, với ATR = 10.0 => span_ratio = 4.0 ATR
+        highs[10] = 2020.0;
+        lows[10] = 1980.0;
+
+        let raw_cache = RawDataCache {
+            datetime: Arc::new(vec![0i64; len]),
+            open: Arc::new(opens),
+            high: Arc::new(highs),
+            low: Arc::new(lows),
+            close: Arc::new(closes),
+            volume: Arc::new(vols),
+            custom_columns: HashMap::new(),
+        };
+
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i: 10,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        sensors.natr = Arc::new(vec![0.50; len]);
+        sensors.micro_natr = Arc::new(vec![0.10; len]);
+        sensors.atr_sl = Arc::new(vec![10.0; len]); // ATR = 10.0
+        let mut vol_z = vec![0.0; len];
+        vol_z[10] = 4.5; // Z_vol = 4.5 >= 4.0
+        sensors.vol_z_score = Arc::new(vol_z);
+        matrix.chaos_index = Arc::new(vec![0.25; len]);
+
+        let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
+        assert!(!eval.passed, "Flash crash nến 4.0 ATR + Z_vol 4.5 phải bị VETO!");
+        assert_eq!(eval.veto_reason, Some(GateVetoReason::FlashCrashFreeze));
+        assert!(eval.is_shock_freeze_active);
+        assert_eq!(eval.regime, MarketRegime::TurbulentChaos);
+    }
+
+    #[test]
+    fn test_gatekeeper_triggers_on_liquidity_vacuum_without_volume() {
+        // ⚡ Nến trượt rỗng thanh khoản: span = 4.8 ATR (vượt vacuum_atr_threshold = 4.5) dù Z_vol = 0.5 thấp
+        let config = HeliosConfigV3::default();
+        let len = 20;
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1995.0; len];
+
+        // Nến sốc cạn kiệt thanh khoản tại i = 5: span = 48.0 / 10.0 = 4.8 ATR
+        highs[5] = 2024.0;
+        lows[5] = 1976.0;
+
+        let raw_cache = RawDataCache {
+            datetime: Arc::new(vec![0i64; len]),
+            open: Arc::new(vec![2000.0; len]),
+            high: Arc::new(highs),
+            low: Arc::new(lows),
+            close: Arc::new(vec![2000.0; len]),
+            volume: Arc::new(vec![100.0; len]),
+            custom_columns: HashMap::new(),
+        };
+
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i: 5,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        sensors.natr = Arc::new(vec![0.50; len]);
+        sensors.micro_natr = Arc::new(vec![0.10; len]);
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        sensors.vol_z_score = Arc::new(vec![0.5; len]); // Volume Z thấp bình thường
+        matrix.chaos_index = Arc::new(vec![0.20; len]);
+
+        let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
+        assert!(!eval.passed, "Liquidity vacuum span 4.8 ATR phải bị VETO dù volume thấp!");
+        assert_eq!(eval.veto_reason, Some(GateVetoReason::FlashCrashFreeze));
+        assert!(eval.is_shock_freeze_active);
+    }
+
+    #[test]
+    fn test_gatekeeper_cools_down_and_resumes_cleanly_after_shock() {
+        // ⚡ Nến sốc xảy ra tại i = 5 (span = 4.0 ATR, Z_vol = 4.5).
+        // Với freeze_bars = 20: Trong các nến i = 6..24, Cầu dao phải duy trì đóng băng (FlashCrashFreeze).
+        // Tại nến i = 25 (khi nến sốc trôi khỏi cửa sổ 20 bars lookback): Cầu dao phải tự động mở lại (PASS).
+        let config = HeliosConfigV3::default();
+        assert_eq!(config.circuit_breaker.freeze_bars, 20);
+
+        let len = 35;
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1995.0; len];
+
+        // Nến sốc duy nhất tại i = 5
+        highs[5] = 2020.0;
+        lows[5] = 1980.0;
+
+        let raw_cache = RawDataCache {
+            datetime: Arc::new(vec![0i64; len]),
+            open: Arc::new(vec![2000.0; len]),
+            high: Arc::new(highs),
+            low: Arc::new(lows),
+            close: Arc::new(vec![2000.0; len]),
+            volume: Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        sensors.natr = Arc::new(vec![0.50; len]);
+        sensors.micro_natr = Arc::new(vec![0.10; len]);
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; len]);
+        sensors.adx = Arc::new(vec![30.0; len]);
+        let mut vol_z = vec![0.0; len];
+        vol_z[5] = 4.5;
+        sensors.vol_z_score = Arc::new(vol_z);
+        matrix.chaos_index = Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; len]);
+
+        // Kiểm tra tại nến i = 15 (10 bars sau cú sốc): vẫn đang trong thời gian đóng băng 20 nến
+        let tick_frozen = TickContext {
+            i: 15,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let eval_frozen = RegimeGatekeeper::evaluate(&tick_frozen, &sensors, &matrix, &config);
+        assert!(!eval_frozen.passed, "Bar 15 (10 bars sau shock) phải tiếp tục bị đóng băng!");
+        assert_eq!(eval_frozen.veto_reason, Some(GateVetoReason::FlashCrashFreeze));
+
+        // Kiểm tra tại nến i = 24 (19 bars sau cú sốc: 24 - 20 + 1 = 5, nến 5 vẫn còn trong cửa sổ)
+        let tick_last_frozen = TickContext {
+            i: 24,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let eval_last = RegimeGatekeeper::evaluate(&tick_last_frozen, &sensors, &matrix, &config);
+        assert!(!eval_last.passed, "Bar 24 vẫn còn chứa nến 5 trong cửa sổ 20 bars!");
+        assert_eq!(eval_last.veto_reason, Some(GateVetoReason::FlashCrashFreeze));
+
+        // Kiểm tra tại nến i = 25 (20 bars sau cú sốc: 25 - 20 + 1 = 6, nến sốc 5 đã trôi ra ngoài cửa sổ!)
+        let tick_resumed = TickContext {
+            i: 25,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let eval_resumed = RegimeGatekeeper::evaluate(&tick_resumed, &sensors, &matrix, &config);
+        assert!(eval_resumed.passed, "Bar 25 cú sốc đã trôi khỏi cửa sổ 20 bars, Cầu dao phải tự động mở lại bình thường!");
+        assert_eq!(eval_resumed.veto_reason, None);
+        assert!(!eval_resumed.is_shock_freeze_active);
+    }
+
+    #[test]
+    fn test_gatekeeper_ignores_normal_breakout_candle() {
+        // ⚡ Nến bứt phá lành mạnh 2.2 ATR và Z_vol = 3.0 (< ngưỡng shock 3.5 ATR và 4.0 Z_vol) => Không báo động giả!
+        let config = HeliosConfigV3::default();
+        let len = 20;
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1995.0; len];
+
+        // Nến breakout bình thường tại i = 5: span = 22.0 / 10.0 = 2.2 ATR
+        highs[5] = 2011.0;
+        lows[5] = 1989.0;
+
+        let raw_cache = RawDataCache {
+            datetime: Arc::new(vec![0i64; len]),
+            open: Arc::new(vec![2000.0; len]),
+            high: Arc::new(highs),
+            low: Arc::new(lows),
+            close: Arc::new(vec![2000.0; len]),
+            volume: Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i: 5,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        sensors.natr = Arc::new(vec![0.50; len]);
+        sensors.micro_natr = Arc::new(vec![0.10; len]);
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; len]);
+        sensors.adx = Arc::new(vec![30.0; len]);
+        let mut vol_z = vec![0.0; len];
+        vol_z[5] = 3.0; // Z_vol = 3.0 (< 4.0)
+        sensors.vol_z_score = Arc::new(vol_z);
+        matrix.chaos_index = Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; len]);
+
+        let eval = RegimeGatekeeper::evaluate(&tick, &sensors, &matrix, &config);
+        assert!(eval.passed, "Nến bứt phá lành mạnh 2.2 ATR không được kích hoạt Cầu dao Flash Crash!");
+        assert_eq!(eval.veto_reason, None);
+        assert!(!eval.is_shock_freeze_active);
     }
 }

@@ -1153,6 +1153,17 @@ mod tests {
         assert!(has_pb_max_dist, "defs phải chứa tactical_sniper.pullback.max_pullback_dist_atr!");
         assert!(has_pb_inval, "defs phải chứa tactical_sniper.pullback.invalidation_buffer_atr!");
 
+        // ⚡ TODO-AUDIT-NEW-161 (GATE-FLASH-CRASH-BREAKER): 4 gen của Cầu Dao Khẩn Cấp Flash Crash & Liquidity Vacuum
+        let has_cb_atr_shock = defs.iter().any(|(name, _)| name.contains("circuit_breaker.atr_shock_threshold"));
+        let has_cb_vol_z = defs.iter().any(|(name, _)| name.contains("circuit_breaker.vol_z_shock_threshold"));
+        let has_cb_vacuum = defs.iter().any(|(name, _)| name.contains("circuit_breaker.vacuum_atr_threshold"));
+        let has_cb_freeze = defs.iter().any(|(name, _)| name.contains("circuit_breaker.freeze_bars"));
+        assert!(has_cb_atr_shock, "defs phải chứa circuit_breaker.atr_shock_threshold!");
+        assert!(has_cb_vol_z, "defs phải chứa circuit_breaker.vol_z_shock_threshold!");
+        assert!(has_cb_vacuum, "defs phải chứa circuit_breaker.vacuum_atr_threshold!");
+        assert!(has_cb_freeze, "defs phải chứa circuit_breaker.freeze_bars!");
+        assert_eq!(width, 110, "DNA_WIDTH phải là 110 chiều sau khi thêm 4 gen của Cầu Dao Flash Crash!");
+
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
         assert_eq!(count_struct_sl, 3, "defs phải chứa chính xác 3 gene struct_sl_buffer_atr cho 3 Scanners (pullback, momentum, absorption)!");
 

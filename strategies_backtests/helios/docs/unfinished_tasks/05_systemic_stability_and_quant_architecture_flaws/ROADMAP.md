@@ -201,14 +201,14 @@
 | 08 | `P2` | `[ ]` | **`TODO-AUDIT-NEW-162`** | Bộ Lọc Khử Ô Nhiễm Phương Sai Z-Score Bằng Robust Dispersion / Winsorization / MAD (`SENS-ROBUST-ZSCORE`) | [TODO.md#L886](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L886) | `strategies_backtests/helios/src/utils/normalization.rs`, `sensors.rs`, `matrix.rs` |
 
 ### 📦 Cụm C: Cổng Vào Chiến Lược & Phân Cực Chế Độ Thị Trường (`helios::gatekeeper`)
-**Quy mô:** `4 tasks` (Hoàn thành: `2`, P0: `0`, P1: `4`, P2: `0`, P3: `0`)
+**Quy mô:** `4 tasks` (Hoàn thành: `3`, P0: `0`, P1: `4`, P2: `0`, P3: `0`)
 
 | STT | Ưu Tiên | Trạng Thái | Mã Task | Tên Nhiệm Vụ | Link Reference Trong `TODO.md` | File Mã Nguồn Mục Tiêu |
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
 | 01 | `P1` | `[x]` | **`TODO-AUDIT-NEW-24`** | Tách Bạch Micro NATR vs Macro NATR Cho Cầu Dao Flatline (`NEW-NATR-4H-BLIND`) | [TODO.md#L210](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L210) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:24-32` |
 | 02 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-114`** | Nâng Cấp Phân Luồng Gatekeeper Cho Phép RangeOsc/Absorption Hoạt Động Khi Nén Biến Động (`H-GATE-01`) | [TODO.md#L600](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L600) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:140-152` |
 | 03 | `P1` | `[x]` | **`TODO-AUDIT-NEW-115`** | Kiến Thiết Bộ Phân Loại Chế Độ Thị Trường Vĩ Mô Macro Regime Classifier (`H-GATE-02`) | [TODO.md#L604](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L604) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:48-67` |
-| 04 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-161`** | Kiến Thiết Cầu Dao Khẩn Cấp Flash Crash & Liquidity Shock Circuit Breaker Tại Gateway (`GATE-FLASH-CRASH-BREAKER`) | [TODO.md#L879](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L879) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `matrix.rs` |
+| 04 | `P1` | `[x]` | **`TODO-AUDIT-NEW-161`** | Kiến Thiết Cầu Dao Khẩn Cấp Flash Crash & Liquidity Shock Circuit Breaker Tại Gateway (`GATE-FLASH-CRASH-BREAKER`) | [TODO.md#L938](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L938) | `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `config.rs`, `telemetry/defense_ledger.rs` |
 
 ### 📦 Cụm D: Động Cơ Đấu Thầu Tín Hiệu & Hòa Giải Xung Đột (`helios::arbiter`)
 **Quy mô:** `17 tasks` (Hoàn thành: `6`, P0: `1`, P1: `15`, P2: `1`, P3: `0`)

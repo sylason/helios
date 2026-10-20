@@ -28,6 +28,8 @@ pub struct DefenseLedger {
     // -------------------------------------------------------------------------
     /// Số thanh nến được né bão biến động hỗn loạn (Chaos Whipsaw)
     pub chaos_whipsaw_bars: usize,
+    /// ⚡ Số thanh nến bị phong tỏa bởi Cầu Dao Khẩn Cấp Flash Crash & Liquidity Vacuum
+    pub flash_crash_freeze_bars: usize,
     /// Số thanh nến bị chặn vì sàn biến động chết / tắt thanh khoản (Flatline)
     pub volatility_flatline_bars: usize,
     /// Tổng số lần chuyển đổi trạng thái (Vào bão / Ra khỏi bão)
@@ -105,6 +107,21 @@ impl DefenseLedger {
             }
 
             let msg = match reason {
+                GateVetoReason::FlashCrashFreeze => {
+                    self.flash_crash_freeze_bars += 1;
+                    if self.prev_gate_veto.is_none() {
+                        self.prev_gate_veto = Some(reason);
+                        self.veto_start_bar = current_bar;
+                        self.veto_start_ts = current_ts;
+                        self.gatekeeper_state_transitions += 1;
+                        Some(format!(
+                            "⚡ [GATEKEEPER ENGAGED] Bar: {} | Veto: FlashCrashFreeze | Kinetic Shock detected in lookback! | Entering Shelter!",
+                            current_bar
+                        ))
+                    } else {
+                        None
+                    }
+                }
                 GateVetoReason::ChaosWhipsaw => {
                     self.chaos_whipsaw_bars += 1;
                     if self.prev_gate_veto.is_none() {
@@ -269,6 +286,7 @@ impl DefenseLedger {
     /// Định dạng Bảng Sổ Cái Tổng Kết Ma Trận Phòng Thủ Vốn (FINAL DEFENSE LEDGER)
     pub fn format_summary_table(&self) -> String {
         let chaos_hours = self.chaos_whipsaw_bars as f64 / 60.0;
+        let freeze_hours = self.flash_crash_freeze_bars as f64 / 60.0;
         let flatline_hours = self.volatility_flatline_bars as f64 / 60.0;
 
         let mut lines = Vec::new();
@@ -279,6 +297,10 @@ impl DefenseLedger {
         lines.push(format!(
             "║    - Chaos Whipsaw Storm Sheltered : {:>8} bars ({:>5.1} hrs né bão hỗn loạn)                        ║",
             self.chaos_whipsaw_bars, chaos_hours
+        ));
+        lines.push(format!(
+            "║    - Flash Crash Shock Frozen      : {:>8} bars ({:>5.1} hrs né sốc sập nến)                         ║",
+            self.flash_crash_freeze_bars, freeze_hours
         ));
         lines.push(format!(
             "║    - Volatility Flatline Blocked   : {:>8} bars ({:>5.1} hrs né sàn chết thanh khoản)                ║",
@@ -465,5 +487,48 @@ mod tests {
         let summary = ledger.format_summary_table();
         assert!(summary.contains("CAPITAL DEFENSE MATRIX: OBSERVABILITY & AUDIT LEDGER"));
         assert!(summary.contains("Sniper Structural SL Vetoed"));
+        assert!(summary.contains("Flash Crash Shock Frozen"));
+    }
+
+    #[test]
+    fn test_gatekeeper_flash_crash_freeze_edge_detection() {
+        let mut ledger = DefenseLedger::new();
+
+        let eval_shock = GateEvaluation {
+            passed: false,
+            veto_reason: Some(GateVetoReason::FlashCrashFreeze),
+            current_chaos: 0.30,
+            market_natr_pct: 0.80,
+            is_shock_freeze_active: true,
+            ..Default::default()
+        };
+
+        let msg_start = ledger.on_gatekeeper_tick(100, 100_000, &eval_shock);
+        assert!(msg_start.is_some());
+        let alert = msg_start.unwrap();
+        assert!(alert.contains("FlashCrashFreeze"));
+        assert!(alert.contains("Kinetic Shock detected in lookback"));
+        assert_eq!(ledger.flash_crash_freeze_bars, 1);
+        assert_eq!(ledger.gatekeeper_state_transitions, 1);
+
+        // Nến kế tiếp vẫn bị freeze: không phát lại alert nhưng tăng số bar
+        let msg_cont = ledger.on_gatekeeper_tick(101, 101_000, &eval_shock);
+        assert!(msg_cont.is_none());
+        assert_eq!(ledger.flash_crash_freeze_bars, 2);
+
+        // Hết freeze: quay lại PASS
+        let eval_pass = GateEvaluation {
+            passed: true,
+            veto_reason: None,
+            current_chaos: 0.20,
+            market_natr_pct: 0.50,
+            is_shock_freeze_active: false,
+            ..Default::default()
+        };
+        let msg_end = ledger.on_gatekeeper_tick(120, 120_000, &eval_pass);
+        assert!(msg_end.is_some());
+        assert_eq!(ledger.gatekeeper_state_transitions, 2);
+        assert_eq!(ledger.zones.len(), 1);
+        assert_eq!(ledger.zones[0].reason, "FLASH_CRASH_FREEZE");
     }
 }

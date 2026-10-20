@@ -21,6 +21,9 @@ pub struct HeliosConfigV3 {
     #[serde(default)]
     #[dna(skip)]
     pub macro_regime: MacroRegimeConfig,
+    #[dna(nest)]
+    #[serde(default)]
+    pub circuit_breaker: FlashCrashBreakerConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, DnaMappableMacro)]
@@ -476,6 +479,50 @@ fn default_min_trending_adx() -> f64 { 25.0 }
 fn default_range_squeeze_threshold() -> f64 { 0.65 }
 fn default_breakout_squeeze_threshold() -> f64 { 0.35 }
 fn default_min_breakout_adx() -> f64 { 20.0 }
+
+/// ============================================================================
+/// PHẦN 2.6: CẦU DAO KHẨN CẤP FLASH CRASH & LIQUIDITY SHOCK (CIRCUIT BREAKER CONFIG)
+/// ============================================================================
+/// Cấu hình các ngưỡng ngắt mạch khẩn cấp phát hiện nến sập/bơm dị thường và cạn kiệt sổ lệnh vi mô.
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct FlashCrashBreakerConfig {
+    /// ⚡ Ngưỡng biên độ nến (span / atr) kết hợp volume để xác nhận bão thanh lý (2.5 -> 6.0, step 0.25)
+    #[dna(min = 2.5, max = 6.0, step = 0.25)]
+    #[serde(default = "default_atr_shock_threshold")]
+    pub atr_shock_threshold: f64,
+
+    /// ⚡ Ngưỡng đột biến khối lượng Z-Score để xác nhận xả lũ (2.5 -> 5.0, step 0.25)
+    #[dna(min = 2.5, max = 5.0, step = 0.25)]
+    #[serde(default = "default_vol_z_shock_threshold")]
+    pub vol_z_shock_threshold: f64,
+
+    /// ⚡ Ngưỡng biên độ nến rỗng thanh khoản độc lập không cần volume (3.5 -> 7.0, step 0.5)
+    #[dna(min = 3.5, max = 7.0, step = 0.5)]
+    #[serde(default = "default_vacuum_atr_threshold")]
+    pub vacuum_atr_threshold: f64,
+
+    /// ⚡ Số nến đóng băng khẩn cấp phong tỏa mở vị thế mới (10 -> 40 nến 1m, step 5)
+    #[dna(min = 10.0, max = 40.0, step = 5.0)]
+    #[serde(default = "default_shock_freeze_bars", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub freeze_bars: usize,
+}
+
+impl Default for FlashCrashBreakerConfig {
+    fn default() -> Self {
+        Self {
+            atr_shock_threshold: default_atr_shock_threshold(),
+            vol_z_shock_threshold: default_vol_z_shock_threshold(),
+            vacuum_atr_threshold: default_vacuum_atr_threshold(),
+            freeze_bars: default_shock_freeze_bars(),
+        }
+    }
+}
+
+fn default_atr_shock_threshold() -> f64 { 3.5 }
+fn default_vol_z_shock_threshold() -> f64 { 4.0 }
+fn default_vacuum_atr_threshold() -> f64 { 4.5 }
+fn default_shock_freeze_bars() -> usize { 20 }
+
 
 /// ============================================================================
 /// PHẦN 3: BỘ TRỌNG TÀI & ĐẤU GIÁ TÍN HIỆU (ARBITER CONFIDENCE AUCTION CONFIG)
