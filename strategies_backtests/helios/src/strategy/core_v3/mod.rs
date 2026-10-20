@@ -1140,6 +1140,131 @@ mod tests {
     }
 
     #[test]
+    fn test_reversal_adx_hurricane_selling_rejection() {
+        // 🌪️ TODO-AUDIT-NEW-191 (REV-MACRO-GATE): Kiểm tra VETO Long khi KAMA âm nhẹ nhưng ADX vọt lên bão xả lũ
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2000.0; len]),
+            low: std::sync::Arc::new(vec![1950.0; len]),
+            close: std::sync::Arc::new(vec![1995.0; len]),
+            volume: std::sync::Arc::new(vec![2500.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i, equity: 1000.0, data_view: &data_view, indicator_manager: &indicator_manager,
+            trades: &trades, last_closed_trade: None, actions: &mut actions, position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![-3.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2100.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![25.0; len]);
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+        // Bão ADX = 48.0 (vượt trần mặc định 35.0)
+        sensors.adx = std::sync::Arc::new(vec![48.0; len]);
+
+        let config = HeliosConfigV3::default();
+
+        // KAMA chỉ hơi dốc nhẹ âm (-0.08 >= -0.20 thỏa mãn dốc), nhưng ADX = 48.0 >= 35.0 -> Bắt buộc VETO Long!
+        let mut matrix_storm = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix_storm.kama_slope_atr = std::sync::Arc::new(vec![-0.08; len]);
+        let prop_storm = ReversalScanner.scan(&tick, &sensors, &matrix_storm, &config);
+        assert!(prop_storm.is_none(), "ReversalScanner PHẢI từ chối Long khi xu hướng giảm vĩ mô có bão ADX (48.0 >= 35.0)!");
+
+        // Khi bão ADX hạ nhiệt (22.0 < 35.0) với cùng độ dốc KAMA an toàn (-0.08) -> Phê duyệt!
+        let mut sensors_calm = sensors.clone();
+        sensors_calm.adx = std::sync::Arc::new(vec![22.0; len]);
+        let matrix_calm = MarketMatrixV3::from_sensors(&config, &sensors_calm);
+        let prop_calm = ReversalScanner.scan(&tick, &sensors_calm, &matrix_calm, &config);
+        assert!(prop_calm.is_some(), "ReversalScanner PHẢI phê duyệt khi bão ADX đã suy yếu (22.0 < 35.0)!");
+    }
+
+    #[test]
+    fn test_reversal_adx_hurricane_buying_rejection() {
+        // 🌪️ TODO-AUDIT-NEW-191 (REV-MACRO-GATE): Kiểm tra VETO Short khi KAMA dương nhẹ nhưng ADX vọt lên bão tăng vĩ mô
+        use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let i = len - 1;
+
+        // Dựng nến Shooting Star đè đầu tạo Short Reversal: Open=2000, Low=2000, High=2050, Close=2005
+        // Range = 50, CLV = (2*2005 - 2050 - 2000)/50 = -40/50 = -0.80 <= -0.20
+        // Upper wick = (2050 - 2005)/50 = 45/50 = 0.90 >= 0.20
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2000.0; len];
+        let mut lows = vec![2000.0; len];
+        let mut closes = vec![2000.0; len];
+        opens[i - 1] = 1950.0; highs[i - 1] = 2020.0; lows[i - 1] = 1950.0; closes[i - 1] = 2015.0;
+        opens[i] = 2010.0; highs[i] = 2050.0; lows[i] = 2000.0; closes[i] = 2005.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![2500.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i, equity: 1000.0, data_view: &data_view, indicator_manager: &indicator_manager,
+            trades: &trades, last_closed_trade: None, actions: &mut actions, position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        sensors.z_score = std::sync::Arc::new(vec![3.0; len]); // Quá mua
+        sensors.kama_mid = std::sync::Arc::new(vec![1900.0; len]); // KAMA ở dưới (1900 < 2005)
+        sensors.atr_sl = std::sync::Arc::new(vec![15.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![85.0; len]); // MFI >= 70.0 (quá tải)
+        sensors.vol_sma = std::sync::Arc::new(vec![1000.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![55.0; len]); // Bão tăng giá ADX = 55.0
+
+        let config = HeliosConfigV3::default();
+
+        // KAMA hơi dốc lên dương (+0.08 <= 0.20 thỏa mãn dốc), nhưng ADX = 55.0 >= 35.0 -> Bắt buộc VETO Short cản tàu!
+        let mut matrix_storm = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix_storm.kama_slope_atr = std::sync::Arc::new(vec![0.08; len]);
+        let prop_storm = ReversalScanner.scan(&tick, &sensors, &matrix_storm, &config);
+        assert!(prop_storm.is_none(), "ReversalScanner PHẢI từ chối Short cản tàu khi xu hướng tăng vĩ mô có bão ADX (55.0 >= 35.0)!");
+
+        // Khi bão ADX hạ nhiệt (20.0 < 35.0) với cùng độ dốc KAMA an toàn (+0.08) -> Phê duyệt Short!
+        let mut sensors_calm = sensors.clone();
+        sensors_calm.adx = std::sync::Arc::new(vec![20.0; len]);
+        let matrix_calm = MarketMatrixV3::from_sensors(&config, &sensors_calm);
+        let prop_calm = ReversalScanner.scan(&tick, &sensors_calm, &matrix_calm, &config);
+        assert!(prop_calm.is_some(), "ReversalScanner PHẢI phê duyệt Short khi bão ADX đã suy yếu (20.0 < 35.0)!");
+    }
+
+    #[test]
     fn test_reversal_rr_hurdle_gate() {
         use crate::strategy::core_v3::scanners::reversal::ReversalScanner;
         use crate::strategy::core_v3::arbiter::TacticalScanner;
@@ -1408,7 +1533,33 @@ mod tests {
         assert!(has_cb_vol_z, "defs phải chứa circuit_breaker.vol_z_shock_threshold!");
         assert!(has_cb_vacuum, "defs phải chứa circuit_breaker.vacuum_atr_threshold!");
         assert!(has_cb_freeze, "defs phải chứa circuit_breaker.freeze_bars!");
-        assert_eq!(width, 110, "DNA_WIDTH phải là 110 chiều sau khi thêm 4 gen của Cầu Dao Flash Crash!");
+
+        // 🌪️ TODO-AUDIT-NEW-191 (REV-MACRO-GATE): 2 gen Cổng Chặn Sức Mạnh Xu Hướng Vĩ Mô Cho Reversal
+        let rev_slope_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.reversal.max_adverse_kama_slope"));
+        assert!(rev_slope_def.is_some(), "defs phải chứa tactical_sniper.reversal.max_adverse_kama_slope!");
+        let (_, rev_slope_attr) = rev_slope_def.unwrap();
+        match rev_slope_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert!((min - 0.02).abs() < 1e-12, "max_adverse_kama_slope min phải là 0.02");
+                assert!((max - 0.80).abs() < 1e-12, "max_adverse_kama_slope max phải là 0.80");
+                assert_eq!(*step, Some(0.02), "max_adverse_kama_slope step phải là Some(0.02)");
+            }
+            _ => panic!("max_adverse_kama_slope phải là ParamDefinition::Range"),
+        }
+
+        let rev_adx_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.reversal.max_adverse_adx"));
+        assert!(rev_adx_def.is_some(), "defs phải chứa tactical_sniper.reversal.max_adverse_adx!");
+        let (_, rev_adx_attr) = rev_adx_def.unwrap();
+        match rev_adx_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert!((min - 15.0).abs() < 1e-12, "max_adverse_adx min phải là 15.0");
+                assert!((max - 75.0).abs() < 1e-12, "max_adverse_adx max phải là 75.0");
+                assert_eq!(*step, Some(5.0), "max_adverse_adx step phải là Some(5.0)");
+            }
+            _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
+        }
+
+        assert_eq!(width, 112, "DNA_WIDTH phải là 112 chiều sau khi thêm 2 gen toàn năng của Reversal Macro Gate (TODO-AUDIT-NEW-191)!");
 
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
         assert_eq!(count_struct_sl, 3, "defs phải chứa chính xác 3 gene struct_sl_buffer_atr cho 3 Scanners (pullback, momentum, absorption)!");

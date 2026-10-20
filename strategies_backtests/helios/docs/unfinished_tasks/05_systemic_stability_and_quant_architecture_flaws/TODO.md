@@ -270,9 +270,19 @@
 - [ ] **TODO-AUDIT-NEW-32: Vá Lỗ Hổng Inverted SL & Động Hóa MMR Theo Tier Sàn (`TODO-ARB-02-R2`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:84-138`
   - **Mô tả:** Bổ sung `is_long: bool` vào `validate_structural_sl` (Long bắt buộc $SL < P$, Short $SL > P$); nạp MMR động theo Tier sàn thay vì áp đặt cứng $1.0\%$ làm tê liệt đòn bẩy cao $\ge 100\text{x}$.
-- [ ] **TODO-AUDIT-NEW-33: Triển Khai Post-Storm Ramp-up Filter Sau Bão (`POST-STORM-BLINDNESS`)**
+- [-] **TODO-AUDIT-NEW-33: Triển Khai Post-Storm Ramp-up Filter Sau Bão (`POST-STORM-BLINDNESS`) (PENDING: TẠM DỪNG CHỜ THỰC NGHIỆM)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `gatekeeper.rs:177-206`
-  - **Mô tả:** Trong $M=3$ nến đầu tiên sau khi Gatekeeper mở khóa sau bão, tự động giảm $50\%$ Position Size và yêu cầu ngưỡng tự tin cao hơn $+0.15$ để phòng ngừa trượt giá và râu nến dư chấn khi sổ lệnh mỏng.
+  - **Mô tả:** [PENDING: ĐỐI CHẤT PHƯƠNG ÁN A & B TRƯỚC KHI QUYẾT ĐỊNH] Đánh giá nhu cầu kiểm soát rủi ro sau khi thoát bão biến động cực hạn (`CircuitBreaker` mở lại) để phòng ngừa trượt giá và râu nến quét SL khi sổ lệnh còn mỏng.
+    - **Bản chất vấn đề:** Note 22 lo ngại hệ thống mở khóa quá sớm ngay sau bão lớn, dẫn đến việc vào lệnh trong vùng dư chấn biến động cao khi thị trường chưa ổn định.
+    - **Đối chất Phương án A (Hệ thống phòng vệ 4 tầng hiện tại đã tự giải quyết):**
+      1. *Dải trễ Hysteresis 5 bars (`gatekeeper.rs:273-330`):* Cầu dao không mở lại vội vã mà duy trì bộ đệm trễ $[t_{\text{exit}}, t_{\text{enter}}]$. Chỉ khi biến động thực sự hạ nhiệt bền vững mới mở khóa.
+      2. *Micro Liquidity Floor (`gatekeeper.rs:211-230`):* Chặn tuyệt đối khi `micro_natr` nhỏ hơn phí ma sát sàn Taker, ngăn vào lệnh khi nến tê liệt / sổ lệnh mất thanh khoản.
+      3. *Risk Parity Sizing tự nhiên (`risk.rs:291-295`):* Quy mô vị thế tính theo $\text{Position\_USD} = \text{Risk\_USD} / \text{sl\_dist\_pct}$. Sau bão biến động cao, râu nến rộng khiến khoảng cách SL lớn $\implies$ Hệ thống toán học đã **tự động co nhỏ vị thế** để bảo toàn mức lỗ hằng số (\$ USD Risk). Việc ép giảm cứng 50% size là bẫy phạt đúp (double-penalty) thiếu cơ sở.
+      4. *Bảo toàn vị thế loại trừ tuyệt đối (`core_v3/mod.rs:232-238`):* Khi lệnh đang mở (`is_pos_open = true`), bot cấm hoàn toàn lệnh mới. Lệnh cũ phải đóng toàn phần $100\%$ về $0.0$ trước khi lệnh mới được xem xét.
+    - **Đối chất Phương án B (Thêm bộ lọc định lượng: Kaufman Efficiency Ratio KER / Chaos Index / Thanh khoản sau bão):**
+      1. *Ưu điểm lý thuyết:* Thay vì đếm mù quáng $M=3$ nến hay giảm 50% size cảm tính, ta có thể dùng $\text{KER} \ge \text{threshold}$ hoặc `chaos_index < 0.60` để xác nhận thị trường không còn hỗn loạn dao động do dự.
+      2. *Nhược điểm & Bẫy triệt tiêu cơ hội (Blanket Veto):* Ép KER cao ngay sau bão sẽ vô tình **triệt tiêu hoàn toàn các cơ hội gom hàng tạo đáy** kinh điển của `AbsorptionScout` (vốn xuất hiện trong vùng nén tích lũy đáy biên độ hẹp với KER thấp) hoặc bắt dao cạn kiệt của `RangeOscillator`.
+    - **Kết luận:** Tạm hoãn (PENDING) không đưa thêm rào cản đếm nến hardcoded hay ép chỉ số làm biến dạng các playbook. Bảo lưu theo dõi trên dữ liệu Telemetry thực tế từ Walk-Forward Out-Of-Sample dài hạn. Chỉ can thiệp nếu nhật ký thực nghiệm phát hiện tổn thất tập trung đặc thù sau nến thoát bão.
 
 ---
 
@@ -1166,12 +1176,13 @@
     - [x] `test_reversal_rejects_poor_low_without_excess_wick`
     - [x] `test_reversal_approves_when_clv_ge_0_50_with_strong_wick`
 
-- [ ] **TODO-AUDIT-NEW-191: Cổng Chặn Sức Mạnh Xu Hướng Vĩ Mô (Macro Trend Invalidation Gate Cho Reversal: Cấm Long Khi KAMA 1h Dốc Mạnh Và ADX 1h > 35) (`REV-MACRO-GATE`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs:85-102`
-  - **Mô tả:** `reversal.rs` hiện tại để trống `_matrix`, hoàn toàn mù độ dốc KAMA và Chaos vĩ mô. Khi thị trường đang rơi tự do theo tin tức xả lũ, Reversal liên tục bắt đáy và bị xe tăng nghiền nát. Bổ sung Macro Veto: Cấm bắt Long Reversal nếu $KAMA\_Slope_{1h} \le -\text{slope\_panic}$ hoặc $ADX_{1h} \ge 35$; chỉ cho phép bắt Reversal khi xu hướng vĩ mô đã có dấu hiệu giảm tốc (Deceleration).
+- [x] **TODO-AUDIT-NEW-191: Cổng Chặn Sức Mạnh Xu Hướng Vĩ Mô (Macro Trend Invalidation Gate Cho Reversal: Cấm Long Khi KAMA 1h Dốc Mạnh Và ADX 1h > 35) (`REV-MACRO-GATE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** Đã kích hoạt `matrix` và thiết lập Cổng Chặn Phòng Vệ Kép (Dual Macro Trend Hurdle - Logic OR). Bổ sung 2 gen DNA toàn năng `max_adverse_kama_slope` (0.02..0.80, step 0.02) và `max_adverse_adx` (15.0..75.0, step 5.0) vào `TacticalReversalParams`, nâng `DNA_WIDTH` lên 112 chiều. VETO Long khi KAMA dốc cắm đứng hoặc KAMA âm kèm ADX bão xả lũ; VETO Short khi KAMA phóng đứng hoặc KAMA dương kèm ADX bão tăng giá.
   - **Unit Tests:**
-    - [ ] `test_reversal_vetoed_when_1h_kama_slope_is_steeply_dumping`
-    - [ ] `test_reversal_allowed_when_macro_trend_shows_momentum_exhaustion`
+    - [x] `test_reversal_kama_slope_adverse_rejection`
+    - [x] `test_reversal_adx_hurricane_selling_rejection`
+    - [x] `test_reversal_adx_hurricane_buying_rejection`
 
 - [ ] **TODO-AUDIT-NEW-192: Cơ Chế Thoát Lệnh Khi Hồi Quy Đàn Hồi Thất Bại (Elastic Snap-back Stagnation Exit TTL 5 Nến) & Cầu Dao Cooldown 2 Lệnh Thua Liên Tiếp (`REV-ELASTIC-STAGNATION-AND-COOLDOWN`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `reversal.rs`, `arbiter.rs`

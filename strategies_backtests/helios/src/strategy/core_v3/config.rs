@@ -927,9 +927,15 @@ pub struct TacticalReversalParams {
     #[serde(default = "default_reversal_min_rr_ratio")]
     pub min_rr_ratio: f64,
 
-    /// 🌪️ Độ dốc KAMA nghịch đảo tối đa (chống bắt dao rơi xả lũ, mặc định 0.40)
+    /// 🌪️ REV-MACRO-GATE: Độ dốc KAMA nghịch đảo tối đa cấm bắt dao rơi (0.02 -> 0.80, Step 0.02 -> 40 nấc, mặc định 0.20)
+    #[dna(min = 0.02, max = 0.80, step = 0.02)]
     #[serde(default = "default_reversal_max_adverse_kama_slope")]
     pub max_adverse_kama_slope: f64,
+
+    /// 🌪️ REV-MACRO-GATE: Cường độ xu hướng ADX nghịch chiều tối đa cấm cản đầu tàu (15.0 -> 75.0, Step 5.0 -> 13 nấc, mặc định 35.0)
+    #[dna(min = 15.0, max = 75.0, step = 5.0)]
+    #[serde(default = "default_reversal_max_adverse_adx")]
+    pub max_adverse_adx: f64,
 
     /// ⚡ Chỉ số bão hỗn loạn Whipsaw tối đa (mặc định 0.65)
     #[serde(default = "default_reversal_max_chaos_index")]
@@ -952,6 +958,7 @@ impl Default for TacticalReversalParams {
             w_displacement: default_reversal_w_displacement(),
             min_rr_ratio: default_reversal_min_rr_ratio(),
             max_adverse_kama_slope: default_reversal_max_adverse_kama_slope(),
+            max_adverse_adx: default_reversal_max_adverse_adx(),
             max_chaos_index: default_reversal_max_chaos_index(),
         }
     }
@@ -1507,6 +1514,10 @@ fn default_reversal_min_rr_ratio() -> f64 {
 
 fn default_reversal_max_adverse_kama_slope() -> f64 {
     0.40
+}
+
+fn default_reversal_max_adverse_adx() -> f64 {
+    35.0
 }
 
 fn default_reversal_max_chaos_index() -> f64 {

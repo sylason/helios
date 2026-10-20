@@ -51,7 +51,9 @@ impl TacticalScanner for ReversalScanner {
         let rev_cfg = &config.tactical_sniper.reversal;
         let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
         let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
-        let max_slope = if rev_cfg.max_adverse_kama_slope <= 0.0 { 0.40 } else { rev_cfg.max_adverse_kama_slope };
+        let adx = sensors.adx.get(i).copied().unwrap_or(0.0);
+        let max_slope = if rev_cfg.max_adverse_kama_slope <= 0.0 { 0.40 } else { rev_cfg.max_adverse_kama_slope.clamp(0.02, 0.80) };
+        let max_adx = if rev_cfg.max_adverse_adx <= 0.0 { 35.0 } else { rev_cfg.max_adverse_adx.clamp(15.0, 75.0) };
         let max_chaos = if rev_cfg.max_chaos_index <= 0.0 { 0.65 } else { rev_cfg.max_chaos_index };
 
         // 🛡️ Task REV-51: Chốt chặn bão hỗn loạn Whipsaw
@@ -99,10 +101,14 @@ impl TacticalScanner for ReversalScanner {
         // 🛡️ Task REV-04: Bộ Lọc Dòng Tiền Kiệt Sức MFI (Money Flow Exhaustion Filter)
         let mfi_thresh = if rev_cfg.mfi_reversal_thresh <= 0.0 { 30.0 } else { rev_cfg.mfi_reversal_thresh.clamp(10.0, 50.0) };
 
-        // Xác định hướng tín hiệu và kiểm tra đồng thời CLV + Excess Wick + MFI + KAMA Slope + Dual-bar
+        // Xác định hướng tín hiệu và kiểm tra đồng thời CLV + Excess Wick + MFI + KAMA Slope + Dual Macro Hurdle (ADX) + Dual-bar
         let signal_type = if z_score < 0.0 && close_price < kama_mid {
-            // Long Reversal: Cần nến rút chân (CLV >= min_clv), râu dưới từ chối rõ rệt (lower_wick_ratio >= min_wick_ratio) và dòng tiền bán kiệt sức (MFI <= mfi_thresh)
-            if clv < min_clv || lower_wick_ratio < min_wick_ratio || mfi > mfi_thresh || kama_slope < -max_slope {
+            // Long Reversal: Cần nến rút chân (CLV >= min_clv), râu dưới từ chối rõ rệt (lower_wick_ratio >= min_wick_ratio),
+            // dòng tiền bán kiệt sức (MFI <= mfi_thresh), không rơi tự do (kama_slope >= -max_slope),
+            // và không bắt dao rơi trong bão xả lũ vĩ mô (kama_slope < 0 && adx >= max_adx).
+            if clv < min_clv || lower_wick_ratio < min_wick_ratio || mfi > mfi_thresh 
+                || kama_slope < -max_slope || (kama_slope < 0.0 && adx >= max_adx) 
+            {
                 return None;
             }
 
@@ -118,8 +124,12 @@ impl TacticalScanner for ReversalScanner {
 
             SignalType::Long
         } else if z_score > 0.0 && close_price > kama_mid {
-            // Short Reversal: Cần nến đè đầu (CLV <= -min_clv), râu trên từ chối rõ rệt (upper_wick_ratio >= min_wick_ratio) và dòng tiền mua quá tải (MFI >= 100 - mfi_thresh)
-            if clv > -min_clv || upper_wick_ratio < min_wick_ratio || mfi < (100.0 - mfi_thresh) || kama_slope > max_slope {
+            // Short Reversal: Cần nến đè đầu (CLV <= -min_clv), râu trên từ chối rõ rệt (upper_wick_ratio >= min_wick_ratio),
+            // dòng tiền mua quá tải (MFI >= 100 - mfi_thresh), không phóng đứng (kama_slope <= max_slope),
+            // và không cản đầu tàu trong bão tăng vĩ mô (kama_slope > 0 && adx >= max_adx).
+            if clv > -min_clv || upper_wick_ratio < min_wick_ratio || mfi < (100.0 - mfi_thresh) 
+                || kama_slope > max_slope || (kama_slope > 0.0 && adx >= max_adx) 
+            {
                 return None;
             }
 
