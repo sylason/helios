@@ -51,12 +51,13 @@ impl TacticalScanner for TrendPBScanner {
                     .map(|s| (s / 0.20).clamp(-1.0, 1.0))
                     .unwrap_or(0.0)
             });
+        let kama_mid = sensors.kama_mid.get(i).copied().unwrap_or(f64::NAN);
         let stoch_k = sensors.stoch_trend_k.get(i).copied().unwrap_or(f64::NAN);
         let rsi = sensors.rsi_trend.get(i).copied().unwrap_or(f64::NAN);
         let z_score = sensors.z_score.get(i).copied().unwrap_or(0.0);
         let squeeze = matrix.squeeze_intensity.get(i).copied().unwrap_or(0.0);
 
-        if kama_slope.is_nan() || stoch_k.is_nan() || rsi.is_nan() || z_score.is_nan() || squeeze.is_nan() {
+        if kama_slope.is_nan() || kama_mid.is_nan() || stoch_k.is_nan() || rsi.is_nan() || z_score.is_nan() || squeeze.is_nan() {
             return None;
         }
 
@@ -79,6 +80,14 @@ impl TacticalScanner for TrendPBScanner {
         let buffer_mult = pb_cfg.struct_sl_buffer_atr.clamp(0.10, 1.20);
         let buffer = current_atr * buffer_mult;
 
+        // 🧭 Quy đổi ATR vi mô sang hệ quy chiếu khung thời gian KAMA (Scale-Invariant MTF ATR):
+        // sqrt(T_kama / T_atr) bảo đảm delta_kama luôn nhất quán dù KAMA chạy ở 15m, 1h hay 4h (TODO-SEM-02 / TODO-AUDIT-NEW-38)
+        let kama_tf_mins = config.indicators.kama.timeframe.to_minutes().max(1) as f64;
+        let atr_tf_mins = config.indicators.atr.timeframe.to_minutes().max(1) as f64;
+        let kama_equiv_atr = (current_atr * (kama_tf_mins / atr_tf_mins).max(1.0).sqrt()).max(1e-5);
+        let max_dist = pb_cfg.max_pullback_dist_atr.max(0.10);
+        let inval_floor = pb_cfg.invalidation_buffer_atr.max(0.05);
+
         let prev_stoch_k = if i >= 1 {
             sensors.stoch_trend_k.get(i - 1).copied().unwrap_or(stoch_k)
         } else {
@@ -97,6 +106,14 @@ impl TacticalScanner for TrendPBScanner {
         // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên + Hồi Quy Vi Mô + Lực Cầu Rút Chân)
         // -------------------------------------------------------------------------
         if kama_slope > slope_thresh {
+            // 🛡️ CHỐT CHẶN KHOẢNG CÁCH KAMA (TODO-AUDIT-NEW-38):
+            // delta_kama < -inval_floor: Giá đâm thủng sâu qua hỗ trợ KAMA (Breakdown Trap) -> VETO!
+            // delta_kama > max_dist: Giá lơ lửng trên không trung xa KAMA (Floating Ghost Pullback) -> VETO!
+            let delta_kama = (close - kama_mid) / kama_equiv_atr;
+            if delta_kama < -inval_floor || delta_kama > max_dist {
+                return None;
+            }
+
             // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống mua đu đỉnh phân phối
             if z_score > pb_cfg.max_boundary_z {
                 return None;
@@ -125,9 +142,10 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
+            let f_dist = sat_proximity(delta_kama.abs(), max_dist);
             let f_stoch = sat_proximity(stoch_k, stoch_thresh);
             let f_clv = ((clv - pb_cfg.min_clv) / (1.0 - pb_cfg.min_clv).max(1e-4)).clamp(0.0, 1.0);
-            let score_long = convex_combine(&[f_slope, f_stoch, f_clv], &[0.40, 0.30, 0.30]);
+            let score_long = convex_combine(&[f_slope, f_dist, f_stoch, f_clv], &[0.35, 0.25, 0.20, 0.20]);
 
             if score_long >= pb_cfg.min_activation_score {
                 // 🛡️ Structural SL neo chặt chẽ theo đáy nến vi mô hiện tại + đệm ATR chuẩn hóa
@@ -146,6 +164,14 @@ impl TacticalScanner for TrendPBScanner {
         // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống + Hồi Quy Vi Mô + Lực Cung Đè Đỉnh)
         // -------------------------------------------------------------------------
         else if kama_slope < -slope_thresh {
+            // 🛡️ CHỐT CHẶN KHOẢNG CÁCH KAMA (TODO-AUDIT-NEW-38):
+            // delta_kama < -inval_floor: Giá đâm thủng sâu lên trên kháng cự KAMA (Breakout Invalidation) -> VETO!
+            // delta_kama > max_dist: Giá lơ lửng ở đáy sâu xa KAMA (Floating Ghost Short) -> VETO!
+            let delta_kama = (kama_mid - close) / kama_equiv_atr;
+            if delta_kama < -inval_floor || delta_kama > max_dist {
+                return None;
+            }
+
             // 🛡️ CHỐT CHẶN BIÊN ĐỘ (BOUNDARY GUARD): Chống bán đuổi đáy hoảng loạn
             if z_score < -pb_cfg.max_boundary_z {
                 return None;
@@ -174,10 +200,12 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
+            let delta_short = delta_kama.abs();
+            let f_dist = sat_proximity(delta_short, max_dist);
             let stoch_dist = (100.0 - stoch_k).max(0.0);
             let f_stoch = sat_proximity(stoch_dist, stoch_thresh);
             let f_clv = ((-clv - pb_cfg.min_clv) / (1.0 - pb_cfg.min_clv).max(1e-4)).clamp(0.0, 1.0);
-            let score_short = convex_combine(&[f_slope, f_stoch, f_clv], &[0.40, 0.30, 0.30]);
+            let score_short = convex_combine(&[f_slope, f_dist, f_stoch, f_clv], &[0.35, 0.25, 0.20, 0.20]);
 
             if score_short >= pb_cfg.min_activation_score {
                 // 🛡️ Structural SL neo chặt chẽ theo đỉnh nến vi mô hiện tại + đệm ATR chuẩn hóa
@@ -200,7 +228,7 @@ impl TacticalScanner for TrendPBScanner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferro_trade::data::{RawDataCache, DataView};
+    use ferro_trade::data::{RawDataCache, DataView, Timeframe};
     use ferro_trade::backtest::manager::IndicatorManager;
     use ferro_trade::broker::position::Position;
     use smallvec::SmallVec;
@@ -257,10 +285,11 @@ mod tests {
         config.tactical_sniper.pullback.rsi_max_cap = 70.0;
         config.tactical_sniper.pullback.min_activation_score = 0.10;
         config.tactical_sniper.pullback.struct_sl_buffer_atr = 0.50;
+        config.tactical_sniper.pullback.max_pullback_dist_atr = 2.0;
 
         let mut sensors = HeliosSensors::default();
-        // Giả lập KAMA 4h nằm tít phía dưới cách 5% (1900.0 so với giá 2004.0)
-        sensors.kama_mid = std::sync::Arc::new(vec![1900.0; len]);
+        // Giả lập KAMA 15m nằm dưới giá (1998.0 so với giá 2004.0 -> delta_kama = (2004 - 1998)/(4 * sqrt(3)) = 6/6.93 = 0.86 <= 2.0)
+        sensors.kama_mid = std::sync::Arc::new(vec![1998.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]); // buffer = 4.0 * 0.5 = 2.0
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
@@ -314,6 +343,7 @@ mod tests {
         config.tactical_sniper.pullback.min_activation_score = 0.10;
 
         let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![1998.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
@@ -358,6 +388,7 @@ mod tests {
         config.tactical_sniper.pullback.struct_sl_buffer_atr = 0.50; // buffer = 4.0 * 0.5 = 2.0
 
         let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
@@ -407,6 +438,7 @@ mod tests {
         config.tactical_sniper.pullback.min_clv = 0.20;
 
         let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![1998.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
@@ -458,6 +490,7 @@ mod tests {
         stoch_falling[i] = 4.0;
 
         let mut sensors_falling = HeliosSensors::default();
+        sensors_falling.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_falling.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_falling.stoch_trend_k = std::sync::Arc::new(stoch_falling);
         sensors_falling.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
@@ -471,6 +504,7 @@ mod tests {
         stoch_hooked[i] = 4.0;
 
         let mut sensors_hooked = HeliosSensors::default();
+        sensors_hooked.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_hooked.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_hooked.stoch_trend_k = std::sync::Arc::new(stoch_hooked);
         sensors_hooked.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
@@ -480,6 +514,7 @@ mod tests {
 
         // Kịch bản C: Nến phẳng MTF do Forward-Fill (prev = 4.0, curr = 4.0) nhưng %K < %D (stoch_d = 6.0)
         let mut sensors_flat_falling = HeliosSensors::default();
+        sensors_flat_falling.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_flat_falling.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_flat_falling.stoch_trend_k = std::sync::Arc::new(vec![4.0; len]);
         sensors_flat_falling.stoch_trend_d = std::sync::Arc::new(vec![6.0; len]);
@@ -490,6 +525,7 @@ mod tests {
 
         // Kịch bản D: Nến phẳng MTF do Forward-Fill (prev = 4.0, curr = 4.0) nhưng %K >= %D (stoch_d = 3.0)
         let mut sensors_flat_hooked = HeliosSensors::default();
+        sensors_flat_hooked.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_flat_hooked.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_flat_hooked.stoch_trend_k = std::sync::Arc::new(vec![4.0; len]);
         sensors_flat_hooked.stoch_trend_d = std::sync::Arc::new(vec![3.0; len]);
@@ -532,6 +568,7 @@ mod tests {
 
         // Long bão hòa sàn 0.0: K = 0.0, D = 0.0
         let mut sensors_zero = HeliosSensors::default();
+        sensors_zero.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_zero.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_zero.stoch_trend_k = std::sync::Arc::new(vec![0.0; len]);
         sensors_zero.stoch_trend_d = std::sync::Arc::new(vec![0.0; len]);
@@ -545,6 +582,7 @@ mod tests {
 
         // Short bão hòa trần 100.0: K = 100.0, D = 100.0
         let mut sensors_hundred = HeliosSensors::default();
+        sensors_hundred.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_hundred.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_hundred.stoch_trend_k = std::sync::Arc::new(vec![100.0; len]);
         sensors_hundred.stoch_trend_d = std::sync::Arc::new(vec![100.0; len]);
@@ -611,6 +649,7 @@ mod tests {
         stoch_deadzone[i] = 22.0;
 
         let mut sensors_deadzone = HeliosSensors::default();
+        sensors_deadzone.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_deadzone.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_deadzone.stoch_trend_k = std::sync::Arc::new(stoch_deadzone);
         sensors_deadzone.stoch_trend_d = std::sync::Arc::new(vec![25.0; len]);
@@ -625,6 +664,7 @@ mod tests {
         stoch_rebound[i] = 26.0;
 
         let mut sensors_rebound = HeliosSensors::default();
+        sensors_rebound.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_rebound.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_rebound.stoch_trend_k = std::sync::Arc::new(stoch_rebound);
         sensors_rebound.stoch_trend_d = std::sync::Arc::new(vec![25.0; len]);
@@ -671,6 +711,7 @@ mod tests {
         stoch_fake[i] = 8.0;
 
         let mut sensors_fake = HeliosSensors::default();
+        sensors_fake.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_fake.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_fake.stoch_trend_k = std::sync::Arc::new(stoch_fake);
         sensors_fake.stoch_trend_d = std::sync::Arc::new(vec![12.0; len]);
@@ -685,6 +726,7 @@ mod tests {
         stoch_confirmed[i] = 9.0;
 
         let mut sensors_confirmed = HeliosSensors::default();
+        sensors_confirmed.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_confirmed.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_confirmed.stoch_trend_k = std::sync::Arc::new(stoch_confirmed);
         sensors_confirmed.stoch_trend_d = std::sync::Arc::new(vec![8.5; len]);
@@ -692,5 +734,160 @@ mod tests {
 
         let prop_confirmed = TrendPBScanner.scan(&tick, &sensors_confirmed, &matrix, &config);
         assert!(prop_confirmed.is_some(), "Hook Guard PHẢI phê duyệt khi K < Climax có đủ xác nhận kép (K > prev && K >= D)!");
+    }
+
+    #[test]
+    fn test_trend_pb_kama_distance_box_and_mtf_scaling() {
+        let len = 10;
+        let i = len - 1;
+
+        // Cấu hình cơ sở: KAMA 15m, ATR 5m => scale = sqrt(15/5) = sqrt(3) ~ 1.73205
+        // ATR = 10.0 => kama_equiv_atr = 17.3205
+        // kama_mid = 2000.0, max_pullback_dist_atr = 2.0, invalidation_buffer_atr = 0.50
+        // Hộp an toàn cho Long: delta_kama in [-0.50, +2.0]
+        // Ngưỡng giá tuyệt đối tương ứng:
+        // Cực dưới (invalidation floor): 2000.0 - 0.50 * 17.3205 = 1991.34
+        // Cực trên (parabolic chasing ceiling): 2000.0 + 2.0 * 17.3205 = 2034.64
+        let mut config = HeliosConfigV3::default();
+        config.indicators.kama.timeframe = Timeframe::T15m;
+        config.indicators.atr.timeframe = Timeframe::T5m;
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.max_pullback_dist_atr = 2.0;
+        config.tactical_sniper.pullback.invalidation_buffer_atr = 0.50;
+        config.tactical_sniper.pullback.min_clv = 0.05;
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.25; len]); // Uptrend mạnh
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        let mut stoch_k_vec = vec![30.0; len];
+        stoch_k_vec[i - 1] = 20.0;
+        stoch_k_vec[i] = 25.0; // Hook up: stoch_k > prev
+        sensors.stoch_trend_k = std::sync::Arc::new(stoch_k_vec);
+        sensors.stoch_trend_d = std::sync::Arc::new(vec![22.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]);
+
+        // --- Kịch bản 1: Shallow Piercing Hợp lệ (Nằm an toàn trong đệm gãy nông) ---
+        // Close = 1998.0, Low = 1990.0, High = 2002.0 => CLV = (2*1998 - 3992) / 12 = +4/12 = +0.333 >= 0.05
+        // delta_kama = (1998 - 2000) / 17.3205 = -0.1155 (>= -0.50) => APPROVED!
+        {
+            let mut opens = vec![2000.0; len];
+            let mut highs = vec![2005.0; len];
+            let mut lows = vec![1990.0; len];
+            let mut closes = vec![2000.0; len];
+            opens[i] = 1992.0;
+            highs[i] = 2002.0;
+            lows[i] = 1990.0;
+            closes[i] = 1998.0;
+
+            let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+            let tick = TickContext {
+                i,
+                equity: 1000.0,
+                data_view: &dv,
+                indicator_manager: &im,
+                trades: &tr,
+                last_closed_trade: None,
+                actions: &mut act,
+                position: Position::default(),
+            };
+            let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+            assert!(prop.is_some(), "Shallow Piercing delta_kama = -0.1155 in [-0.50, 2.0] PHẢI được phê duyệt!");
+        }
+
+        // --- Kịch bản 2: Breakdown Invalidation VETO (Xuyên thủng sâu quá ngưỡng cho phép) ---
+        // Close = 1985.0, Low = 1980.0, High = 1988.0 => CLV = (2*1985 - 3968) / 8 = +0.25 >= 0.05
+        // delta_kama = (1985 - 2000) / 17.3205 = -0.866 < -0.50 => VETO!
+        {
+            let mut opens = vec![2000.0; len];
+            let mut highs = vec![2005.0; len];
+            let mut lows = vec![1980.0; len];
+            let mut closes = vec![2000.0; len];
+            opens[i] = 1982.0;
+            highs[i] = 1988.0;
+            lows[i] = 1980.0;
+            closes[i] = 1985.0;
+
+            let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+            let tick = TickContext {
+                i,
+                equity: 1000.0,
+                data_view: &dv,
+                indicator_manager: &im,
+                trades: &tr,
+                last_closed_trade: None,
+                actions: &mut act,
+                position: Position::default(),
+            };
+            let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+            assert!(prop.is_none(), "Breakdown delta_kama = -0.866 < -0.50 PHẢI bị VETO chặn đứng!");
+        }
+
+        // --- Kịch bản 3: Parabolic Chasing VETO (Đu đỉnh quá xa trên KAMA) ---
+        // Close = 2040.0, Low = 2035.0, High = 2043.0 => CLV = (2*2040 - 4078) / 8 = +0.25 >= 0.05
+        // delta_kama = (2040 - 2000) / 17.3205 = +2.3094 > 2.0 => VETO!
+        {
+            let mut opens = vec![2000.0; len];
+            let mut highs = vec![2045.0; len];
+            let mut lows = vec![2000.0; len];
+            let mut closes = vec![2000.0; len];
+            opens[i] = 2036.0;
+            highs[i] = 2043.0;
+            lows[i] = 2035.0;
+            closes[i] = 2040.0;
+
+            let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+            let tick = TickContext {
+                i,
+                equity: 1000.0,
+                data_view: &dv,
+                indicator_manager: &im,
+                trades: &tr,
+                last_closed_trade: None,
+                actions: &mut act,
+                position: Position::default(),
+            };
+            let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+            assert!(prop.is_none(), "Parabolic chasing delta_kama = +2.31 > 2.0 PHẢI bị VETO chặn đứng!");
+        }
+
+        // --- Kịch bản 4: MTF Scale Invariance trên KAMA 4h ---
+        // Đổi KAMA sang 4h (240m), ATR 5m => scale = sqrt(240/5) = sqrt(48) ~ 6.9282
+        // kama_equiv_atr = 10.0 * 6.9282 = 69.282
+        // Invalidation floor = 2000.0 - 0.50 * 69.282 = 1965.36
+        // Thử giá Close = 1975.0 (cách KAMA -25.0):
+        // Nếu dùng ATR 5m không scale (10.0): delta = -25 / 10 = -2.5 < -0.50 => SẼ BỊ VETO SAI LẦM!
+        // Khi có MTF scale: delta_kama = -25 / 69.282 = -0.3608 in [-0.50, 2.0] => APPROVED!
+        {
+            let mut config_4h = config.clone();
+            config_4h.indicators.kama.timeframe = Timeframe::T4h;
+
+            let mut opens = vec![2000.0; len];
+            let mut highs = vec![2005.0; len];
+            let mut lows = vec![1970.0; len];
+            let mut closes = vec![2000.0; len];
+            opens[i] = 1972.0;
+            highs[i] = 1978.0;
+            lows[i] = 1970.0;
+            closes[i] = 1975.0; // CLV = (2*1975 - 3948) / 8 = +0.25 >= 0.05
+
+            let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+            let tick = TickContext {
+                i,
+                equity: 1000.0,
+                data_view: &dv,
+                indicator_manager: &im,
+                trades: &tr,
+                last_closed_trade: None,
+                actions: &mut act,
+                position: Position::default(),
+            };
+            let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config_4h);
+            assert!(prop.is_some(), "KAMA 4h MTF Equiv ATR scaling PHẢI bảo vệ pullback rộng -25 điểm (delta_kama = -0.36) không bị VETO oan!");
+        }
     }
 }

@@ -304,9 +304,17 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/` (`matrix.rs`, `gatekeeper.rs`, `arbiter.rs`, `risk.rs`, `scanners/`)
   - **Mô tả:** Tách bạch 3 ranh giới trách nhiệm: (1) Context Tracker theo dõi bối cảnh và bộ nhớ sự kiện vi mô (Spring tại bar $i$, xác nhận tại bar $i+1$); (2) Scanners chỉ phát hiện xác suất hiện tượng và điểm neo cấu trúc; (3) Arbiter & Risk độc quyền phân bổ vốn và co size động theo SL (`Dynamic De-leverage`) thay vì VETO hủy lệnh.
 
-- [ ] **TODO-AUDIT-NEW-38: Khôi Phục Neo Khoảng Cách KAMA Trong Trend_PB (`GHOST-PULLBACK`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:47-75`
-  - **Mô tả:** Khôi phục biến `delta_kama = (close - kama_mid) / ATR` và điều kiện kiểm tra khoảng cách an toàn, chấm dứt tình trạng Trend_PB biến thành Dip Buying vu vơ không có điểm tựa hồi quy.
+- [x] **TODO-AUDIT-NEW-38: Khôi Phục Neo Khoảng Cách KAMA Trong Trend_PB (`GHOST-PULLBACK`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:47-198`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH - KHÔI PHỤC NEO KAMA & SCALE-INVARIANT MTF EQUIV ATR].
+    1. Khôi phục biến `delta_kama = (close - kama_mid) / kama_equiv_atr` và hộp khoảng cách an toàn:
+       - Long: `delta_kama < -inval_floor || delta_kama > max_dist => None`
+       - Short: `delta_kama > inval_floor || delta_kama < -max_dist => None`
+    2. Khử triệt để bẫy lệch thang đo đa khung thời gian MTF (`TODO-SEM-02`) bằng công thức tỷ lệ chuẩn:
+       $\text{kama\_equiv\_atr} = \text{current\_atr} \times \sqrt{\frac{T_{\text{kama}}}{T_{\text{atr}}}}$
+    3. Hồi sinh 2 gen DNA mồ côi `max_pullback_dist_atr` và `invalidation_buffer_atr` trong `TacticalPullbackParams` kết hợp với `f_dist = sat_proximity(delta_kama.abs(), max_dist)` vào hàm tổ hợp lồi `convex_combine(&[f_slope, f_dist, f_stoch, f_clv], &[0.35, 0.25, 0.20, 0.20])`.
+    4. Bảo toàn 100% kích thước không gian tìm kiếm `DNA_WIDTH = 110`.
+    5. Unit tests: 9/9 tests trong `trend_pb.rs` (bao gồm `test_trend_pb_kama_distance_box_and_mtf_scaling`) và 8/8 tests trong `mod.rs` (`test_trend_pb_*`) PASSED; toàn bộ 145/145 tests thư viện Helios PASSED.
 
 - [x] **TODO-AUDIT-NEW-39: Khắc Phục Lỗi Tê Liệt Stochastic Hook Guard Do Forward-Fill 15m (`STOCH-15M-BLIND`, `TODO-PB-04`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:86, 110-120, 162-172`

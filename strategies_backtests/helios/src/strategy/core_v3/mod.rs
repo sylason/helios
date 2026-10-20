@@ -2303,12 +2303,22 @@ mod tests {
 
         let len = 50;
         let i = len - 1;
+        let mut opens = vec![1996.0; len];
+        let mut highs = vec![1997.0; len];
+        let mut lows = vec![1988.0; len];
+        let mut closes = vec![1990.0; len];
+        // CLV = (2*1990 - 1997 - 1980)/(1997-1980) = (3980 - 3977)/17 = 3/17 = 0.176 >= min_clv(0.05)
+        // Giá đóng cửa 1990.0 < KAMA (2000.0) - 0.5 * 17.32 = 1991.34 -> delta_kama = (1990 - 2000)/17.32 = -0.577 < -0.50!
+        opens[i] = 1985.0;
+        highs[i] = 1997.0;
+        lows[i] = 1980.0;
+        closes[i] = 1990.0;
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![1996.0; len]),
-            high: std::sync::Arc::new(vec![1997.0; len]),
-            low: std::sync::Arc::new(vec![1988.0; len]),
-            close: std::sync::Arc::new(vec![1990.0; len]), // Đâm thủng sàn KAMA - 0.5 ATR (1995.0)
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -2360,12 +2370,22 @@ mod tests {
 
         let len = 50;
         let i = len - 1;
+        let mut opens = vec![2020.0; len];
+        let mut highs = vec![2030.0; len];
+        let mut lows = vec![2019.0; len];
+        let mut closes = vec![2025.0; len];
+        // CLV = (2*2028 - 2030 - 2019)/(2030-2019) = (4056 - 4049)/11 = 7/11 = 0.636 >= min_clv(0.05)
+        // Giá đóng cửa 2028.0 > KAMA (2000.0) + 2.0 * 10.0 = 2020.0 -> Bị chặn ĐÍCH DANH bởi max_pullback_dist_atr!
+        opens[i] = 2020.0;
+        highs[i] = 2030.0;
+        lows[i] = 2019.0;
+        closes[i] = 2028.0;
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![2020.0; len]),
-            high: std::sync::Arc::new(vec![2030.0; len]),
-            low: std::sync::Arc::new(vec![2019.0; len]),
-            close: std::sync::Arc::new(vec![2025.0; len]), // Bay quá trần 2000 + 2.0*10 = 2020.0
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
