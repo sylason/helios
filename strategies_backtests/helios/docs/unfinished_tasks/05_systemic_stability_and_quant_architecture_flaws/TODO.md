@@ -256,9 +256,14 @@
 - [-] **TODO-AUDIT-NEW-29: Chuyển Đổi Sniper Veto Sang Dynamic De-leverage & Size Scaling (`TODO-ARB-03`) (PENDING: Chờ Cụm F)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:223-289`, `risk.rs:84-138`
   - **Mô tả:** [PENDING: Phần Arbiter gỡ bỏ Hard Veto đã hoàn thành tại TODO-AUDIT-NEW-04 & NEW-23. Phần co size $Fixed Risk USD thuộc thẩm quyền tầng Quản trị Rủi ro tại Cụm F (TODO-AUDIT-NEW-55 & TODO-AUDIT-NEW-118).] Khi SL cấu trúc $> 15\%$ ROE (nhưng $\le 35\%$ ROE), tự động co giảm kích thước vị thế tỷ lệ nghịch với khoảng cách SL để bảo toàn \$ USD Risk cố định thay vì VETO hủy lệnh, tái kích hoạt khối code `clamp_sl_price`.
-- [ ] **TODO-AUDIT-NEW-30: Bổ Sung EV Hurdle Gate Nhận Thức Chi Phí Ma Sát Sàn 2.6% ROE (`TODO-ARB-05`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:290-302`
-  - **Mô tả:** Bắt buộc biên độ kỳ vọng tối thiểu của lệnh phải thỏa mãn $\ge 2.5 \times \text{Friction Cost} \ge 6.5\%$ ROE (tại 20x) trước khi phê duyệt mở lệnh, loại bỏ các lệnh scalp mỏng bị âm sau phí.
+- [x] **TODO-AUDIT-NEW-30: Bổ Sung EV Hurdle Gate Nhận Thức Chi Phí Ma Sát Sàn 2.6% ROE (`TODO-ARB-05`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:221-470`, `config.rs:517`, `telemetry/cards.rs:122, 260`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH] Triển khai cơ chế Dual-Track EV Hurdle Gate (`validate_ev_hurdle`) $O(1)$ phi thứ nguyên trong `HeliosArbiter`: (1) Track 1 (Explicit TP cho Reversal/RangeOsc) kiểm tra tính nhất quán hướng và biên độ $|TP - P|/P \ge (2 \times \text{fee} + \text{slippage}) \times \text{min\_ev\_hurdle\_ratio}$; (2) Track 2 (Dynamic Trend cho TrendPB/Momentum/Absorption) kiểm tra không gian biến động vi mô $\text{ATR}_{\text{micro}}/P \ge \text{Required Hurdle}$. Bổ sung `AuctionStatus::FrictionalHurdleVeto` và `min_ev_hurdle_ratio = 2.50` (`#[serde(default)]`, bảo toàn `DNA_WIDTH = 105`), tương thích đa tài sản từ Forex đến Memecoin.
+  - **Unit Tests:**
+    - [x] `test_ev_hurdle_explicit_tp_rejection`
+    - [x] `test_ev_hurdle_explicit_tp_direction_contradiction`
+    - [x] `test_ev_hurdle_dynamic_trend_rejection`
+    - [x] `test_ev_hurdle_pass_and_forex_multi_asset_compatibility`
 - [ ] **TODO-AUDIT-NEW-31: Dọn Dẹp Triệt Để 8 Biến Ma & Trường Rác Khỏi `ArbiterConfig` (`ZOMBIE-ARBITER-CFG`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:450-478`
   - **Mô tả:** Xóa bỏ 6 dead fields cũ và 2 trường bù nhìn (`max_chaos_penalty`, `conflict_confidence_margin`), tách các trường thuộc Cầu Dao sang `GatekeeperConfig`.

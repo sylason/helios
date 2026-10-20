@@ -57,8 +57,9 @@ pub enum AuctionStatus {
     RunnerUp,
     LowConfidence,
     ConflictEliminated,
-    StructuralRiskVeto,  // 🛑 Rủi ro cấu trúc SL vượt quá trần ROE cho phép (Sniper Entry Guard)
-    LiquidationRiskVeto, // 🛑 Rủi ro thanh lý sàn (SL nằm ngoài hoặc quá sát P_liq theo MMR)
+    StructuralRiskVeto,   // 🛑 Rủi ro cấu trúc SL vượt quá trần ROE cho phép (Sniper Entry Guard)
+    LiquidationRiskVeto,  // 🛑 Rủi ro thanh lý sàn (SL nằm ngoài hoặc quá sát P_liq theo MMR)
+    FrictionalHurdleVeto, // 💰 Biên độ kỳ vọng không vượt qua rào cản chi phí ma sát sàn (2*Fee + Slippage) * Hurdle Ratio
     RegimeIneligible(MarketRegime), // 🛑 Scanner không phù hợp với chế độ thị trường hiện tại
     NotTriggered,
 }
@@ -218,6 +219,109 @@ impl HeliosArbiter {
         }
     }
 
+    /// 💰 [EV HURDLE GATE: BỘ LỌC CHI PHÍ MA SÁT SÀN NHẬN THỨC KỲ VỌNG TOÁN HỌC] (TODO-AUDIT-NEW-30 / TODO-ARB-05)
+    /// Thẩm định biên độ lợi nhuận tiềm năng của đề xuất (Proposal) có vượt qua rào cản ma sát sàn 2 chiều:
+    ///   Required_Hurdle = (2.0 * taker_fee_rate + slippage_allowance_pct) * min_ev_hurdle_ratio
+    ///
+    /// Phân tách 2 luồng (Dual-Track Evaluation):
+    /// - Track 1 (Explicit TP): Đối với các chiến lược có mục tiêu chốt lời rõ ràng (ClimaxReversal, RangeOscillator):
+    ///   + Kiểm tra tính nhất quán phương hướng: Long đòi hỏi TP > Price, Short đòi hỏi TP < Price.
+    ///   + Kiểm tra biên độ: |TP - Price| / Price >= Required_Hurdle.
+    /// - Track 2 (Dynamic Trend): Đối với các chiến lược gồng lãi theo xu hướng mở rộng (TrendPullback, MomentumIgnition, AbsorptionScout):
+    ///   + Kiểm tra dư địa biến động vi mô: ATR_micro / Price >= Required_Hurdle.
+    #[inline]
+    pub fn validate_ev_hurdle(
+        proposal: &Proposal,
+        current_price: f64,
+        current_atr_sl: f64,
+        config: &HeliosConfigV3,
+    ) -> Result<(), (AuctionStatus, String)> {
+        if !current_price.is_finite() || current_price <= 1e-9 {
+            return Err((
+                AuctionStatus::FrictionalHurdleVeto,
+                "Invalid current price (non-positive or NaN)".to_string(),
+            ));
+        }
+
+        let risk_base = &config.risk_management.risk_base;
+        let roundtrip_friction = 2.0 * risk_base.taker_fee_rate + risk_base.slippage_allowance_pct;
+        let hurdle_ratio = config.arbiter.min_ev_hurdle_ratio.max(1.0);
+        let required_hurdle = roundtrip_friction * hurdle_ratio;
+
+        if let Some(tp) = proposal.suggested_tp {
+            if !tp.is_finite() || tp <= 1e-9 {
+                return Err((
+                    AuctionStatus::FrictionalHurdleVeto,
+                    format!("Invalid suggested TP ({:.2}) for scanner {:?}", tp, proposal.scanner_id),
+                ));
+            }
+
+            // Kiểm tra tính nhất quán phương hướng
+            match proposal.signal_type {
+                SignalType::Long => {
+                    if tp <= current_price {
+                        return Err((
+                            AuctionStatus::FrictionalHurdleVeto,
+                            format!(
+                                "Directional contradiction: Long TP ({:.2}) <= current price ({:.2})",
+                                tp, current_price
+                            ),
+                        ));
+                    }
+                }
+                SignalType::Short => {
+                    if tp >= current_price {
+                        return Err((
+                            AuctionStatus::FrictionalHurdleVeto,
+                            format!(
+                                "Directional contradiction: Short TP ({:.2}) >= current price ({:.2})",
+                                tp, current_price
+                            ),
+                        ));
+                    }
+                }
+            }
+
+            let expected_move_pct = (tp - current_price).abs() / current_price;
+            if expected_move_pct < required_hurdle {
+                return Err((
+                    AuctionStatus::FrictionalHurdleVeto,
+                    format!(
+                        "Explicit TP move {:.3}% < required hurdle {:.3}% ({:.1}x friction {:.3}%)",
+                        expected_move_pct * 100.0,
+                        required_hurdle * 100.0,
+                        hurdle_ratio,
+                        roundtrip_friction * 100.0
+                    ),
+                ));
+            }
+        } else {
+            // Track 2: Dynamic Trend (Không có explicit TP, đánh giá qua micro-volatility expansion room)
+            if !current_atr_sl.is_finite() || current_atr_sl <= 0.0 {
+                return Err((
+                    AuctionStatus::FrictionalHurdleVeto,
+                    "Invalid micro ATR (non-positive or NaN)".to_string(),
+                ));
+            }
+
+            let micro_vol_pct = current_atr_sl / current_price;
+            if micro_vol_pct < required_hurdle {
+                return Err((
+                    AuctionStatus::FrictionalHurdleVeto,
+                    format!(
+                        "Micro volatility room {:.3}% < required hurdle {:.3}% ({:.1}x friction {:.3}%)",
+                        micro_vol_pct * 100.0,
+                        required_hurdle * 100.0,
+                        hurdle_ratio,
+                        roundtrip_friction * 100.0
+                    ),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn process_tick(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3, debug_mode: bool) -> ArbiterDecision {
         let i = tick.i;
         
@@ -259,6 +363,7 @@ impl HeliosArbiter {
         let chaos_penalty = 0.0;
 
         let current_price = tick.closes()[i];
+        let current_atr_sl = sensors.atr_sl.get(i).copied().unwrap_or(0.0);
         let leverage = config.risk_management.risk_base.leverage.max(1.0);
 
         let mut scanned_info = Vec::with_capacity(self.scanners.len());
@@ -347,17 +452,22 @@ impl HeliosArbiter {
                             // Tín hiệu có SL cấu trúc vượt trần ROE không bị Arbiter VETO loại bỏ,
                             // mà được phê duyệt tham gia đấu thầu để chuyển tiếp xuống RiskManager kẹp SL và định cỡ Dynamic De-leverage.
                             if confidence >= min_threshold {
-                                approved_proposals.push((proposal.clone(), confidence));
-                                (
-                                    confidence,
-                                    true,
-                                    None,
-                                    format!(
-                                        "Structural SL exceeds ROE cap ({:.1}% > {:.1}%), passed to RiskManager for clamping & dynamic sizing",
-                                        suggested_roe * 100.0,
-                                        max_roe * 100.0
-                                    ),
-                                    )
+                                match Self::validate_ev_hurdle(proposal, current_price, current_atr_sl, config) {
+                                    Ok(()) => {
+                                        approved_proposals.push((proposal.clone(), confidence));
+                                        (
+                                            confidence,
+                                            true,
+                                            None,
+                                            format!(
+                                                "Structural SL exceeds ROE cap ({:.1}% > {:.1}%), passed to RiskManager for clamping & dynamic sizing",
+                                                suggested_roe * 100.0,
+                                                max_roe * 100.0
+                                            ),
+                                        )
+                                    }
+                                    Err((status, reason)) => (confidence, false, Some(status), reason),
+                                }
                             } else {
                                 (
                                     confidence,
@@ -385,8 +495,13 @@ impl HeliosArbiter {
                         }
                         SlValidationResult::Acceptable => {
                             if confidence >= min_threshold {
-                                approved_proposals.push((proposal.clone(), confidence));
-                                (confidence, true, None, String::new())
+                                match Self::validate_ev_hurdle(proposal, current_price, current_atr_sl, config) {
+                                    Ok(()) => {
+                                        approved_proposals.push((proposal.clone(), confidence));
+                                        (confidence, true, None, String::new())
+                                    }
+                                    Err((status, reason)) => (confidence, false, Some(status), reason),
+                                }
                             } else {
                                 (
                                     confidence,
@@ -1376,5 +1491,229 @@ mod tests {
                 candidate.reason
             );
         }
+    }
+
+    #[test]
+    fn test_ev_hurdle_explicit_tp_rejection() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        // 💰 [TODO-AUDIT-NEW-30]: Track 1 (Explicit TP) phải từ chối lệnh khi biên độ TP < 2.5x ma sát sàn
+        // Phí mặc định: taker = 0.04%, slippage = 0.02% => roundtrip friction = 0.10%
+        // min_ev_hurdle_ratio = 2.50 => required_hurdle = 0.25% (5.0 giá trên nền Entry 2000.0)
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.arbiter.min_ev_hurdle_ratio = 2.50;
+        config.risk_management.risk_base.leverage = 20.0;
+
+        // Cấu hình thị trường RangeBound (hợp lệ cho ClimaxReversal và RangeOscillator)
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]);
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![12.0; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.10; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+
+        // Đề xuất Reversal Long có TP = 2002.0 (biên độ 2.0 / 2000.0 = 0.10% < 0.25% required hurdle)
+        let thin_tp_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.92,
+            scanner_id: ScannerId::ClimaxReversal,
+            suggested_sl: Some(1990.0),
+            suggested_tp: Some(2002.0),
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::ClimaxReversal,
+            proposal: Some(thin_tp_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+        assert!(!decision.is_approved, "Proposal có TP mỏng (0.10% < 0.25%) PHẢI bị FrictionalHurdleVeto từ chối!");
+        assert_eq!(decision.auction_ledger.len(), 1);
+        assert_eq!(decision.auction_ledger[0].status, AuctionStatus::FrictionalHurdleVeto);
+        assert!(
+            decision.auction_ledger[0].reason.contains("Explicit TP move 0.100% < required hurdle 0.250%"),
+            "Reason thực tế: {}",
+            decision.auction_ledger[0].reason
+        );
+    }
+
+    #[test]
+    fn test_ev_hurdle_explicit_tp_direction_contradiction() {
+        let config = HeliosConfigV3::default();
+        let current_price = 2000.0;
+        let current_atr = 10.0;
+
+        // 1. Long nhưng TP <= Price (1995.0 <= 2000.0)
+        let bad_long = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.85,
+            scanner_id: ScannerId::ClimaxReversal,
+            suggested_sl: Some(1985.0),
+            suggested_tp: Some(1995.0),
+        };
+        let res_long = HeliosArbiter::validate_ev_hurdle(&bad_long, current_price, current_atr, &config);
+        assert!(res_long.is_err());
+        let (st_l, msg_l) = res_long.unwrap_err();
+        assert_eq!(st_l, AuctionStatus::FrictionalHurdleVeto);
+        assert!(msg_l.contains("Directional contradiction: Long TP"));
+
+        // 2. Short nhưng TP >= Price (2005.0 >= 2000.0)
+        let bad_short = Proposal {
+            signal_type: SignalType::Short,
+            raw_score: 0.85,
+            scanner_id: ScannerId::RangeOscillator,
+            suggested_sl: Some(2015.0),
+            suggested_tp: Some(2005.0),
+        };
+        let res_short = HeliosArbiter::validate_ev_hurdle(&bad_short, current_price, current_atr, &config);
+        assert!(res_short.is_err());
+        let (st_s, msg_s) = res_short.unwrap_err();
+        assert_eq!(st_s, AuctionStatus::FrictionalHurdleVeto);
+        assert!(msg_s.contains("Directional contradiction: Short TP"));
+    }
+
+    #[test]
+    fn test_ev_hurdle_dynamic_trend_rejection() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        // 💰 [TODO-AUDIT-NEW-30]: Track 2 (Dynamic Trend, suggested_tp = None)
+        // Khi ATR_micro / Price = 2.0 / 2000.0 = 0.10% < 0.25% required hurdle => Phải bị FrictionalHurdleVeto!
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2005.0; len]),
+            low: std::sync::Arc::new(vec![1995.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.arbiter.min_confidence_threshold = 0.50;
+        config.arbiter.min_ev_hurdle_ratio = 2.50;
+        config.risk_management.risk_base.leverage = 20.0;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.natr = std::sync::Arc::new(vec![0.30; len]);
+        sensors.micro_natr = std::sync::Arc::new(vec![0.10; len]);
+        // ATR vi mô bóp nghẹt chỉ còn 2.0 USD trên nền giá 2000.0 (0.10% < 0.25%)
+        sensors.atr_sl = std::sync::Arc::new(vec![2.0; len]);
+        sensors.adx = std::sync::Arc::new(vec![32.0; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.45; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.chaos_index = std::sync::Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.20; len]);
+
+        let trend_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.90,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(1990.0),
+            suggested_tp: None,
+        };
+
+        let mut arbiter = HeliosArbiter::new();
+        arbiter.add_scanner(Box::new(MockScanner {
+            id: ScannerId::TrendPullback,
+            proposal: Some(trend_prop),
+        }));
+
+        let decision = arbiter.process_tick(&tick, &sensors, &matrix, &config, false);
+        assert!(!decision.is_approved, "Proposal Trend khi ATR vi mô quá hẹp (0.10% < 0.25%) PHẢI bị từ chối!");
+        assert_eq!(decision.auction_ledger.len(), 1);
+        assert_eq!(decision.auction_ledger[0].status, AuctionStatus::FrictionalHurdleVeto);
+        assert!(
+            decision.auction_ledger[0].reason.contains("Micro volatility room 0.100% < required hurdle 0.250%"),
+            "Reason thực tế: {}",
+            decision.auction_ledger[0].reason
+        );
+    }
+
+    #[test]
+    fn test_ev_hurdle_pass_and_forex_multi_asset_compatibility() {
+        let mut config = HeliosConfigV3::default();
+        // 1. Kịch bản Crypto chuẩn (fee 0.04%, slip 0.02% => hurdle 0.25%)
+        // Proposal Explicit TP = 2006.0 (+0.30% >= 0.25%) -> PASS
+        let crypto_prop = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.88,
+            scanner_id: ScannerId::RangeOscillator,
+            suggested_sl: Some(1990.0),
+            suggested_tp: Some(2006.0),
+        };
+        assert!(HeliosArbiter::validate_ev_hurdle(&crypto_prop, 2000.0, 10.0, &config).is_ok());
+
+        // 2. Kịch bản Forex biến động thấp (TODO-AUDIT-NEW-61):
+        // EUR/USD @ 1.1000, taker_fee = 0.005% (0.00005), slippage = 0.005% (0.00005)
+        // Roundtrip friction = 0.015% => Required hurdle (2.5x) = 0.0375%
+        // ATR_micro = 0.0006 (tương đương 6 pips = 0.0545% >= 0.0375%) -> PASS hoàn hảo!
+        config.risk_management.risk_base.taker_fee_rate = 0.00005;
+        config.risk_management.risk_base.slippage_allowance_pct = 0.00005;
+        let forex_trend_prop = Proposal {
+            signal_type: SignalType::Short,
+            raw_score: 0.82,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(1.1020),
+            suggested_tp: None,
+        };
+        assert!(
+            HeliosArbiter::validate_ev_hurdle(&forex_trend_prop, 1.1000, 0.0006, &config).is_ok(),
+            "Forex setup với 6 pips ATR (0.0545% >= 0.0375% hurdle) phải PASS!"
+        );
     }
 }

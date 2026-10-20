@@ -514,6 +514,12 @@ pub struct ArbiterConfig {
     #[serde(default = "default_conflict_confidence_margin")]
     pub conflict_confidence_margin: f64,
 
+    /// 💰 HỆ SỐ NGƯỠNG LỢI NHUẬN KỲ VỌNG TRÊN CHI PHÍ MA SÁT SÀN (TODO-AUDIT-NEW-30 / TODO-ARB-05)
+    /// Yêu cầu biên độ lợi nhuận tối thiểu phải gấp min_ev_hurdle_ratio lần chi phí ma sát 2 chiều (2 * fee + slippage).
+    /// Mặc định 2.50 (tương đương 0.25% biên độ giá cơ sở hay 5.0% ROE ở 20x đòn bẩy khi fee = 0.04%, slippage = 0.02%).
+    #[serde(default = "default_min_ev_hurdle_ratio")]
+    pub min_ev_hurdle_ratio: f64,
+
     // =========================================================================
     // 🧹 CÁC TRƯỜNG CŨ ĐÃ BỎ GEN DNA (COMMENT OUT #[dna(...)]) ĐỂ DE-OVERENGINEER
     // Tạm thời giữ lại để tương thích mã nguồn cho đến khi Bước 4 (Arbiter) hoàn tất.
@@ -546,6 +552,7 @@ impl Default for ArbiterConfig {
             chaos_hysteresis_delta: default_chaos_hysteresis_delta(),
             max_chaos_penalty: default_max_chaos_penalty(),
             conflict_confidence_margin: default_conflict_confidence_margin(),
+            min_ev_hurdle_ratio: default_min_ev_hurdle_ratio(),
             min_multiplier_veto: default_min_multiplier_veto(),
             scanner_weight: default_scanner_weight(),
             min_confidence_trending: default_min_confidence_trending(),
@@ -562,6 +569,7 @@ fn default_min_natr_threshold() -> f64 { 0.0012 }
 fn default_chaos_hysteresis_delta() -> f64 { 0.10 }
 fn default_max_chaos_penalty() -> f64 { 0.50 }
 fn default_conflict_confidence_margin() -> f64 { 0.15 }
+fn default_min_ev_hurdle_ratio() -> f64 { 2.50 }
 fn default_min_multiplier_veto() -> f64 { 0.01 }
 fn default_scanner_weight() -> f64 { 0.50 }
 fn default_min_confidence_trending() -> f64 { 0.20 }

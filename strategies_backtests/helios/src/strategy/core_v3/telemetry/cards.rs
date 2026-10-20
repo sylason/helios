@@ -126,6 +126,7 @@ impl DecisionCardFormatter {
                 AuctionStatus::ConflictEliminated => "⚔️ [CONFLICT-FLAT]",
                 AuctionStatus::StructuralRiskVeto => "🛑 [RISK-VETO]    ",
                 AuctionStatus::LiquidationRiskVeto => "💀 [LIQ-VETO]     ",
+                AuctionStatus::FrictionalHurdleVeto => "💰 [FRICTION-VETO]",
                 AuctionStatus::RegimeIneligible(_) => "🧭 [REGIME-VETO]  ",
                 AuctionStatus::NotTriggered => "⚪ [NOT-TRIGGERED]",
             };
@@ -214,6 +215,8 @@ impl DecisionCardFormatter {
             "TIER 1 (REGIME GATEKEEPER)"
         } else if decision.auction_ledger.iter().any(|c| c.status == AuctionStatus::StructuralRiskVeto) {
             "TIER 3 (SNIPER ENTRY GUARD)"
+        } else if decision.auction_ledger.iter().any(|c| c.status == AuctionStatus::FrictionalHurdleVeto) {
+            "TIER 2.5 (EV FRICTION HURDLE GATE)"
         } else {
             "ARBITER AUCTION FILTER"
         };
@@ -260,6 +263,7 @@ impl DecisionCardFormatter {
                 AuctionStatus::ConflictEliminated => "⚔️ [CONFLICT-FLAT]",
                 AuctionStatus::StructuralRiskVeto => "🛑 [RISK-VETO]    ",
                 AuctionStatus::LiquidationRiskVeto => "💀 [LIQ-VETO]     ",
+                AuctionStatus::FrictionalHurdleVeto => "💰 [FRICTION-VETO]",
                 AuctionStatus::RegimeIneligible(_) => "🧭 [REGIME-VETO]  ",
                 AuctionStatus::NotTriggered => "⚪ [NOT-TRIGGERED]",
             };
