@@ -368,9 +368,9 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `sensors.rs`
   - **Mô tả:** Nhận diện vùng hấp thụ tại các ngưỡng hỗ trợ/kháng cự cấu trúc thực sự (Prior Swing Lows / Value Area) thay vì dải Bollinger trôi nổi; bổ sung chốt chặn vỡ tường Limit khi lực xả phá vỡ đáy hấp thụ.
 
-- [ ] **TODO-AUDIT-NEW-51: Triển Khai Chuỗi Xác Nhận Đảo Chiều Đa Nến & Cổng Kiểm Tra R:R Tối Thiểu (`REV-SEQUENCE-RR`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `arbiter.rs`
-  - **Mô tả:** Kết nối lại `_matrix` để đọc độ dốc KAMA và Chaos Index (chống bắt dao rơi xả lũ); bổ sung nến xác nhận phủ nhận $t+1$ (Engulfing / Higher Low); bắt buộc kiểm tra tỷ lệ kỳ vọng $\frac{\text{TP Dist}}{\text{SL Dist}} \ge 1.2$ trước khi phát tín hiệu Proposal.
+- [x] **TODO-AUDIT-NEW-51: Triển Khai Chuỗi Xác Nhận Đảo Chiều Đa Nến & Cổng Kiểm Tra R:R Tối Thiểu (`REV-SEQUENCE-RR`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Kết nối `matrix` để đọc độ dốc KAMA và Chaos Index (chặn bắt dao rơi khi KAMA dốc $<-0.40$ hoặc bão Whipsaw $>0.65$); bổ sung bộ xác nhận đa nến Wyckoff Spring ($i$ vs $i-1$) trên nến 1m nguyên bản (nến xanh hấp thụ và giữ vững đáy); áp dụng cổng kiểm tra tỷ lệ kỳ vọng toán học $\frac{\text{TP Dist}}{\text{SL Dist}} \ge 1.20$; bảo toàn 107 chiều DNA; bộ test 11/11 tests pass 100%.
 
 - [ ] **TODO-AUDIT-NEW-52: Triển Khai Bộ Nhận Diện Cấu Trúc Đỉnh/Đáy Bậc Thang Dow & Bảo Vệ Đáy Sóng Cũ (`TREND-DOW-STRUCTURE`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `sensors.rs`

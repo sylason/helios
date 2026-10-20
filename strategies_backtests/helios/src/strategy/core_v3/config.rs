@@ -922,6 +922,18 @@ pub struct TacticalReversalParams {
     #[dna(min = 0.10, max = 0.80, step = 0.05)]
     #[serde(default = "default_reversal_w_displacement")]
     pub w_displacement: f64,
+
+    /// 🎯 Ngưỡng tỷ lệ R:R tối thiểu (TP Dist / SL Dist >= 1.20)
+    #[serde(default = "default_reversal_min_rr_ratio")]
+    pub min_rr_ratio: f64,
+
+    /// 🌪️ Độ dốc KAMA nghịch đảo tối đa (chống bắt dao rơi xả lũ, mặc định 0.40)
+    #[serde(default = "default_reversal_max_adverse_kama_slope")]
+    pub max_adverse_kama_slope: f64,
+
+    /// ⚡ Chỉ số bão hỗn loạn Whipsaw tối đa (mặc định 0.65)
+    #[serde(default = "default_reversal_max_chaos_index")]
+    pub max_chaos_index: f64,
 }
 
 impl Default for TacticalReversalParams {
@@ -938,6 +950,9 @@ impl Default for TacticalReversalParams {
             mfi_reversal_thresh: default_reversal_mfi_thresh(),
             w_z_score: default_reversal_w_z_score(),
             w_displacement: default_reversal_w_displacement(),
+            min_rr_ratio: default_reversal_min_rr_ratio(),
+            max_adverse_kama_slope: default_reversal_max_adverse_kama_slope(),
+            max_chaos_index: default_reversal_max_chaos_index(),
         }
     }
 }
@@ -1484,6 +1499,18 @@ fn default_reversal_w_z_score() -> f64 {
 
 fn default_reversal_w_displacement() -> f64 {
     0.40
+}
+
+fn default_reversal_min_rr_ratio() -> f64 {
+    1.20
+}
+
+fn default_reversal_max_adverse_kama_slope() -> f64 {
+    0.40
+}
+
+fn default_reversal_max_chaos_index() -> f64 {
+    0.65
 }
 
 #[derive(Debug, Clone, Deserialize, DnaMappableMacro)]

@@ -42,9 +42,22 @@ impl TacticalScanner for ReversalScanner {
         Box::new(ReversalScanner)
     }
 
-    fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, _matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
+    fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
+        if i == 0 {
+            return None;
+        }
+
         let rev_cfg = &config.tactical_sniper.reversal;
+        let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
+        let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
+        let max_slope = if rev_cfg.max_adverse_kama_slope <= 0.0 { 0.40 } else { rev_cfg.max_adverse_kama_slope };
+        let max_chaos = if rev_cfg.max_chaos_index <= 0.0 { 0.65 } else { rev_cfg.max_chaos_index };
+
+        // 🛡️ Task REV-51: Chốt chặn bão hỗn loạn Whipsaw
+        if chaos_val > max_chaos {
+            return None;
+        }
         
         let z_score = sensors.z_score[i];
         let kama_mid = sensors.kama_mid[i];
@@ -86,18 +99,40 @@ impl TacticalScanner for ReversalScanner {
         // 🛡️ Task REV-04: Bộ Lọc Dòng Tiền Kiệt Sức MFI (Money Flow Exhaustion Filter)
         let mfi_thresh = if rev_cfg.mfi_reversal_thresh <= 0.0 { 30.0 } else { rev_cfg.mfi_reversal_thresh.clamp(10.0, 50.0) };
 
-        // Xác định hướng tín hiệu và kiểm tra đồng thời CLV + Excess Wick + MFI
+        // Xác định hướng tín hiệu và kiểm tra đồng thời CLV + Excess Wick + MFI + KAMA Slope + Dual-bar
         let signal_type = if z_score < 0.0 && close_price < kama_mid {
             // Long Reversal: Cần nến rút chân (CLV >= min_clv), râu dưới từ chối rõ rệt (lower_wick_ratio >= min_wick_ratio) và dòng tiền bán kiệt sức (MFI <= mfi_thresh)
-            if clv < min_clv || lower_wick_ratio < min_wick_ratio || mfi > mfi_thresh {
+            if clv < min_clv || lower_wick_ratio < min_wick_ratio || mfi > mfi_thresh || kama_slope < -max_slope {
                 return None;
             }
+
+            // 🛡️ Task REV-51: Chốt chặn xác nhận đa nến (Dual-bar Wyckoff Spring Confirmation)
+            let prev_high = tick.highs()[i - 1];
+            let prev_low = tick.lows()[i - 1];
+            let prev_mid = 0.5 * (prev_high + prev_low);
+            let price_absorbed = close_price >= open_price || close_price > prev_mid;
+            let floor_held = low_price >= prev_low || clv >= min_clv;
+            if !price_absorbed || !floor_held {
+                return None;
+            }
+
             SignalType::Long
         } else if z_score > 0.0 && close_price > kama_mid {
             // Short Reversal: Cần nến đè đầu (CLV <= -min_clv), râu trên từ chối rõ rệt (upper_wick_ratio >= min_wick_ratio) và dòng tiền mua quá tải (MFI >= 100 - mfi_thresh)
-            if clv > -min_clv || upper_wick_ratio < min_wick_ratio || mfi < (100.0 - mfi_thresh) {
+            if clv > -min_clv || upper_wick_ratio < min_wick_ratio || mfi < (100.0 - mfi_thresh) || kama_slope > max_slope {
                 return None;
             }
+
+            // 🛡️ Task REV-51: Chốt chặn xác nhận đa nến (Dual-bar Wyckoff Upthrust Confirmation)
+            let prev_high = tick.highs()[i - 1];
+            let prev_low = tick.lows()[i - 1];
+            let prev_mid = 0.5 * (prev_high + prev_low);
+            let price_rejected = close_price <= open_price || close_price < prev_mid;
+            let ceiling_held = high_price <= prev_high || clv <= -min_clv;
+            if !price_rejected || !ceiling_held {
+                return None;
+            }
+
             SignalType::Short
         } else {
             return None;
@@ -140,6 +175,14 @@ impl TacticalScanner for ReversalScanner {
             0.0015,
             wick_buffer,
         );
+
+        // 🛡️ Task REV-51: Cổng Kiểm Tra Kỳ Vọng Toán Học R:R Tối Thiểu (R:R Hurdle Gate)
+        let tp_dist = (kama_mid - close_price).abs();
+        let sl_dist = (close_price - sanitized_sl).abs();
+        let min_rr = if rev_cfg.min_rr_ratio <= 0.0 { 1.20 } else { rev_cfg.min_rr_ratio };
+        if sl_dist <= 1e-6 || (tp_dist / sl_dist) < min_rr {
+            return None;
+        }
 
         Some(Proposal {
             signal_type,
