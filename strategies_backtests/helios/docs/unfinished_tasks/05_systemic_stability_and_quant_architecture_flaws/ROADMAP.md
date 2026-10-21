@@ -15,7 +15,7 @@
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.1. Tasks Đã Hoàn Thành (`[x]`) | 28 | 28 | 0 | 100.0% | Đã pass test và merge vào source code |
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.2. Tasks ĐÃ ĐƯỢC CHUYỂN HÓA Vào `TODO.md` | 37 | 0 | 37 | 0.0% | Đã có mã đại diện chi tiết trong TODO.md |
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.3. Tasks Còn Mở Đặc Thù Audit 01 | 36 | 0 | 36 | 0.0% | Lỗ hổng kỹ thuật & toán học kế thừa |
-| **II. Chiến Dịch Tái Cấu Trúc Toàn Hệ Thống (`TODO.md`)** | **227** | **21** | **206** | **9.3%** | Phân bổ vào 13 Cụm Tác Chiến Subsystem (A → M) |
+| **II. Chiến Dịch Tái Cấu Trúc Toàn Hệ Thống (`TODO.md`)** | **227** | **22** | **205** | **9.7%** | Phân bổ vào 13 Cụm Tác Chiến Subsystem (A → M) |
 
 > **Phân bổ Độ ưu tiên trong `TODO.md` (227 Tasks):**  
 > - 🔴 **P0 (Cốt tử & Sinh tồn):** `30 tasks` (Lookahead bias, Cháy tài khoản, Deadlock, Treo worker Tokio, Naked SL gap 150ms, Bán tháo Clean slate, Ban IP...)  
@@ -234,11 +234,11 @@
 | 17 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-184`** | Cơ Chế Cắt Lỗ Cấu Trúc Khi Gãy Cấu Trúc Thị Trường (Market Structure Break - MSB Exit Thủng Higher Low) (`TREND-MSB-EXIT`) | [TODO.md#L1045](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L1045) | `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `arbiter.rs` |
 
 ### 📦 Cụm E: Chiến Đội Tác Chiến 6 Scanners (`helios::scanners`)
-**Quy mô:** `53 tasks` (Hoàn thành: `5`, P0: `4`, P1: `40`, P2: `9`, P3: `0`)
+**Quy mô:** `53 tasks` (Hoàn thành: `6`, P0: `4`, P1: `40`, P2: `9`, P3: `0`)
 
 | STT | Ưu Tiên | Trạng Thái | Mã Task | Tên Nhiệm Vụ | Link Reference Trong `TODO.md` | File Mã Nguồn Mục Tiêu |
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
-| 01 | `P1` | `[ ]` | **`TODO-STAB-02`** | Khử triệt để dao rơi trong Absorption Scanner (`TODO-SCN-02`) | [TODO.md#L28](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L28) | `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs` |
+| 01 | `P1` | `[x]` | **`TODO-STAB-02`** | Khử triệt để dao rơi trong Absorption Scanner (`TODO-SCN-02`) | [TODO.md#L28](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L28) | `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs` |
 | 02 | `P1` | `[ ]` | **`TODO-STAB-04`** | Bổ sung Chốt Chặn Đồng Thuận Pha Đa Khung Thời Gian (MTF Phase Coherence Gate) | [TODO.md#L43](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L43) | `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `momentum_ignition.rs` |
 | 03 | `P1` | `[ ]` | **`TODO-AUDIT-H-01`** | Hóa Giải Nghịch Lý Khối Lượng và Tái Sinh `reversal.rs` | [TODO.md#L102](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L102) | `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs` |
 | 04 | `P1` | `[ ]` | **`TODO-AUDIT-H-02`** | Phá Bẫy Catch-22 Giữa Stop Loss Cấu Trúc và VETO ROE | [TODO.md#L105](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L105) | `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `anomaly.rs`, `arbiter.rs` |
@@ -429,7 +429,7 @@
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
 | 01 | `P1` | `[~]` | **`TODO-STAB-05`** | Tái Cấu Trúc Hàm Mục Tiêu Fitness GA Theo Chuẩn t-Statistic EV_Net (TRẠNG THÁI: HOÀN THIỆN MỘT PHẦN — PHASE 1 DONE) | [TODO.md#L52](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L52) | `trading_bot/bot_engine/src/optimizer/prospector_runner.rs`, `ferro_trade/src/stats/core.rs` |
 | 02 | `P0` | `[ ]` | **`TODO-AUDIT-NEW-08`** | Triển Khai Staleness Watchdog Chống Zombie DNA Lock-in | [TODO.md#L155](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L155) | `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:423-440` |
-| 03 | `P0` | `[ ]` | **`TODO-AUDIT-NEW-11`** | Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`) | [TODO.md#L168](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L168) | `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385` |
+| 03 | `P0` | `[x]` | **`TODO-AUDIT-NEW-11`** | Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`) | [TODO.md#L168](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L168) | `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385` |
 | 04 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-18`** | Thẩm Định Ngoài Mẫu OOS Thuần Khiết Cắt Bỏ Nhiễm Bẩn Warmup (`TODO-PROS-02`) | [TODO.md#L189](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L189) | `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:410-435` |
 | 05 | `P2` | `[ ]` | **`TODO-AUDIT-NEW-132`** | Triển Khai Cơ Chế Đào Thải LRU Cho Fitness Cache Chống Cache Thrashing (`FT-CACHE-THRASHING`) | [TODO.md#L687](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L687) | `ferro_trade/src/optimizer/fitness_cache.rs:102-115` |
 | 06 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-135`** | Thay Thế `isize::MIN` Bằng Điểm Phạt Hữu Hạn Trong Đánh Giá GA (`FT-VAR-EXPLOSION-MIN`) | [TODO.md#L705](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L705) | `ferro_trade/src/optimizer/ga_worker.rs:345-350` |

@@ -25,11 +25,12 @@
     - [x] `test_tiered_profit_lock_locks_4_pct_at_8_pct_roe`
     - [x] `test_anti_atr_expansion_tightening`
 
-- [ ] **TODO-STAB-02: Khử triệt để dao rơi trong Absorption Scanner (`TODO-SCN-02`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`
-  - **Mô tả:** Bổ sung Macro Adverse Slope Veto: cấm Long khi `kama_slope_atr < -max_adverse_slope`, cấm Short khi `kama_slope_atr > max_adverse_slope`.
+- [x] **TODO-STAB-02: Khử triệt để dao rơi trong Absorption Scanner (`TODO-SCN-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:123-140`, `config.rs:1027-1031`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH] Bổ sung Macro Adverse Slope Veto (`FLAW-REG.9 TẦNG 2`): cấm Long khi `kama_slope_atr < -max_adverse_slope`, cấm Short khi `kama_slope_atr > max_adverse_slope` (tham số hóa DNA `max_adverse_slope` $\in [0.02, 0.25]$, mặc định `0.15`), kết hợp loại bỏ bộ lọc trễ pha `vwma < bb_middle` và neo SL trực tiếp theo đáy/đỉnh nến Spring/Upthrust vi mô.
   - **Unit Tests:**
-    - [ ] `test_absorption_rejects_falling_knife_adverse_kama`
+    - [x] `test_absorption_falling_knife_blocked_by_macro_trend`
+    - [x] `test_absorption_sl_spring_geometry`
 
 ---
 
@@ -192,9 +193,11 @@
   - **Unit Tests:**
     - [x] `test_extract_sl_price_from_action`
     - [x] `test_live_engine_initial_sl_from_policy`
-- [ ] **TODO-AUDIT-NEW-11: Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`)**
-  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385`
-  - **Mô tả:** Khởi tạo Job mới tăng dần (`new_job_id = max_job + 1`) mỗi chu kỳ Walk-Forward Rolling thay vì bỏ qua tạo Job khi file DB đã tồn tại.
+- [x] **TODO-AUDIT-NEW-11: Sửa Lỗ Hổng Tê Liệt GA Optimizer Từ Chu Kỳ 2 Trở Đi (`NEW-OPT-01`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-385`, `trading_bot/bot_engine/examples/walk_forward_smart_seed.rs:320-330`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH] Khởi tạo Job mới vô điều kiện mỗi chu kỳ Walk-Forward Rolling (`add_initial_job`), loại bỏ hoàn toàn bẫy kiểm tra Resume trên đĩa (`if !db_exists || get_max_job_id() == 0`) gây tê liệt GA; tự động dọn sạch tệp/thư mục đệm cũ trước khi chạy; loại bỏ dòng code xóa nhầm SQLite database chính (`walk_forward_smart_seed_db`) trong example.
+  - **Unit Tests:**
+    - [x] `test_prospector_runner_unconditional_job_seeding`
 - [x] **TODO-AUDIT-NEW-12: Khắc Phục Thảm Họa High Watermark Buffer Bleed Khi Lệnh Trôi Khỏi Buffer (`TODO-BRG-01`)**
   - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:223-238`, `strategies_backtests/helios/src/strategy/core_v3/risk.rs:310-330`
   - **Mô tả:** Bổ sung `highest_favorable_price` vào `LivePositionState` và `Trade`, cập nhật đơn điệu qua từng nến, xóa bỏ hoàn toàn vòng lặp quét lại toàn bộ nến quá khứ từ index 1 khi `mapped_entry_bar == 0`.
