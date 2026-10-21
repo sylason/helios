@@ -225,9 +225,10 @@
 - [x] **TODO-AUDIT-NEW-20: Triển Khai Tanh Scaling Cho KAMA Slope Chuẩn Hóa Theo ATR (`TODO-MAT-02`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs:81-84`, `config.rs:416-422`
   - **Mô tả:** [ĐÃ HOÀN THÀNH]: Thay thế phép kẹp cứng `.clamp(-1.0, 1.0)` bằng hàm hyperbol trơn $\tanh(s / \text{scale\_atr})$, mở rộng dải DNA `kama_slope_scale_atr` `[0.02, 1.00, step = 0.02]` (50 nấc giá trị). Khôi phục gradient trơn mượt phi tuyến tính, triệt tiêu hoàn toàn hiện tượng kẹt trần và mù giảm tốc khi sóng hạ nhiệt. Đã kiểm chứng qua unit tests `test_kama_slope_atr_scale_asset_agnostic` và `test_kama_slope_atr_tanh_scaling_preserves_gradient_under_extreme_trend`.
-- [ ] **TODO-AUDIT-NEW-21: Đồng Bộ Float Comparator Trong Chuẩn Hóa Phân Vị (`TODO-SEN-11`)**
-  - **File:** `strategies_backtests/helios/src/utils/normalization.rs:77, 88, 98`
-  - **Mô tả:** Thống nhất cách so sánh float giữa `dedup_by` và `binary_search_by` với cùng dung sai $\epsilon = 10^{-7}$, triệt tiêu hoàn toàn lỗi trả về `NaN` cho các nến hợp lệ.
+- [-] **TODO-AUDIT-NEW-21: Đồng Bộ Float Comparator Trong Chuẩn Hóa Phân Vị (`TODO-SEN-11`)**
+  - **File:** `strategies_backtests/helios/src/utils/normalization.rs:68-115`
+  - **Trạng thái:** `[-] (OBSOLETE / ARCHIVED)`
+  - **Mô tả:** Đã gắn cờ `#[deprecated]` cho `rolling_percentile`. Hàm này là Dead Code trong Helios V3 (đã được thay thế hoàn toàn bởi các bộ chuẩn hóa vật lý liên tục $O(1)$ như Tanh scaling và direct bounds theo Note 08 & Note 19 để triệt tiêu lỗi forward-fill MTF). Được lưu giữ tạm thời phục vụ Core V2 legacy và sẽ được dọn dẹp cùng Core V2.
 - [ ] **TODO-AUDIT-NEW-22: Sửa Fallback Z-Score Thành 0.0 Khi Thị Trường Đứng Im (`TODO-FT-02`)**
   - **File:** `ferro_trade/src/indicators/calculate/bulk.rs:128`, `helios/src/utils/normalization.rs:236`
   - **Mô tả:** Khi $\sigma \le 10^{-9}$ và $|X - \mu| \le 10^{-9}$, trả về $Z = 0.0$ thay vì `NaN`, ngăn ngừa lây nhiễm `NaN` toàn hệ thống khi thị trường flat.
@@ -773,11 +774,11 @@
   - **Unit Tests:**
     - [ ] `test_fitness_cache_lru_eviction`
 
-- [ ] **TODO-AUDIT-NEW-133: Định Danh Cache Key Theo Khung Thời Gian Trong `IndicatorManager` (`FT-TIMEFRAME-POLLUTE`)**
+- [x] **TODO-AUDIT-NEW-133: Định Danh Cache Key Theo Khung Thời Gian Trong `IndicatorManager` (`FT-TIMEFRAME-POLLUTE`)**
   - **File:** `ferro_trade/src/backtest/manager.rs:106-115`
   - **Mô tả:** `add_raw_cached` hardcode cứng chuỗi `"T1m"` và cột `"Close"` trong cache key. Khi nạp dữ liệu MTF (5m, 15m, 1h) vào cùng cache, các mảng nến khung khác nhau sẽ ghi đè lên nhau, gây sai lệch nghiêm trọng chỉ báo MTF. Bổ sung `timeframe.as_str()` và `column_name` vào cache key.
   - **Unit Tests:**
-    - [ ] `test_manager_cache_isolation_across_timeframes`
+    - [x] `test_manager_cache_isolation_across_timeframes`
 
 - [ ] **TODO-AUDIT-NEW-134: Khắc Phục Over-subscription CPU Bằng Nested Rayon ThreadPool Guard (`FT-CPU-OVERSUBSCRIBE`)**
   - **File:** `ferro_trade/src/optimizer/prospector.rs:898-903`

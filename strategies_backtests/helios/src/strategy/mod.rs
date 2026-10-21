@@ -1,11 +1,13 @@
 // strategies_backtests/helios/src/strategy/mod.rs
 
-pub mod config;
 pub mod core_v2;
 pub mod core_v3;
-pub mod memory;
 pub mod sensors;
-pub mod matrix;
+
+// Re-export Core V2 modules
+pub use crate::strategy::core_v2::config;
+pub use crate::strategy::core_v2::matrix;
+pub use crate::strategy::core_v2::memory;
 
 use std::collections::HashMap;
 

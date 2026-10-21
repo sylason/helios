@@ -65,6 +65,9 @@ impl FenwickTree {
 /// [ELITE - BUG #5 FIXED] Chuẩn hóa Bách phân vị trượt (Rolling Percentile).
 /// Sử dụng Thuật toán Rời rạc hóa (Discretization) kết hợp Cây nhị phân Fenwick Tree.
 /// Triệt tiêu 100% thảm họa dịch chuyển RAM O(W), nâng tốc độ tính toán gấp 20x với độ chính xác tuyệt đối 100%.
+#[deprecated(
+    note = "Superseded by O(1) continuous physical scalers in Helios V3 to eliminate MTF forward-fill distortion (Notes 08 & 19); scheduled for removal with Core V2"
+)]
 pub fn rolling_percentile(data: &[f64], window_size: usize) -> Vec<f64> {
     let len = data.len();
     let mut result = vec![f64::NAN; len];

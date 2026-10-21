@@ -31,6 +31,7 @@ pub struct MarketMatrix {
 
 impl MarketMatrix {
     /// Tính toán ma trận từ dữ liệu cảm biến thô.
+    #[allow(deprecated)]
     pub fn from_sensors(config: &HeliosConfig, sensors: &HeliosSensors, volumes: &[f64], vol_ratio: f64) -> Self {
         let len = volumes.len();
         
