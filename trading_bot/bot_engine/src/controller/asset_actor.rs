@@ -483,6 +483,8 @@ impl AssetActor {
             strategy.update_from_dna(dna_slice);
         }
         self.helios_config.update_from_dna(dna_slice);
+        // 🛡️ TODO-AUDIT-NEW-60 (H-CFG-05): Khóa bất biến thứ bậc phân tầng Trailing Stop cho bản sao helios_config
+        self.helios_config.risk_management.stop_management.enforce_tsl_hierarchy();
         info!(
             "✨ [{}] Áp dụng DNA thành công [{}]! (Fitness: {:.2}%, Dim: {})",
             self.symbol, context, fitness, dna_slice.len()

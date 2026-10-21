@@ -66,7 +66,7 @@
   - *Bản chất:* Struct `CacheKey` chỉ chứa loại chỉ báo, tham số và khung thời gian, hoàn toàn thiếu mã cặp tiền (`symbol`). Nếu dùng chung cache cho nhiều bot (BTC, ETH), các bot sẽ lấy nhầm chỉ báo của nhau!
   - *Giải pháp đề xuất:* Bổ sung `symbol: String` vào `CacheKey`.
 
-- [ ] **FLAW-3.6:** **`add_raw_cached` Gán Cứng Khung 1m Đè Cache Đa Khung Thời Gian**
+- [x] **FLAW-3.6:** **`add_raw_cached` Gán Cứng Khung 1m Đè Cache Đa Khung Thời Gian**
   - *Vị trí:* [`ferro_trade/src/backtest/manager.rs:70-76`](file:///E:/Projects/Automations/trading_backtest/ferro_trade/src/backtest/manager.rs#L70-L76)
   - *Bản chất:* Hàm cache chỉ báo thô tự động gán `Timeframe::T1m`. Hai chỉ báo cùng loại khác khung (ví dụ EMA 1h và EMA 4h) sẽ ghi đè lên nhau.
   - *Giải pháp đề xuất:* Truyền `Timeframe` thực tế của chỉ báo vào hàm cache.

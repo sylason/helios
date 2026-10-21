@@ -131,7 +131,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("🧬 [INITIAL OPTIMIZE] Chạy GA Optimizer huấn luyện ban đầu trên 30 ngày...");
 
     let prospector_db = format!("examples/storage/{}_prospector.db", STRATEGY_ID);
-    let walk_forward_smart_seed_db = format!("examples/storage/{}.db", STRATEGY_ID);
     if Path::new(&prospector_db).exists() {
         let _ = std::fs::remove_file(&prospector_db);
     }
@@ -319,12 +318,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 None
             };
 
-            // Dọn dẹp cache đệm prospector_db cũ để 99.5% quần thể được làm mới ngẫu nhiên (LHS Sampling)
-            if Path::new(&prospector_db).exists() {
-                let _ = std::fs::remove_file(&prospector_db);
-                let _ = std::fs::remove_file(&walk_forward_smart_seed_db);
-                debug!("🧹 [SMART SEEDING] Đã reset prospector_db để làm mới 99.5% quần thể còn lại.");
-            }
+            // [TODO-AUDIT-NEW-11]: Việc dọn dẹp cache đệm prospector_db (nếu có) nay đã được ProspectorRunner tự động xử lý bên trong.
+            // Tuyệt đối không xóa walk_forward_smart_seed_db vì chứa nến lịch sử và bảng DNA của bài test.
 
             let db_opt = db_store.clone();
             let dna_tx_clone = dna_tx.clone();

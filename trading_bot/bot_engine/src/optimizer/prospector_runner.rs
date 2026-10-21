@@ -349,11 +349,20 @@ impl ProspectorRunner {
                 .build().map_err(|e| e.to_string())?;
 
 
-            if let Some(parent) = Path::new(&prospector_db_path_owned).parent() {
+            // [TODO-AUDIT-NEW-11]: Dọn dẹp tệp/thư mục đệm cũ nếu có để đảm bảo môi trường sạch
+            let db_path = Path::new(&prospector_db_path_owned);
+            if db_path.exists() {
+                if db_path.is_dir() {
+                    let _ = std::fs::remove_dir_all(db_path);
+                } else {
+                    let _ = std::fs::remove_file(db_path);
+                }
+            }
+
+            if let Some(parent) = db_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
 
-            let db_exists = Path::new(&prospector_db_path_owned).exists();
             let mut prospector = Prospector::new(prospector_config).map_err(|e| e.to_string())?;
 
             if let Some(dna) = seed_dna {
@@ -367,10 +376,10 @@ impl ProspectorRunner {
                 info!("🌱 [Smart Seeding] Tiêm 1 hạt giống Rank 1 Champion từ chu kỳ trước vào Generation 0.");
             }
 
-            if !db_exists || prospector.backlog_storage.get_max_job_id() == 0 {
-                let flat_search_space = helios::strategy::core_v3::config::HeliosConfigV3::parameter_defs();
-                prospector.add_initial_job(flat_search_space);
-            }
+            // [TODO-AUDIT-NEW-11]: Khởi tạo Job mới vô điều kiện mỗi chu kỳ Walk-Forward Rolling
+            // Loại bỏ hoàn toàn bẫy Resume trên đĩa gây tê liệt GA từ chu kỳ 2 trở đi
+            let flat_search_space = helios::strategy::core_v3::config::HeliosConfigV3::parameter_defs();
+            prospector.add_initial_job(flat_search_space);
 
             let fitness_cfg_blocking = fitness_cfg;
             let objective = move |stats: &ferro_trade::stats::Stats| {
@@ -737,5 +746,39 @@ mod tests {
         let val_net_ret_pass = val_ret_pass - (val_trades_pass as f64 * slippage_drag_roe); // 4.1 - 1.6 = 2.5%
         let is_oos_failed_pass = val_trades_pass > 0 && (val_net_ret_pass < 0.0 || val_dd_pass > 15.0);
         assert!(!is_oos_failed_pass, "OOS 3 ngày có lãi ròng (+2.5%) và DD an toàn (4%) phải được APPROVE!");
+    }
+
+    #[test]
+    fn test_prospector_runner_unconditional_job_seeding() {
+        let temp_dir = std::env::temp_dir();
+        let db_path = temp_dir.join("test_prospector_unconditional.db");
+        let db_path_str = db_path.to_str().unwrap().to_string();
+
+        // Giả lập tệp đã tồn tại từ chu kỳ trước
+        std::fs::write(&db_path, b"dummy stale db content").expect("Failed to write dummy db file");
+        assert!(db_path.exists());
+
+        // Mô phỏng logic dọn dẹp và khởi tạo trong ProspectorRunner
+        if db_path.exists() {
+            if db_path.is_dir() {
+                let _ = std::fs::remove_dir_all(&db_path);
+            } else {
+                let _ = std::fs::remove_file(&db_path);
+            }
+        }
+        assert!(!db_path.exists(), "Tệp đệm cũ bắt buộc phải được dọn sạch");
+
+        let mut prospector_config = ProspectorConfig::default();
+        prospector_config.db_path = db_path_str;
+        let mut prospector = Prospector::new(prospector_config).expect("Failed to create prospector");
+
+        // Gọi add_initial_job vô điều kiện
+        let flat_search_space = helios::strategy::core_v3::config::HeliosConfigV3::parameter_defs();
+        prospector.add_initial_job(flat_search_space);
+
+        // Kiểm chứng hàng đợi hotspot_queue luôn nhận Job, không bao giờ bị rỗng
+        let (lock, _) = &*prospector.hotspot_queue;
+        let queue_len = lock.lock().len();
+        assert_eq!(queue_len, 1, "Hàng đợi hotspot_queue bắt buộc phải có 1 Job được nạp!");
     }
 }
