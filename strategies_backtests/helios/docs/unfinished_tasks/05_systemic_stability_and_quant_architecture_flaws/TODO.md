@@ -307,9 +307,18 @@
     - [x] `test_absorption_valid_accumulation_in_neutral_range`
     - [x] `test_absorption_spring_geometry_wick_deep_close_controlled`
 
-- [ ] **TODO-AUDIT-NEW-36: Hiệu Chuẩn Điểm Tự Tin Anti-Inflation & Loại Bỏ VWMA Trễ Pha (`ABS-SCORE-INFLATION`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:67-76`, `normalization.rs:25-37`
-  - **Mô tả:** Hiệu chuẩn lại hàm `sat_ratio_damped` để điểm tự tin `raw_score` không bị thổi phồng lên $0.90 \sim 0.98$ mỗi khi thân nến hẹp; loại bỏ điều kiện `vwma < bb_middle` gây nhiễu loạn 50/50 trong vùng nén.
+- [x] **TODO-AUDIT-NEW-36: Hiệu Chuẩn Điểm Tự Tin Anti-Inflation & Loại Bỏ VWMA Trễ Pha (`ABS-SCORE-INFLATION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `normalization.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH: 12/12 Audit PASS, 5 tests PASS]. 
+    1. Hiệu chuẩn lại hàm `sat_ratio_damped` bằng mẫu số điều hòa nến chuẩn 1.0 ATR: $\text{den} = 1.0 + \text{norm\_spread}$, triệt tiêu 100% điểm kỳ dị chia cho 0 và số ma thuật 0.10, dập tắt hiện tượng thổi phồng điểm $raw\_score \approx 0.98$ khi nến hẹp.
+    2. Bổ sung chốt chặn sàn cứng bất biến $Z_{\text{vol}} \le 0.0$ tại đầu hàm scan để từ chối ngay lập tức các nến chợ chiều vắng khách.
+    3. Khử số ma thuật `.max(0.10)` tại `norm_spread` và dọn dẹp sạch sẽ tàn dư docstring về `vwma`.
+  - **Unit Tests:**
+    - [x] `test_sat_ratio_damped_prevents_explosion`
+    - [x] `test_sat_ratio_damped_rejects_sub_normal_volume`
+    - [x] `test_sat_ratio_damped_rewards_genuine_wyckoff_spring`
+    - [x] `test_absorption_early_exit_on_sub_zero_volume`
+    - [x] `test_absorption_raw_score_not_inflated_on_normal_volume`
 
 - [x] **TODO-AUDIT-NEW-37: Nâng Cấp Kiến Trúc Tách Bạch 3 Tầng & Bộ Nhớ Sự Kiện Vi Mô (`ARCH-DECOUPLED-TIERS`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/` (`matrix.rs`, `gatekeeper.rs`, `arbiter.rs`, `risk.rs`, `scanners/`)

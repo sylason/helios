@@ -8,14 +8,13 @@
 //! ## 2. Logic Hoạt Động & Bộ Lọc Phòng Ngự 2 Tầng:
 //! - **Chỉ báo sử dụng:**
 //!   + `squeeze_intensity`: Cường độ nén của biến động thị trường.
-//!   + `volume_force`: Khối lượng giao dịch gia tăng bất thường.
-//!   + `vwma` (Volume Weighted Moving Average): Đường giá bình quân gia quyền khối lượng.
+//!   + `vol_z_score`: Khối lượng giao dịch gia tăng bất thường (Z-Score).
 //!   + `bb_middle`, `bb_lower`, `bb_upper`: Dải Bollinger Bands bao bọc vùng nén.
 //!   + `kama_slope_atr`: Độ dốc xu hướng KAMA chuẩn hóa theo ATR để tránh bẫy cản tàu hoặc bắt dao rơi.
 //! - **Hệ Thống Phòng Ngự 2 Tầng:**
-//!   + Tầng 1 (Price Action & Mean Alignment): Phải có sự đồng thuận giữa VWMA và Close so với BB Middle.
-//!     - Long: Cả VWMA và Close đều phải nằm trên hoặc bằng BB Middle.
-//!     - Short: Cả VWMA và Close đều phải nằm dưới hoặc bằng BB Middle.
+//!   + Tầng 1 (Price Action & Wick Clearance): Quét râu (%B_low / %B_high) kết hợp lực nến rút chân/đè đầu CLV.
+//!     - Long: Râu nến quét sâu vào vùng đáy tích lũy (%B_low <= max_bound) và CLV >= min_clv, close <= bb_middle.
+//!     - Short: Râu nến quét cao vào vùng đỉnh phân phối (%B_high >= 1 - max_bound) và CLV <= -min_clv, close >= bb_middle.
 //!   + Tầng 2 (Macro Trend Alignment): VETO chặn bắt dao rơi khi `kama_slope_atr` dốc ngược chiều vượt ngưỡng `max_adverse_slope`.
 //! - **Thiết lập Vị thế:**
 //!   + Long: SL neo dưới đáy nến Spring vi mô: `low - buffer`.
@@ -64,9 +63,14 @@ impl TacticalScanner for AbsorptionScanner {
         let candle_range = (high - low).max(1e-5);
         let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
 
-        // 🛡️ PHƯƠNG ÁN 2: Mô hình Nỗ lực vs Kết quả (Effort vs Result - Wyckoff VSA)
-        // Chuẩn hóa biên độ nến qua ATR với Epsilon toán học sàn 0.10 (chống chia cho 0)
-        let norm_spread = (candle_range / current_atr).max(0.10);
+        // 🛡️ CHỐT CHẶN BẤT BIẾN (TODO-AUDIT-NEW-36): Bắt buộc Volume phải vượt mức trung bình
+        // Triệt tiêu 100% nguy cơ mở lệnh gom hàng khi thị trường chết thanh khoản lúc nửa đêm
+        if raw_vol_z <= 0.0 {
+            return None;
+        }
+
+        // 🛡️ TODO-AUDIT-NEW-36: Chuẩn hóa biên độ nến qua ATR (phi thứ nguyên, khử số ma thuật sàn 0.10)
+        let norm_spread = candle_range / current_atr;
         let f_vol = sat_ratio_damped(raw_vol_z, norm_spread, vol_thresh);
 
         // 1. Chấm điểm Mềm Cường độ Nén Squeeze & Lực gom Volume qua trọng số DNA squeeze_weight
@@ -197,5 +201,121 @@ mod tests {
         let loss_dist_old = close - sl_old; // 2508 - 2397 = 111 giá
         let roe_loss_20x_old = 20.0 * (loss_dist_old / close); // ~ 88.5% ROE!
         assert!(roe_loss_20x_old > 0.15, "Công thức cũ bị bẫy SL phình to 88.5% ROE (chắc chắn bị Sniper Guard VETO)");
+    }
+
+    #[test]
+    fn test_absorption_early_exit_on_sub_zero_volume() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 20;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2002.0; len]),
+            low: std::sync::Arc::new(vec![1998.0; len]),
+            close: std::sync::Arc::new(vec![2000.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        let config = HeliosConfigV3::default();
+
+        // Volume âm (dưới trung bình)
+        sensors.vol_z_score = std::sync::Arc::new(vec![-0.5; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![2.0; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.80; len]);
+
+        let scanner = AbsorptionScanner;
+        let proposal = scanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(proposal.is_none(), "Khi volume Z <= 0.0, scanner bắt buộc phải thoát sớm trả về None!");
+    }
+
+    #[test]
+    fn test_absorption_raw_score_not_inflated_on_normal_volume() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 20;
+        let i = len - 1;
+        // Nến Spring tích lũy rút chân: close 1988, low 1982 (%B_low <= 0.40), high 1990
+        let mut lows = vec![1990.0; len];
+        let mut closes = vec![1995.0; len];
+        let mut highs = vec![2005.0; len];
+        lows[i] = 1982.0;
+        closes[i] = 1988.0;
+        highs[i] = 1990.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1986.0; len]),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        let config = HeliosConfigV3::default();
+
+        // Volume Z = 1.8 (bình thường, chưa phải cá mập bùng nổ), dải BB width = 40.0
+        sensors.vol_z_score = std::sync::Arc::new(vec![1.8; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]); // ATR = 10, candle_range = 8 -> norm_spread = 0.8
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.60; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
+
+        let scanner = AbsorptionScanner;
+        let proposal = scanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(proposal.is_some(), "Nến Spring rút chân hợp lệ phải tạo proposal!");
+        let prop = proposal.unwrap();
+        // Điểm tự tin không được thổi phồng lên > 0.85
+        assert!(prop.raw_score < 0.80, "Với volume bình thường 1.8 sigma, raw_score phải < 0.80, thực tế: {}", prop.raw_score);
     }
 }

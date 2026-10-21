@@ -23,17 +23,18 @@ pub fn sat_unbounded(val: f64, thresh: f64) -> f64 {
 }
 
 /// Chuẩn hóa tỉ số nỗ lực vs kết quả (Effort vs Result của Wyckoff)
-/// Áp dụng căn bậc hai $\sqrt{num / den} / thresh$ để chống bùng nổ điểm ảo khi nến nén thân hẹp.
+/// 🛡️ TODO-AUDIT-NEW-36: Chuẩn hóa mẫu số qua nến tham chiếu 1.0 ATR (Harmonic Scaling)
+/// Triệt tiêu vĩnh viễn điểm kỳ dị chia cho số nhỏ (Zero-Singularity) và số ma thuật 0.10.
+/// Công thức: $\tanh(\text{numerator} / ((1.0 + \text{denominator}) \cdot \text{thresh}))$
 #[inline]
 pub fn sat_ratio_damped(numerator: f64, denominator: f64, thresh: f64) -> f64 {
     if numerator.is_nan() || denominator.is_nan() || thresh.is_nan() || numerator <= 0.0 {
         return 0.0;
     }
-    let den = denominator.max(0.10); // Sàn biên độ tối thiểu 0.10 ATR
+    let den = 1.0 + denominator.max(0.0);
     let ratio = numerator / den;
-    let damped = ratio.sqrt();
     let t = thresh.max(1e-5);
-    (damped / t).tanh().clamp(0.0, 1.0)
+    (ratio / t).tanh().clamp(0.0, 1.0)
 }
 
 /// Chuẩn hóa khoảng cách bứt phá (Breakout Penetration) so với mục tiêu tối thiểu
@@ -132,12 +133,30 @@ mod tests {
 
     #[test]
     fn test_sat_ratio_damped_prevents_explosion() {
-        let thresh = 1.5;
-        // norm_spread rất nhỏ (0.10) và volume lớn (2.0) -> ratio = 20.0
-        // damped = sqrt(20.0) ~ 4.47 -> tanh(4.47 / 1.5) ~ tanh(2.98) ~ 0.995 (không bị blow up quá sớm)
-        let score = sat_ratio_damped(2.0, 0.10, thresh);
-        assert!(score < 1.0);
-        assert!(score > 0.90);
+        let thresh = 2.0;
+        // 🛡️ TODO-AUDIT-NEW-36: norm_spread rất nhỏ (0.10) và volume bình thường (1.8 sigma)
+        // ratio = 1.8 / (1.0 + 0.10) = 1.636 -> tanh(1.636 / 2.0) = tanh(0.818) ~ 0.674
+        // Không còn bị thổi phồng lên > 0.90 như công thức cũ!
+        let score = sat_ratio_damped(1.8, 0.10, thresh);
+        assert!(score >= 0.60 && score <= 0.75, "Score phải nằm trong vùng cân bằng 0.60..0.75, thực tế: {}", score);
+    }
+
+    #[test]
+    fn test_sat_ratio_damped_rejects_sub_normal_volume() {
+        let thresh = 2.0;
+        // Volume thấp (0.8 sigma) trong nến nén thân hẹp (0.10 ATR)
+        // ratio = 0.8 / 1.10 = 0.727 -> tanh(0.727 / 2.0) = tanh(0.364) ~ 0.348 (< 0.40)
+        let score = sat_ratio_damped(0.8, 0.10, thresh);
+        assert!(score < 0.40, "Volume thấp phải bị dập tắt điểm < 0.40, thực tế: {}", score);
+    }
+
+    #[test]
+    fn test_sat_ratio_damped_rewards_genuine_wyckoff_spring() {
+        let thresh = 2.0;
+        // Cá mập gom thật sự: Volume bùng nổ (3.6 sigma) trên nến rút chân hẹp (0.30 ATR)
+        // ratio = 3.6 / (1.0 + 0.30) = 2.769 -> tanh(2.769 / 2.0) = tanh(1.385) ~ 0.882 (Tier A)
+        let score = sat_ratio_damped(3.6, 0.30, thresh);
+        assert!(score >= 0.85, "Volume cá mập gom thật phải đạt điểm cao Tier A >= 0.85, thực tế: {}", score);
     }
 
     #[test]
