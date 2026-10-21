@@ -390,9 +390,12 @@
 
 ### PHẦN 13: KIỂM TOÁN HẠ TẦNG CỐT LÕI (CORE_V3/MOD, CONFIG & DNA MAPPING - NOTES 47, 48)
 
-- [ ] **TODO-AUDIT-NEW-53: Đồng Bộ Tái Tính Toán Sensors Khi Nhận DNA Hot-Swap (`H-MOD-01`, `H-CFG-02`)**
+- [x] **TODO-AUDIT-NEW-53: Đồng Bộ Tái Tính Toán Sensors Khi Nhận DNA Hot-Swap (`H-MOD-01`, `H-CFG-02`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:67-79`, `config.rs:24-70`
-  - **Mô tả:** Sửa lỗi `update_from_dna` chỉ cập nhật config/matrix mà bỏ rơi sensors, biến 34 gen indicators thành gen ma bù nhìn trong thực chiến; đồng bộ luồng tính lại chỉ báo kỹ thuật trong Live/Paper.
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Đã xác minh bản chất: `HeliosBridge::evaluate_live_tick` gọi `init()` trên mỗi nến 1m mới nên `sensors` luôn được tính lại theo DNA mới trong thực chiến. Đã sửa lỗi gọi `MarketMatrixV3::from_sensors` vô điều kiện khi `sensors` rỗng lúc Strategy mới khởi tạo (trong `ferro_trade::run_with_dna`) bằng guard `if !self.sensors.closes.is_empty()`. Việc tinh giản các gen indicator cố định thuộc scope của `TODO-AUDIT-NEW-63`.
+  - **Unit Tests:**
+    - [x] `test_update_from_dna_safe_on_empty_sensors`
+    - [x] `test_update_from_dna_updates_matrix_when_sensors_present`
 
 - [ ] **TODO-AUDIT-NEW-54: Loại Bỏ Lệnh Gọi Cầu Dao Đánh Giá Lặp Lại Tại `mod.rs` (`H-MOD-02`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:241`, `arbiter.rs:168-173`
@@ -418,9 +421,12 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:23, 392, 537, 612, 750, 852, 924, 1011`
   - **Mô tả:** Bổ sung `#[serde(default)]` cho tất cả struct con để chống lỗi parse JSON hoặc panic crash khi nhận cấu hình thiếu trường từ UI client.
 
-- [ ] **TODO-AUDIT-NEW-60: Thiết Lập Dải Phân Tầng Trailing Stop Thứ Bậc Bất Biến (`H-CFG-05`, `TODO-CFG-03`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:1071-1080`
-  - **Mô tả:** Tách dải tìm kiếm 3 tầng độc lập tăng dần: $tsl\_tight \in [0.4, 1.8] < tsl\_normal \in [1.2, 3.2] < tsl\_loose \in [2.5, 6.0]$, chấm dứt nghịch lý GA siết chặt siêu sóng và thả rông thị trường range.
+- [x] **TODO-AUDIT-NEW-60: Thiết Lập Dải Phân Tầng Trailing Stop Thứ Bậc Bất Biến (`H-CFG-05`, `TODO-CFG-03`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:1223-1234, 1326-1338`, `mod.rs:75-85`, `trading_bot/bot_engine/src/controller/asset_actor.rs:485`
+  - **Mô tả:** Mở rộng dải tìm kiếm DNA toàn năng $[0.40 \to 6.00\ \text{ATR}]$ (step 0.10, 57 nấc đều) cho cả 3 gen `tsl_atr_tight`, `tsl_atr_normal`, `tsl_atr_loose`; thiết lập phương thức khóa bất biến thứ bậc `enforce_tsl_hierarchy()` sắp xếp $O(1)$ (`tight <= normal <= loose`) tại các cổng nạp DNA và khởi tạo, triệt tiêu hoàn toàn nghịch lý GA siết chặt siêu sóng và thả rông thị trường range.
+  - **Unit Tests:**
+    - [x] `test_dna_width_and_parameter_defs_integrity` (khóa dải $[0.40, 6.00]$ và kiểm tra chia hết step cho cả 3 gen)
+    - [x] `test_tsl_hierarchy_enforcement_prevents_inversion` (kiểm tra hoán vị nghịch lý tại struct và qua `update_from_dna`)
 
 - [x] **TODO-AUDIT-NEW-61: Mở Rộng Dải Sàn Biến Động `min_natr_threshold` Cho Đa Tài Sản (`H-CFG-06`, `TODO-CFG-02`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:497-503`
@@ -1218,6 +1224,7 @@
 - [ ] **TODO-AUDIT-NEW-196: Chốt Lời Sang Biên Đối Diện Hộp (Opposite Boundary TP, $R:R \ge 1.5$) & Khóa Lãi Hòa Vốn Tại $POC$ (`RNG-OPPOSITE-BOUNDARY-TP`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`, `risk.rs`
   - **Mô tả:** Khắc phục tử huyệt R:R âm do chốt lời non tại trục giữa ($bb\_middle$). Take Profit thực tế bắt buộc phải hướng sang biên đối diện của hộp ($VAL \to VAH$ hoặc $VAH \to VAL$) để bảo đảm $R:R \ge 1.5$. Trục giữa $POC$ chỉ đóng vai trò là điểm kích hoạt dời Stop Loss về hòa vốn (Break-Even Lock).
+  - **Ghi chú Kiến trúc & Định hướng Refactor (Kế thừa Thảo luận Task 188):** Đánh giá chuyển đổi cơ chế TP của `RANGE_OSC` từ Dynamic BB sang **Static Limit Anchor $TP_0$ (tại biên đối diện) + Unified Adaptive TTP trong RAM** (đồng bộ với Reversal `TODO-AUDIT-NEW-188`). Khi hoàn tất, sẽ xóa bỏ hoàn toàn khối Dynamic TP còn lại tại `risk.rs:718-768`, vừa chống co thắt dải làm co hẹp TP, vừa tối ưu Maker fee và bảo toàn $R:R$ trên sổ lệnh sàn.
   - **Unit Tests:**
     - [ ] `test_range_bound_targets_opposite_boundary_rr_ge_1_5`
     - [ ] `test_range_bound_breakeven_lock_at_poc`
@@ -1275,3 +1282,11 @@
   - **Mô tả:** Thư mục `core_v2` cũ không còn sử dụng gây nhiễu code; file `core_v3/mod.rs` dài hơn 1,800 dòng do nhét toàn bộ test cases vào cuối file, làm giảm tính công thái học và cản trở bảo trì. Di chuyển `core_v2` vào `legacy/core_v2` và bóc tách toàn bộ `mod tests` trong `core_v3/mod.rs` sang file `strategies_backtests/helios/tests/core_v3_integration_tests.rs`.
   - **Unit Tests:**
     - [ ] `cargo test -p helios` xác nhận 100% tests pass nguyên vẹn sau khi di chuyển.
+
+- [ ] **TODO-AUDIT-NEW-205: Thiết Kế Máy Trạng Thái Vòng Đời Vị Thế 3 Pha & Động Cơ Thăng Cấp Siêu Sóng (`RISK-3STAGE-LIFECYCLE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `config.rs`, `mod.rs`
+  - **Mô tả:** [PHƯƠNG ÁN D / NOTE 56] Thiết kế kiến trúc quản trị thoát lệnh và chốt lời đa tầng dựa trên vòng đời vị thế 3 pha (3-Stage Lifecycle Exit Engine): (1) Pha 1 - Thoát Ma Sát (Friction Escape & Initial SL đến khi đạt EV Hurdle); (2) Pha 2 - Đấu Thầu Giá Trị Công Bằng (Fair Value Limit Anchor tại KAMA/POC/BBands + Dynamic BE Ratchet); (3) Pha 3 - Thăng Cấp Thả Diều Siêu Sóng (Momentum Runner Promotion: khi nến bứt phá qua vạch đích với Volume/ADX bùng nổ, hủy trần TP tĩnh và chuyển sang Trailing Take Profit bám đỉnh). Tham số hóa các ngưỡng chuyển pha vào DNA Mappable của Risk Manager.
+  - **Unit Tests:**
+    - [ ] `test_lifecycle_friction_escape_to_break_even`
+    - [ ] `test_lifecycle_fair_value_limit_anchor_execution`
+    - [ ] `test_lifecycle_momentum_runner_promotion_on_climax_breakout`

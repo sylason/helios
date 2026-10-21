@@ -1225,18 +1225,18 @@ pub struct RiskStopParams {
     pub be_buffer_atr_volatile: f64,
 
     // =========================================================================
-    // 5. BỘ 3 PHÂN TẦNG ATR TRAILING STOP PHỔ QUÁT (0.5 -> 15.0 ATR KHÔNG CHỒNG CHÉO)
+    // 5. BỘ 3 PHÂN TẦNG ATR TRAILING STOP THỨ BẬC BẤT BIẾN (TODO-AUDIT-NEW-60: TIGHT <= NORMAL <= LOOSE)
     // =========================================================================
-    /// - Phân Tầng Siết Chặt: Dành cho thị trường Range / Reversal / Đỉnh sóng (0.5 -> 4.5 ATR, Step 0.10 -> 41 nấc)
-    #[dna(min = 0.5, max = 4.5, step = 0.10)]
+    /// - Phân Tầng Siết Chặt: Dành cho thị trường Range / Reversal / Đỉnh sóng (0.40 -> 6.00 ATR, Step 0.10 -> 57 nấc)
+    #[dna(min = 0.40, max = 6.00, step = 0.10)]
     pub tsl_atr_tight: f64,
 
-    /// - Phân Tầng Chuẩn: Dành cho xu hướng bậc thang Trend Pullback & Absorption (0.5 -> 4.5 ATR, Step 0.10 -> 41 nấc)
-    #[dna(min = 0.5, max = 4.5, step = 0.10)]
+    /// - Phân Tầng Chuẩn: Dành cho xu hướng bậc thang Trend Pullback & Absorption (0.40 -> 6.00 ATR, Step 0.10 -> 57 nấc)
+    #[dna(min = 0.40, max = 6.00, step = 0.10)]
     pub tsl_atr_normal: f64,
 
-    /// - Phân Tầng Nới Lỏng: Dành cho siêu sóng bùng nổ Momentum & Anomaly (0.5 -> 4.5 ATR, Step 0.10 -> 41 nấc)
-    #[dna(min = 0.5, max = 4.5, step = 0.10)]
+    /// - Phân Tầng Nới Lỏng: Dành cho siêu sóng bùng nổ Momentum & Anomaly (0.40 -> 6.00 ATR, Step 0.10 -> 57 nấc)
+    #[dna(min = 0.40, max = 6.00, step = 0.10)]
     pub tsl_atr_loose: f64,
 
     // =========================================================================
@@ -1321,6 +1321,22 @@ pub struct RiskStopParams {
     #[dna(min = 0.001, max = 0.008, step = 0.0005)]
     #[serde(default = "default_dynamic_tp_min_gain_pct")]
     pub dynamic_tp_min_gain_pct: f64,
+}
+
+impl RiskStopParams {
+    /// 🛡️ TODO-AUDIT-NEW-60 (H-CFG-05): Khóa bất biến thứ bậc phân tầng Trailing Stop (tight <= normal <= loose)
+    #[inline]
+    pub fn enforce_tsl_hierarchy(&mut self) {
+        if self.tsl_atr_tight > self.tsl_atr_normal {
+            std::mem::swap(&mut self.tsl_atr_tight, &mut self.tsl_atr_normal);
+        }
+        if self.tsl_atr_normal > self.tsl_atr_loose {
+            std::mem::swap(&mut self.tsl_atr_normal, &mut self.tsl_atr_loose);
+        }
+        if self.tsl_atr_tight > self.tsl_atr_normal {
+            std::mem::swap(&mut self.tsl_atr_tight, &mut self.tsl_atr_normal);
+        }
+    }
 }
 
 impl Default for RiskStopParams {

@@ -75,12 +75,21 @@ impl Strategy for HeliosStrategyV3 {
         self.config.update_from_dna(dna);
         // 🛡️ TASK-MAT-05: Đồng bộ hóa cấu hình Keltner timeframe theo BBands
         self.config.indicators.keltner.timeframe = self.config.indicators.bbands.timeframe;
-        self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
+        // 🛡️ TODO-AUDIT-NEW-60 (H-CFG-05): Khóa bất biến thứ bậc phân tầng Trailing Stop (tight <= normal <= loose)
+        self.config.risk_management.stop_management.enforce_tsl_hierarchy();
+
+        // 🛡️ [TODO-AUDIT-NEW-53 / H-MOD-01]: Chỉ tái tính toán Ma trận khi sensors đã được nạp dữ liệu từ init()
+        // Nếu sensors rỗng (ví dụ trước khi init trong BacktestBuilder::run_with_dna), giữ matrix ở trạng thái default để tránh cấp phát thừa.
+        if !self.sensors.closes.is_empty() {
+            self.matrix = MarketMatrixV3::from_sensors(&self.config, &self.sensors);
+        }
     }
 
     fn init(&mut self, ctx: &mut InitContext) {
         // 🛡️ TASK-MAT-05: Khóa cứng đồng bộ 100% Timeframe của Keltner Channel theo Bollinger Bands (Serde-Safe)
         self.config.indicators.keltner.timeframe = self.config.indicators.bbands.timeframe;
+        // 🛡️ TODO-AUDIT-NEW-60 (H-CFG-05): Khóa bất biến thứ bậc phân tầng Trailing Stop khi khởi tạo
+        self.config.risk_management.stop_management.enforce_tsl_hierarchy();
 
         let ind = &self.config.indicators;
 
@@ -1455,6 +1464,21 @@ mod tests {
             }
             other => panic!("min_natr_threshold phải là ParamDefinition::Range, nhận {:?}", other),
         }
+        // 🛡️ TODO-AUDIT-NEW-60 (H-CFG-05): Khóa dải DNA Trailing Stop phân tầng phủ rộng [0.40, 6.00], step 0.10 (56 bước đều)
+        for tsl_param in &["tsl_atr_tight", "tsl_atr_normal", "tsl_atr_loose"] {
+            let tsl_def = defs.iter().find(|(name, _)| name.contains(tsl_param)).map(|(_, d)| d);
+            match tsl_def {
+                Some(ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step }) => {
+                    assert!((min - 0.40).abs() < 1e-12, "{}.min phải = 0.40, nhận {}", tsl_param, min);
+                    assert!((max - 6.00).abs() < 1e-12, "{}.max phải = 6.00, nhận {}", tsl_param, max);
+                    let s = step.expect("phải có step");
+                    assert!((s - 0.10).abs() < 1e-12, "{}.step phải = 0.10, nhận {}", tsl_param, s);
+                    let n_steps = (max - min) / s;
+                    assert!((n_steps - n_steps.round()).abs() < 1e-9, "{}: Dải phải chia hết cho step (chống Discrete Binning Bias)", tsl_param);
+                }
+                other => panic!("{} phải là ParamDefinition::Range, nhận {:?}", tsl_param, other),
+            }
+        }
         assert!(has_pb_boundary_z, "defs phải chứa tactical_sniper.pullback.max_boundary_z!");
         assert!(has_pb_squeeze, "defs phải chứa tactical_sniper.pullback.max_squeeze_intensity!");
         assert!(!has_max_chaos, "defs KHÔNG được chứa max_chaos_penalty (đã loại bỏ gen theo Pure Confidence FLAW-RISK.11)!");
@@ -1590,6 +1614,56 @@ mod tests {
         assert!(ind.adx.period > 0, "adx.period must be > 0");
         assert!(ind.bbands.period > 0, "bbands.period must be > 0");
         assert!(ind.atr.period > 0, "atr.period must be > 0");
+    }
+
+    #[test]
+    fn test_tsl_hierarchy_enforcement_prevents_inversion() {
+        use crate::strategy::core_v3::config::RiskStopParams;
+
+        // 1. Kiểm tra trực tiếp trên struct RiskStopParams khi có giá trị nghịch lý
+        let mut stop_params = RiskStopParams {
+            tsl_atr_tight: 4.8,
+            tsl_atr_normal: 2.5,
+            tsl_atr_loose: 0.8,
+            ..Default::default()
+        };
+        stop_params.enforce_tsl_hierarchy();
+        assert!((stop_params.tsl_atr_tight - 0.8).abs() < 1e-12, "tsl_atr_tight phải là giá trị nhỏ nhất (0.8)");
+        assert!((stop_params.tsl_atr_normal - 2.5).abs() < 1e-12, "tsl_atr_normal phải là giá trị trung gian (2.5)");
+        assert!((stop_params.tsl_atr_loose - 4.8).abs() < 1e-12, "tsl_atr_loose phải là giá trị lớn nhất (4.8)");
+
+        // 2. Kiểm tra trường hợp GA bốc 3 số bằng nhau (cho phép chấp nhận)
+        let mut equal_params = RiskStopParams {
+            tsl_atr_tight: 2.0,
+            tsl_atr_normal: 2.0,
+            tsl_atr_loose: 2.0,
+            ..Default::default()
+        };
+        equal_params.enforce_tsl_hierarchy();
+        assert!((equal_params.tsl_atr_tight - 2.0).abs() < 1e-12);
+        assert!((equal_params.tsl_atr_normal - 2.0).abs() < 1e-12);
+        assert!((equal_params.tsl_atr_loose - 2.0).abs() < 1e-12);
+
+        // 3. Kiểm tra thông qua HeliosStrategyV3::update_from_dna
+        let mut strategy = HeliosStrategyV3::default();
+        let mut dna = vec![0.5; HeliosConfigV3::DNA_WIDTH];
+        
+        let defs = HeliosConfigV3::parameter_defs();
+        let tight_idx = defs.iter().position(|(name, _)| name.contains("tsl_atr_tight")).unwrap();
+        let normal_idx = defs.iter().position(|(name, _)| name.contains("tsl_atr_normal")).unwrap();
+        let loose_idx = defs.iter().position(|(name, _)| name.contains("tsl_atr_loose")).unwrap();
+
+        // Nạp giá trị nghịch lý thô: tight=5.0, normal=3.0, loose=1.0
+        dna[tight_idx] = 5.0;
+        dna[normal_idx] = 3.0;
+        dna[loose_idx] = 1.0;
+
+        strategy.update_from_dna(&dna);
+        let stop_cfg = &strategy.config.risk_management.stop_management;
+        assert!(stop_cfg.tsl_atr_tight <= stop_cfg.tsl_atr_normal, "Tight ({}) phải <= Normal ({})", stop_cfg.tsl_atr_tight, stop_cfg.tsl_atr_normal);
+        assert!(stop_cfg.tsl_atr_normal <= stop_cfg.tsl_atr_loose, "Normal ({}) phải <= Loose ({})", stop_cfg.tsl_atr_normal, stop_cfg.tsl_atr_loose);
+        assert!((stop_cfg.tsl_atr_tight - 1.0).abs() < 0.15, "Tight phải là 1.0 sau khi sắp xếp, nhận {}", stop_cfg.tsl_atr_tight);
+        assert!((stop_cfg.tsl_atr_loose - 5.0).abs() < 0.15, "Loose phải là 5.0 sau khi sắp xếp, nhận {}", stop_cfg.tsl_atr_loose);
     }
 
     #[test]
@@ -3449,6 +3523,60 @@ mod tests {
         let parsed_without_tf: Result<KeltnerParams, _> = serde_json::from_str(json_without_tf);
         assert!(parsed_without_tf.is_ok(), "JSON thiếu trường timeframe phải tự động fallback về default mà không panic!");
         assert_eq!(parsed_without_tf.unwrap().timeframe, Timeframe::T5m);
+    }
+
+    #[test]
+    fn test_update_from_dna_safe_on_empty_sensors() {
+        use ferro_trade::strategy::Strategy;
+
+        let mut strategy = HeliosStrategyV3::new(&std::collections::HashMap::new());
+        assert!(strategy.sensors.closes.is_empty(), "Strategy mới tạo phải có sensors rỗng");
+        assert!(strategy.matrix.kama_slope_atr.is_empty(), "Strategy mới tạo phải có matrix rỗng");
+
+        let dummy_dna = vec![0.5; HeliosConfigV3::DNA_WIDTH];
+        strategy.update_from_dna(&dummy_dna);
+
+        // Đảm bảo không gọi from_sensors sinh ma trận rác và matrix vẫn giữ nguyên trạng thái an toàn
+        assert!(strategy.matrix.kama_slope_atr.is_empty(), "Matrix phải giữ nguyên rỗng khi sensors rỗng");
+        assert_eq!(
+            strategy.config.indicators.keltner.timeframe,
+            strategy.config.indicators.bbands.timeframe,
+            "Keltner timeframe vẫn phải được đồng bộ"
+        );
+    }
+
+    #[test]
+    fn test_update_from_dna_updates_matrix_when_sensors_present() {
+        use ferro_trade::strategy::Strategy;
+
+        let mut strategy = HeliosStrategyV3::new(&std::collections::HashMap::new());
+        let len = 50;
+        
+        // Giả lập sensors đã có dữ liệu sau khi chạy init()
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.highs = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.lows = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.volumes = std::sync::Arc::new(vec![100.0; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.40; len]); // raw slope
+        strategy.sensors = sensors;
+
+        // Ban đầu chưa chạy from_sensors
+        assert!(strategy.matrix.kama_slope_atr.is_empty());
+
+        let mut dummy_dna = vec![0.5; HeliosConfigV3::DNA_WIDTH];
+        let defs = HeliosConfigV3::parameter_defs();
+        let scale_idx = defs.iter().position(|(name, _)| name.contains("kama_slope_scale_atr")).unwrap();
+
+        // Nạp kama_slope_scale_atr = 0.40
+        // Khi slope = 0.40 và scale_atr = 0.40 => tanh(0.40 / 0.40) = tanh(1.0) ~ 0.76159
+        dummy_dna[scale_idx] = 0.40;
+        strategy.update_from_dna(&dummy_dna);
+
+        assert!(!strategy.matrix.kama_slope_atr.is_empty(), "Matrix phải được recompute khi sensors có dữ liệu");
+        let actual_val = strategy.matrix.kama_slope_atr[0];
+        let expected_val = (0.40 / 0.40_f64).tanh();
+        assert!((actual_val - expected_val).abs() < 1e-4, "kama_slope_atr phải được re-scale chính xác: expected {}, actual {}", expected_val, actual_val);
     }
 }
 
