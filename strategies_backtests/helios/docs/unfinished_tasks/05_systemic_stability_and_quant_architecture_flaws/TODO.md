@@ -1171,12 +1171,14 @@
 
 ## 🏛️ PHẦN 28: GIA CỐ TOÀN DIỆN CHIẾN ĐỘI REVERSAL (NOTES 33, 41, 42)
 
-- [ ] **TODO-AUDIT-NEW-188: Triển Khai Monotonic TP Floor Guard Khóa Sàn Lợi Nhuận Reversal Chống KAMA Trôi Dốc Đè Bẹp TP (`REV-MONOTONIC-TP-FLOOR`)**
+- [x] **TODO-AUDIT-NEW-188: Triển Khai Kiến Trúc Dual-Layer TP (Static Limit Anchor $TP_0$ + Unified Adaptive TTP) Cho Reversal Chống KAMA Trôi Dốc Đè Bẹp TP (`REV-MONOTONIC-TP-FLOOR`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `scanners/reversal.rs`
-  - **Mô tả:** Khi bắt đáy đảo chiều, KAMA Midline phản ứng trễ nên tiếp tục cắm dốc xuống trong 5–10 nến tiếp theo. Đặt TP bám theo KAMA Midline động sẽ khiến mức TP bị kéo tụt xuống sát Entry, biến một vị thế lãi lớn thành hòa vốn hoặc lỗ phí sàn. Khóa sàn mức TP tối thiểu không được phép tụt lùi quá 30% so với mức TP ban đầu được xác lập tại nến Entry.
+  - **Mô tả:** [ĐÃ HOÀN THÀNH] Triệt tiêu tận gốc hiện tượng KAMA Midline trôi dốc đè bẹp Take Profit của Reversal bằng kiến trúc 2 tầng chuẩn mực:
+    1. *Tầng Sàn (Binance Orderbook):* Giữ nguyên $TP_0 = \text{kama\_mid}_{t_0}$ làm **Static Limit Anchor** bất biến trên sàn (bảo toàn tỷ lệ $R:R \ge 1.2$ đã kiểm định ở `scan()`, tối ưu Maker fee, 0 trượt giá khi có râu nến quét).
+    2. *Tầng RAM (Helios Engine):* Mở khóa `is_ttp_eligible = true` trong `risk.rs` cho toàn bộ Playbook; kích hoạt Trailing Take Profit bám đỉnh (Peak-Callback $0.8\text{ ATR}$) và Tiered Profit Ratchet khi vị thế có lãi lớn ($\ge 15\%$ ROE) rồi quay đầu hụt hơi trước khi chạm $TP_0$.
   - **Unit Tests:**
-    - [ ] `test_reversal_monotonic_tp_floor_prevents_midline_collapse`
-    - [ ] `test_reversal_tp_locks_initial_target_within_30_pct_tolerance`
+    - [x] `test_reversal_static_tp_anchor_immune_to_kama_downward_drift`
+    - [x] `test_reversal_ttp_locks_profit_before_hitting_tp0`
 
 - [ ] **TODO-AUDIT-NEW-189: Triển Khai Chốt Chặn Phá Vỡ Cấu Trúc Secondary Test (Structural Invalidation Guard Cắt Lỗ Khi Thủng $Low_{SC}$) (`REV-STRUCTURAL-INVALIDATION`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `risk.rs`

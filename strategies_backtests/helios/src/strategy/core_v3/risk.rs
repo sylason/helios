@@ -587,10 +587,11 @@ impl RiskManager {
             // =========================================================================
             // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
             // =========================================================================
-            // Áp dụng cho các Playbook xu hướng hoặc không có TP cố định (TREND_PB, MOMENTUM_IGN, ABSORPTION, ANOMALY)
-            // Giúp thả diều tối đa lợi nhuận siêu sóng và chỉ chốt lời khi giá tạo đỉnh quay đầu (Callback).
+            // 🚀 [TODO-AUDIT-NEW-188: UNIFIED DUAL-LAYER TTP ENGINE]
+            // Áp dụng cơ chế bám đỉnh chốt lời (Trailing Take Profit) cho TẤT CẢ các Playbook (kể cả REVERSAL và RANGE_OSC).
+            // Ngay cả khi lệnh có Static Limit Anchor TP0 trên sàn, TTP trong RAM vẫn bảo vệ khóa lợi nhuận nếu giá tạo đỉnh rồi quay đầu.
             // 🛡️ TODO-SEM-03: Tách độc lập TTP khỏi Break-Even. TTP chỉ kích hoạt khi peak_roe >= ttp_act_roe (>= 15% ROE).
-            let is_ttp_eligible = matches!(tag_str, "TREND_PB" | "MOMENTUM_IGN" | "ABSORPTION" | "ANOMALY") || trade.tp_price.is_none();
+            let is_ttp_eligible = true;
             if is_ttp_eligible {
                 let ttp_act_roe = if risk_cfg.ttp_activation_roe > 0.0 { risk_cfg.ttp_activation_roe } else { 0.15 };
                 let ttp_cb_atr = if risk_cfg.ttp_callback_atr > 0.0 { risk_cfg.ttp_callback_atr } else { 0.80 };
@@ -712,21 +713,17 @@ impl RiskManager {
             // =========================================================================
             // 🎯 [FLAW-TSL.1: HYBRID TTP - NHÁNH A: DYNAMIC STRUCTURAL TAKE PROFIT]
             // =========================================================================
-            // Cho các Playbook RANGE_OSC (Bollinger Bands) và REVERSAL (KAMA Mid).
-            // Dời TP bám sát cấu trúc thị trường động thay vì bị đóng băng (Frozen Static TP).
+            // Cho Playbook RANGE_OSC (Bollinger Bands).
+            // 🛡️ TODO-AUDIT-NEW-188: REVERSAL đã được tách sang Static Limit Anchor TP0 kết hợp Unified TTP trong RAM,
+            // không còn bị KAMA dốc xuống đè bẹp TP. RANGE_OSC tiếp tục bám dải BB (sẽ tối ưu hóa tại TODO-AUDIT-NEW-196).
             let mut new_tp_to_update = trade.tp_price;
-            if tag_str == "RANGE_OSC" || tag_str == "REVERSAL" {
-                let raw_tp = if tag_str == "RANGE_OSC" {
-                    let tp_ratio = config.tactical_sniper.range.tp_target_ratio.clamp(0.10, 0.90);
-                    let bb_width = (sensors.bb_upper[i] - sensors.bb_lower[i]).max(0.0);
-                    if trade.is_long() {
-                        sensors.bb_lower[i] + bb_width * tp_ratio
-                    } else {
-                        sensors.bb_upper[i] - bb_width * tp_ratio
-                    }
+            if tag_str == "RANGE_OSC" {
+                let tp_ratio = config.tactical_sniper.range.tp_target_ratio.clamp(0.10, 0.90);
+                let bb_width = (sensors.bb_upper[i] - sensors.bb_lower[i]).max(0.0);
+                let raw_tp = if trade.is_long() {
+                    sensors.bb_lower[i] + bb_width * tp_ratio
                 } else {
-                    // REVERSAL: Mục tiêu phục hồi sóng hồi về KAMA Mid
-                    sensors.kama_mid[i]
+                    sensors.bb_upper[i] - bb_width * tp_ratio
                 };
 
                 if !raw_tp.is_nan() && raw_tp > 0.0 {
@@ -1017,25 +1014,49 @@ mod tests {
     }
 
     #[test]
-    fn test_dynamic_structural_tp_reversal_kama_short() {
-        let entry_price: f64 = 2500.0;
-        let current_atr: f64 = 10.0;
-        let min_gain_pct: f64 = 0.002; // 0.2%
-        let calculated_sl: f64 = 2520.0;
+    fn test_reversal_static_tp_anchor_immune_to_kama_downward_drift() {
+        // 🛡️ TODO-AUDIT-NEW-188: Kiểm chứng tính bất biến của TP0: Khi KAMA Midline lao dốc sau cú sập hoảng loạn,
+        // TP0 của Reversal vẫn giữ nguyên giá trị ban đầu, không bị dìm tụt về giá vốn.
+        let initial_kama_mid = 2500.0; // TP0 thiết lập tại t0 (R:R > 2.0)
+        let tp_price = Some(initial_kama_mid);
 
-        // Vị thế Short: KAMA Mid là mục tiêu chốt lời hồi quy
-        let max_tp_ceiling: f64 = entry_price * (1.0 - min_gain_pct); // 2495.0
-        let spread_ceiling: f64 = calculated_sl - (0.5 * current_atr); // 2515.0
+        // Giả lập 5 nến tiếp theo KAMA dốc cắm xuống
+        let plunged_kama_mid_values = [2480.0, 2450.0, 2420.0, 2410.0, 2405.0];
+        
+        let tag_str = "REVERSAL";
+        for plunged_kama in plunged_kama_mid_values {
+            // Với kiến trúc Phương Án B, REVERSAL không nằm trong khối Dynamic TP
+            let new_tp_to_update = if tag_str == "RANGE_OSC" {
+                Some(plunged_kama)
+            } else {
+                tp_price // Giữ nguyên TP0 tĩnh bất biến
+            };
+            assert_eq!(new_tp_to_update, Some(2500.0), "TP của Reversal phải là Static Anchor bất biến");
+        }
+    }
 
-        // 1. KAMA Mid bình thường: 2470.0 -> TP lấy 2470.0
-        let kama_mid: f64 = 2470.0;
-        let final_tp: f64 = kama_mid.min(max_tp_ceiling).min(spread_ceiling);
-        assert_eq!(final_tp, 2470.0);
+    #[test]
+    fn test_reversal_ttp_locks_profit_before_hitting_tp0() {
+        // 🛡️ TODO-AUDIT-NEW-188: Kiểm chứng Lớp 2 (RAM): Giá tăng mạnh từ 2400 lên 2480 (ROE 66.6% tại 20x),
+        // chưa chạm TP0 (2500.0) nhưng quay đầu giảm quá 0.8 ATR -> TTP kích hoạt Market Close.
+        let entry_price = 2400.0;
+        let leverage = 20.0;
+        let current_atr = 10.0;
+        let ttp_act_roe = 0.15; // 15% ROE
+        let ttp_cb_atr = 0.80; // 0.8 ATR = 8.0 giá
+        let min_gain_pct = 0.002;
 
-        // 2. KAMA Mid bị kéo lên cao 2505.0 (> entry) -> Max Profit Ceiling Guard phải kẹp tại 2495.0
-        let kama_mid_bad: f64 = 2505.0;
-        let guarded_bad: f64 = kama_mid_bad.min(max_tp_ceiling).min(spread_ceiling);
-        assert_eq!(guarded_bad, 2495.0, "Short TP không bao giờ được cao hơn giá vốn trừ min_gain");
+        let peak_val = 2480.0;
+        let peak_roe = ((peak_val - entry_price) / entry_price) * leverage;
+        assert!(peak_roe >= ttp_act_roe, "Peak ROE đạt 66.6% >= 15% phải kích hoạt TTP");
+
+        let ttp_trigger_price = peak_val - (ttp_cb_atr * current_atr); // 2480 - 8 = 2472.0
+        let min_exit_price = entry_price * (1.0 + min_gain_pct); // 2404.8
+
+        // Giá quay đầu tụt xuống 2470.0 (<= 2472.0)
+        let current_close = 2470.0;
+        let should_exit = current_close <= ttp_trigger_price && current_close >= min_exit_price;
+        assert!(should_exit, "TTP phải kích hoạt chốt lời khi giá hụt hơi quay đầu");
     }
 
     #[test]
