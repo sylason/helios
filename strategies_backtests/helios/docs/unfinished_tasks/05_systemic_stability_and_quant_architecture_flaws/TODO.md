@@ -930,12 +930,12 @@
     - [ ] `test_cold_start_fallback_to_baseline_seed_on_wfe_reject`
     - [ ] `test_existing_champion_not_overwritten_by_baseline`
 
-- [ ] **TODO-AUDIT-NEW-153: Triển Khai Bộ Đệm Top-K Candidates Waterfall ($K=5$) Vượt Cửa Ải WFE Gate Trong `ProspectorRunner` (`TODO-PROS-08`)**
-  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:395-408`
+- [x] **TODO-AUDIT-NEW-153: Triển Khai Bộ Đệm Top-K Candidates Waterfall ($K=5$) Vượt Cửa Ải WFE Gate Trong `ProspectorRunner` (`TODO-PROS-08`)**
+  - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:360-500`
   - **Mô tả:** Runner hiện chỉ trích xuất duy nhất 1 cá thể Rank 1 In-Sample đi thẩm định OOS. Trích xuất Top 5 cá thể In-Sample tốt nhất từ quần thể GA và chạy thẩm định OOS tuần tự theo cơ chế Waterfall: Cá thể đầu tiên vượt qua tiêu chuẩn Do-No-Harm sẽ được chọn làm Champion triển khai ra Live; nếu cả 5 đều rớt mới kích hoạt Defensive Hold.
   - **Unit Tests:**
-    - [ ] `test_top_k_waterfall_picks_first_passing_candidate`
-    - [ ] `test_top_k_waterfall_all_reject_triggers_defensive_hold`
+    - [x] `test_top_k_waterfall_picks_first_passing_candidate`
+    - [x] `test_top_k_waterfall_all_reject_preserves_state`
 
 - [ ] **TODO-AUDIT-NEW-154: Giải Phóng Khóa Tĩnh Toàn Cục `DIAGNOSTIC_LOCK` Cho Phép Đa Cặp Tiền Backtest Đồng Thời (`TODO-TB-05`)**
   - **File:** `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:335`, `controller/asset_actor.rs:360`
