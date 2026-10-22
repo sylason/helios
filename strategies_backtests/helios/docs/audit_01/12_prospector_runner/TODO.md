@@ -18,7 +18,7 @@
 | **5** | `TASK-PROS-05` | Làm mượt hàm phạt Early Termination trong GA để bảo vệ phương sai cho Pruning Strategy | **MEDIUM** | 🔴 Chưa xử lý | `prospector_runner.rs:260–273` |
 | **6** | `TASK-PROS-06` | Cấu hình hóa các hằng số WFE Gate vào `FullOptimizerConfig` (Loại bỏ Hardcoded Constants) | **LOW** | 🔴 Chưa xử lý | `prospector_runner.rs:194–196, 339`, `helios_optimizer_config.json` |
 | **7** | `TASK-PROS-07` | Bổ sung kiểm tra tính toàn vẹn và tương thích số chiều DNA trước khi tiêm hạt giống mồi (Seed Guard) | **LOW** | 🔴 Chưa xử lý | `prospector_runner.rs:283–292` |
-| **8** | `TASK-PROS-08` | Bộ đệm ứng viên Top-K Champions qua WFE Gate chống bẫy Overfitting Rank 1 | **CRITICAL** | 🔴 Chưa xử lý | `prospector_runner.rs:320–360`, `prospector.rs` |
+| **8** | `TASK-PROS-08` | Bộ đệm ứng viên Top-K Champions qua WFE Gate chống bẫy Overfitting Rank 1 | **CRITICAL** | 🟢 Đã hoàn thành | `prospector_runner.rs:360–480` |
 | **9** | `TASK-PROS-09` | Cơ chế Tẩy Não Hạt Giống (Seed Retirement) khi thất bại liên tiếp $\ge 3$ chu kỳ | **HIGH** | 🔴 Chưa xử lý | `prospector_runner.rs`, `storage.rs` |
 
 ---
@@ -160,7 +160,8 @@
 
 ---
 
-### 🔴 TASK-PROS-08: Bộ đệm ứng viên Top-K Champions qua WFE Gate chống bẫy Overfitting Rank 1
+### 🟢 TASK-PROS-08: Bộ đệm ứng viên Top-K Champions qua WFE Gate chống bẫy Overfitting Rank 1 (ĐÃ HOÀN THÀNH)
+- **Trạng thái:** `[x]` Đã hoàn thành 100%. Đã triển khai Top-K Candidates trích xuất từ `Prospector`, khử trùng lặp qua `DnaKey`, duyệt vòng lặp Waterfall First-Pass Greedy và chọn ứng viên đầu tiên vượt qua OOS Do-No-Harm Gate. Đã thêm 2 unit test xác minh hành vi.
 - **Mã lỗi liên đới:** `VULN-PROS-08` (Critical).
 - **Tài liệu thiết kế chi tiết:** [`top_k_champions_and_seed_retirement.md`](./top_k_champions_and_seed_retirement.md)
 - **Hiện trạng:**
