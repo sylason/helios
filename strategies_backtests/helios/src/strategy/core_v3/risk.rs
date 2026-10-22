@@ -513,34 +513,6 @@ impl RiskManager {
                 0.0
             };
 
-            let max_hold = risk_cfg.max_stagnant_hold_bars;
-            if max_hold > 0 && bars_held >= max_hold {
-                // Nếu sau thời gian ngâm tối đa mà tỷ lệ lãi chưa đạt ngưỡng tối thiểu
-                if trade_price_pnl_pct < risk_cfg.stagnant_min_profit_pct {
-                    if _debug_mode {
-                        tracing::info!(
-                            "⏳ [STAGNANT CAPITAL RELEASE] Bar: {} | Trade #{:?} | Held: {} bars >= max: {} | PnL: {:+.2}% < min: {:.2}% -> Closed to release capital",
-                            i, trade.id, bars_held, max_hold, trade_price_pnl_pct * 100.0, risk_cfg.stagnant_min_profit_pct * 100.0
-                        );
-                    }
-                    tick.close(None);
-                    continue;
-                }
-            }
-
-            // Zombie Trade Purge: Lệnh ngâm quá 2x max_stagnant_hold_bars (tối thiểu 2880 nến = 48 tiếng) -> Cưỡng bức dọn dẹp
-            let zombie_limit = (max_hold * 2).max(2880);
-            if max_hold > 0 && bars_held >= zombie_limit {
-                if _debug_mode {
-                    tracing::warn!(
-                        "🧟 [ZOMBIE TRADE PURGE] Bar: {} | Trade #{:?} | Held: {} bars >= zombie limit: {} -> Force closed",
-                        i, trade.id, bars_held, zombie_limit
-                    );
-                }
-                tick.close(None);
-                continue;
-            }
-
             let trade_margin = (trade.entry_price * trade.size.abs()) / leverage;
             let current_roe = if trade_margin > 0.0 { current_pnl / trade_margin } else { 0.0 };
             let peak_roe = if trade.entry_price > 0.0 {
@@ -553,6 +525,35 @@ impl RiskManager {
                 0.0
             };
 
+            // 🛡️ [TODO-AUDIT-NEW-167]: Bỏ qua Stagnant Exit & Zombie Purge nếu vị thế đang có lãi vững chắc (>= +5.0% ROE)
+            let is_in_strong_profit = current_roe >= 0.05 || trade_price_pnl_pct >= risk_cfg.stagnant_min_profit_pct;
+
+            let max_hold = risk_cfg.max_stagnant_hold_bars;
+            if max_hold > 0 && bars_held >= max_hold && !is_in_strong_profit {
+                // Nếu sau thời gian ngâm tối đa mà tỷ lệ lãi chưa đạt ngưỡng tối thiểu
+                if _debug_mode {
+                    tracing::info!(
+                        "⏳ [STAGNANT CAPITAL RELEASE] Bar: {} | Trade #{:?} | Held: {} bars >= max: {} | ROE: {:+.2}% < +5.0% -> Closed to release capital",
+                        i, trade.id, bars_held, max_hold, current_roe * 100.0
+                    );
+                }
+                tick.close(None);
+                continue;
+            }
+
+            // Zombie Trade Purge: Lệnh ngâm quá 2x max_stagnant_hold_bars (tối đa 720 nến = 12 tiếng) -> Cưỡng bức dọn dẹp nếu không có lãi
+            let zombie_limit = (max_hold * 2).max(720);
+            if max_hold > 0 && bars_held >= zombie_limit && !is_in_strong_profit {
+                if _debug_mode {
+                    tracing::warn!(
+                        "🧟 [ZOMBIE TRADE PURGE] Bar: {} | Trade #{:?} | Held: {} bars >= zombie limit: {} | ROE: {:+.2}% -> Force closed",
+                        i, trade.id, bars_held, zombie_limit, current_roe * 100.0
+                    );
+                }
+                tick.close(None);
+                continue;
+            }
+
             // =========================================================================
             // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
             // =========================================================================
@@ -562,7 +563,7 @@ impl RiskManager {
 
             // [ENHANCEMENT 1: REGIME-AWARE DYNAMIC BREAK-EVEN PARAMETERS & DUAL-CRITERION TRIGGER]
             // 1. Phân tầng ngưỡng kích hoạt và khoảng đệm bảo vệ vốn theo 3 nhóm Regime Simplex (Trend, Absorption, Range, Volatile)
-            let (be_trigger_mult, be_buffer_mult) = match tag_str {
+            let (be_trigger_mult, _be_buffer_mult) = match tag_str {
                 "ABSORPTION" => (
                     if risk_cfg.be_atr_trigger_absorption > 0.0 { risk_cfg.be_atr_trigger_absorption } else { 1.2 },
                     if risk_cfg.be_buffer_atr_absorption > 0.0 { risk_cfg.be_buffer_atr_absorption } else { 0.8 },
@@ -607,6 +608,10 @@ impl RiskManager {
             // 5. Kích hoạt theo Chốt Chặn Kép: Vượt sàn kinh tế DNA VÀ vượt đệm biến động Regime
             let is_be_triggered = peak_dist >= required_price_gain && peak_roe >= be_trigger_roe;
 
+            // 1. Kiểm tra chế độ Siêu Sóng Mega Trend
+            let mega_trend_trigger_pnl = risk_cfg.mega_trend_pnl_trigger * trade.entry_price * trade.size.abs();
+            let is_mega_trend = current_pnl > 0.0 && (current_pnl >= mega_trend_trigger_pnl || current_roe >= 0.50);
+
             // =========================================================================
             // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
             // =========================================================================
@@ -617,7 +622,9 @@ impl RiskManager {
             let is_ttp_eligible = true;
             if is_ttp_eligible {
                 let ttp_act_roe = if risk_cfg.ttp_activation_roe > 0.0 { risk_cfg.ttp_activation_roe } else { 0.15 };
-                let ttp_cb_atr = if risk_cfg.ttp_callback_atr > 0.0 { risk_cfg.ttp_callback_atr } else { 0.80 };
+                let base_ttp_cb = if risk_cfg.ttp_callback_atr > 0.0 { risk_cfg.ttp_callback_atr } else { 0.80 };
+                // 🛡️ Chống xung đột TTP vs Mega Trend: Khi sóng lớn, nới Callback ATR đồng bộ với tsl_atr_loose
+                let ttp_cb_atr = if is_mega_trend { base_ttp_cb.max(risk_cfg.tsl_atr_loose) } else { base_ttp_cb };
                 let min_gain_pct = if risk_cfg.dynamic_tp_min_gain_pct > 0.0 { risk_cfg.dynamic_tp_min_gain_pct } else { 0.002 };
                 let min_exit_gain_pct = min_gain_pct.max(fee_buffer_pct);
 
@@ -652,10 +659,6 @@ impl RiskManager {
                     }
                 }
             }
-
-            // 1. Kiểm tra chế độ Siêu Sóng Mega Trend
-            let mega_trend_trigger_pnl = risk_cfg.mega_trend_pnl_trigger * trade.entry_price * trade.size.abs();
-            let is_mega_trend = current_pnl > 0.0 && (current_pnl >= mega_trend_trigger_pnl || current_roe >= 0.50);
 
             // 2. Tính toán hệ số nhân Multiplier hiện tại
             let mut current_multiplier = if is_mega_trend {
@@ -700,19 +703,23 @@ impl RiskManager {
             // 🛡️ [TIERED PROFIT RATCHET: MONOTONIC DUAL-CRITERION PROFIT RETENTION]
             // =========================================================================
             if is_be_triggered || is_mega_trend {
-                // Định nghĩa 3 tầng bậc đơn điệu tuyệt đối (Chống 100% Tier Inversion)
+                // 🛡️ [TODO-AUDIT-NEW-166]: Định nghĩa 4 tầng bậc đơn điệu tuyệt đối (Chống 100% Tier Inversion)
                 let tier1_hurdle = be_trigger_roe;
-                let tier2_hurdle = 2.0 * tier1_hurdle;
+                let tier2_hurdle = tier1_hurdle.max(0.10);
+                let tier3_hurdle = tier2_hurdle.max(0.15);
                 let mega_min_roe = if risk_cfg.mega_trend_min_lock_roe > 0.0 { risk_cfg.mega_trend_min_lock_roe } else { 0.15 };
-                let tier3_hurdle = mega_min_roe.max(tier2_hurdle * 1.25);
-                let mega_ratio = if risk_cfg.mega_trend_lock_ratio > 0.0 { risk_cfg.mega_trend_lock_ratio } else { 0.50 };
+                let tier4_hurdle = mega_min_roe.max(tier3_hurdle * 1.25).max(0.20);
+                let mega_ratio = if risk_cfg.mega_trend_lock_ratio > 0.0 { risk_cfg.mega_trend_lock_ratio.min(0.70) } else { 0.50 };
 
                 // Xác định tỷ lệ ROE sàn được bảo vệ đơn điệu theo từng tầng bậc
-                let locked_roe_floor = if peak_roe >= tier3_hurdle || is_mega_trend {
-                    // Nấc 3: Bảo vệ siêu sóng Mega Trend (Phục vụ duy nhất bằng DNA Mega)
+                let locked_roe_floor = if peak_roe >= tier4_hurdle || is_mega_trend {
+                    // Nấc 4: Bảo vệ siêu sóng Mega Trend (Tối đa 70% lợi nhuận)
                     (peak_roe * mega_ratio).max(net_be_roe)
+                } else if peak_roe >= tier3_hurdle {
+                    // Nấc 3: Khóa 60% lợi nhuận (Tối thiểu +9.0% ROE tại mốc 15% ROE)
+                    (peak_roe * 0.60).max(net_be_roe)
                 } else if peak_roe >= tier2_hurdle {
-                    // Nấc 2: Khóa 50% lợi nhuận Half-Back (Suy diễn thuần từ Hurdle_BE, độc lập với Mega)
+                    // Nấc 2: Khóa 50% lợi nhuận Half-Back (Tối thiểu +5.0% ROE tại mốc 10% ROE)
                     (peak_roe * 0.50).max(net_be_roe)
                 } else {
                     // Nấc 1: Khóa bảo vệ hòa vốn sau phí (Break-Even)
@@ -720,16 +727,13 @@ impl RiskManager {
                 };
 
                 // Chuyển đổi ROE sàn thành mức giá dừng lỗ cứng (Độc lập với biến động phình to của ATR)
+                // Đã loại bỏ dynamic_floor = peak_val - current_atr * be_buffer_mult để tránh xung đột với ATR TSL
                 if trade.is_long() {
                     let min_be_price = trade.entry_price * (1.0 + (locked_roe_floor / leverage));
-                    let dynamic_floor = peak_val - (current_atr * be_buffer_mult);
-                    let target_sl = dynamic_floor.max(min_be_price);
-                    calculated_sl = calculated_sl.max(target_sl);
+                    calculated_sl = calculated_sl.max(min_be_price);
                 } else {
                     let max_be_price = trade.entry_price * (1.0 - (locked_roe_floor / leverage));
-                    let dynamic_ceiling = peak_val + (current_atr * be_buffer_mult);
-                    let target_sl = dynamic_ceiling.min(max_be_price);
-                    calculated_sl = calculated_sl.min(target_sl);
+                    calculated_sl = calculated_sl.min(max_be_price);
                 }
             }
 
@@ -1947,5 +1951,92 @@ mod tests {
             SlValidationResult::Acceptable,
             "Lệnh BTC Scalp 100x với mmr = 0.0 (tự nội suy) PHẢI được chấp thuận!"
         );
+    }
+
+    #[test]
+    fn test_tiered_profit_lock_locks_9_pct_at_15_pct_roe() {
+        // 🛡️ [TODO-AUDIT-NEW-166]: Kiểm chứng Nấc 3 - Khóa 60% lợi nhuận (+9.0% ROE) khi peak_roe chạm +15.0%
+        let entry_price: f64 = 2500.0;
+        let leverage: f64 = 20.0;
+        let taker_fee_rate: f64 = 0.0004;
+        let slippage: f64 = 0.0002;
+        let fee_buffer_pct: f64 = 2.0 * taker_fee_rate + slippage;
+        let friction_roe: f64 = fee_buffer_pct * leverage;
+        let net_be_roe: f64 = friction_roe + (0.0003 * leverage); // 0.026 = 2.6% ROE
+        let base_be_roe_trigger: f64 = 0.035;
+        let be_trigger_roe: f64 = base_be_roe_trigger.max(net_be_roe); // 0.035
+
+        let tier1_hurdle: f64 = be_trigger_roe;
+        let tier2_hurdle: f64 = tier1_hurdle.max(0.10); // 0.10 (10.0% ROE)
+        let tier3_hurdle: f64 = tier2_hurdle.max(0.15); // 0.15 (15.0% ROE)
+        let mega_min_roe: f64 = 0.20;
+        let tier4_hurdle: f64 = mega_min_roe.max(tier3_hurdle * 1.25).max(0.20); // 0.20 (20.0% ROE)
+        let mega_ratio: f64 = 0.50;
+
+        // 1. Khi peak_roe = 0.15 (Đạt đúng Nấc 3)
+        let peak_roe: f64 = 0.15;
+        let locked_roe_floor: f64 = if peak_roe >= tier4_hurdle {
+            (peak_roe * mega_ratio).max(net_be_roe)
+        } else if peak_roe >= tier3_hurdle {
+            (peak_roe * 0.60).max(net_be_roe)
+        } else if peak_roe >= tier2_hurdle {
+            (peak_roe * 0.50).max(net_be_roe)
+        } else {
+            net_be_roe
+        };
+
+        assert_eq!(locked_roe_floor, 0.09, "Tại đỉnh 15% ROE, Nấc 3 PHẢI khóa đúng 9.0% ROE (60% lợi nhuận)!");
+        let min_be_price = entry_price * (1.0 + (locked_roe_floor / leverage));
+        // 2500 * (1 + 0.09 / 20) = 2500 * 1.0045 = 2511.25
+        assert!((min_be_price - 2511.25).abs() < 1e-4, "Mức SL sàn Nấc 3 phải đạt 2511.25 giá!");
+
+        // 2. Khi peak_roe = 0.18 (Nằm trong vùng trước đây là chân không: 15% - 20%)
+        let peak_roe_18: f64 = 0.18;
+        let locked_roe_18: f64 = if peak_roe_18 >= tier4_hurdle {
+            (peak_roe_18 * mega_ratio).max(net_be_roe)
+        } else if peak_roe_18 >= tier3_hurdle {
+            (peak_roe_18 * 0.60).max(net_be_roe)
+        } else if peak_roe_18 >= tier2_hurdle {
+            (peak_roe_18 * 0.50).max(net_be_roe)
+        } else {
+            net_be_roe
+        };
+        // 0.18 * 0.60 = 0.108 (10.8% ROE)
+        assert!((locked_roe_18 - 0.108).abs() < 1e-4, "Tại đỉnh 18% ROE, Nấc 3 phải khóa 10.8% ROE thay vì bị tụt về 2.6%!");
+    }
+
+    #[test]
+    fn test_stagnant_exit_bypassed_when_position_in_strong_profit() {
+        // 🛡️ [TODO-AUDIT-NEW-167]: Kiểm chứng bỏ qua Stagnant Exit và Zombie Purge khi vị thế có lãi >= 5.0% ROE
+        let max_hold = 180;
+        let zombie_limit = (max_hold * 2).max(720); // 720
+        let stagnant_min_profit_pct = 0.01; // 1% giá
+
+        // Kịch bản 1: Lệnh ngâm 200 nến (> max_hold) nhưng đang lãi 8% ROE (trade_price_pnl = 0.4% tại 20x)
+        let bars_held = 200;
+        let current_roe = 0.08;
+        let trade_price_pnl_pct = 0.004;
+        let is_in_strong_profit = current_roe >= 0.05 || trade_price_pnl_pct >= stagnant_min_profit_pct;
+        assert!(is_in_strong_profit, "Lệnh lãi 8% ROE PHẢI được đánh dấu là strong profit!");
+
+        let should_stagnant_exit = max_hold > 0 && bars_held >= max_hold && !is_in_strong_profit;
+        assert!(!should_stagnant_exit, "Lệnh lãi 8% ROE TUYỆT ĐỐI KHÔNG được kích hoạt Stagnant Exit!");
+
+        // Kịch bản 2: Lệnh ngâm 800 nến (> zombie_limit) nhưng đang lãi 15% ROE
+        let zombie_bars_held = 800;
+        let zombie_roe = 0.15;
+        let zombie_price_pnl = 0.0075;
+        let zombie_is_strong = zombie_roe >= 0.05 || zombie_price_pnl >= stagnant_min_profit_pct;
+        assert!(zombie_is_strong);
+        let should_zombie_purge = max_hold > 0 && zombie_bars_held >= zombie_limit && !zombie_is_strong;
+        assert!(!should_zombie_purge, "Lệnh lãi 15% ROE TUYỆT ĐỐI KHÔNG bị Zombie Purge chém cụt!");
+
+        // Kịch bản 3: Lệnh ngâm 200 nến nhưng đang lỗ -2% ROE -> PHẢI đóng để giải phóng vốn
+        let loss_roe = -0.02;
+        let loss_price_pnl = -0.001;
+        let loss_is_strong = loss_roe >= 0.05 || loss_price_pnl >= stagnant_min_profit_pct;
+        assert!(!loss_is_strong);
+        let should_exit_loss = max_hold > 0 && bars_held >= max_hold && !loss_is_strong;
+        assert!(should_exit_loss, "Lệnh lỗ ngâm 200 nến PHẢI bị đóng để giải phóng vốn!");
     }
 }

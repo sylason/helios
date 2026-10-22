@@ -1261,8 +1261,8 @@ pub struct RiskStopParams {
     // =========================================================================
     // 7. THAM SỐ PHỤ TRỢ & TÍCH LŨY & COOLDOWN
     // =========================================================================
-    /// Thời Gian Ngâm Tối Đa Trước Khi Giải Phóng Vốn (60 nến -> 720 nến / 12 tiếng, Step 30 nến -> 23 nấc)
-    #[dna(min = 60.0, max = 720.0, step = 30.0)]
+    /// Thời Gian Ngâm Tối Đa Trước Khi Giải Phóng Vốn (30 nến -> 360 nến / 6 tiếng, Step 30 nến -> 12 nấc)
+    #[dna(min = 30.0, max = 360.0, step = 30.0)]
     #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub max_stagnant_hold_bars: usize,
 

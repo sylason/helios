@@ -1026,17 +1026,17 @@
   - **Unit Tests:**
     - [x] `test_intra_regime_fair_auction_pattern_quality_wins`
 
-- [ ] **TODO-AUDIT-NEW-166: Điều Chỉnh `min_lock_roe` Khử Vùng Chân Không Trailing SL Từ $+6\%$ Đến $+20\%$ ROE (`H-TSL-VACUUM-RECONCILIATION`)**
+- [x] **TODO-AUDIT-NEW-166: Điều Chỉnh `min_lock_roe` Khử Vùng Chân Không Trailing SL Từ $+6\%$ Đến $+20\%$ ROE (`H-TSL-VACUUM-RECONCILIATION`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:1187`, `risk.rs:431-445`
   - **Mô tả:** `min_lock_roe` đang bị hardcode cứng ở mức $+20.0\%$ ROE, tạo ra vùng chân không bảo vệ khiến lệnh lãi $+16.5\%$ ROE rơi thẳng về mức hòa vốn $+2.6\%$ ROE khi đảo chiều. Cài đặt 3 nấc khóa lãi bậc thang trong `risk.rs`: $+6\% \to +2.5\%$, $+10\% \to +5.0\%$, $+15\% \to +9.0\%$ ROE.
   - **Unit Tests:**
-    - [ ] `test_tiered_profit_lock_locks_9_pct_at_15_pct_roe`
+    - [x] `test_tiered_profit_lock_locks_9_pct_at_15_pct_roe`
 
-- [ ] **TODO-AUDIT-NEW-167: Thêm Chốt Chặn Lợi Nhuận Bỏ Qua Stagnant Hold Exit Khi Vị Thế Đang Có Lãi Lớn (`H-RSK-STAGNANT-PROFIT-BYPASS`)**
+- [x] **TODO-AUDIT-NEW-167: Thêm Chốt Chặn Lợi Nhuận Bỏ Qua Stagnant Hold Exit Khi Vị Thế Đang Có Lãi Lớn (`H-RSK-STAGNANT-PROFIT-BYPASS`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:358-364`
   - **Mô tả:** Logic giải phóng vốn ngâm cưỡng bức đóng lệnh Market sau $N$ nến mà không kiểm tra vị thế đang lãi hay lỗ. Bổ sung điều kiện: Nếu `unrealized_roe >= min_profitable_roe` (ví dụ $+5.0\%$ ROE), **CẤM KÍCH HOẠT STAGNANT EXIT**, tiếp tục để Trailing SL gồng lãi theo xu hướng.
   - **Unit Tests:**
-    - [ ] `test_stagnant_exit_bypassed_when_position_in_strong_profit`
+    - [x] `test_stagnant_exit_bypassed_when_position_in_strong_profit`
 
 - [ ] **TODO-AUDIT-NEW-168: Cơ Chế Đệm Chuyển Tiếp Trạng Thái 1-Bar Tránh Sốc Tín Hiệu Sau Khi DNA Hot-Swap (`HOTSWAP-STATE-INVALIDATION`)**
   - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:338-345`, `strategies_backtests/helios/src/strategy/core_v3/mod.rs`
