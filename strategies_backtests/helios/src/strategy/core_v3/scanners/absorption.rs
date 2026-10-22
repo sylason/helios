@@ -61,11 +61,26 @@ impl TacticalScanner for AbsorptionScanner {
         let low = tick.lows()[i];
         let close = tick.closes()[i];
         let candle_range = (high - low).max(1e-5);
-        let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
+        let raw_atr = sensors.atr_sl.get(i).copied().unwrap_or(0.0);
+        if !close.is_finite() || close <= 1e-12 || !raw_atr.is_finite() || raw_atr <= 0.0 {
+            return None;
+        }
+        let current_atr = raw_atr.max(1e-12);
 
         // 🛡️ CHỐT CHẶN BẤT BIẾN (TODO-AUDIT-NEW-36): Bắt buộc Volume phải vượt mức trung bình
         // Triệt tiêu 100% nguy cơ mở lệnh gom hàng khi thị trường chết thanh khoản lúc nửa đêm
         if raw_vol_z <= 0.0 {
+            return None;
+        }
+
+        // 🛡️ TODO-AUDIT-NEW-176 (ABS-SUB-FRICTIONAL-FILTER): Chốt chặn hộp giá nén nhỏ hơn (1 nến ATR thực tế + 2 nửa hộp phí sàn 2 chiều)
+        // Tự động co giãn theo biến động thực tế của từng tài sản/thời điểm mà không dùng số ma thuật 2.5 cứng,
+        // đồng thời bảo vệ bb_width > 0.0 tuyệt đối từ đầu hàm cho phép chia %B trên mọi mệnh giá tài sản.
+        let bb_width = bb_upper - bb_lower;
+        let risk_base = &config.risk_management.risk_base;
+        let roundtrip_friction = (2.0 * risk_base.taker_fee_rate + risk_base.slippage_allowance_pct).max(0.0);
+        let min_required_width = raw_atr + 2.0 * roundtrip_friction * close;
+        if bb_width <= 0.0 || bb_width < min_required_width {
             return None;
         }
 
@@ -82,7 +97,6 @@ impl TacticalScanner for AbsorptionScanner {
             // 🛡️ TODO-AUDIT-NEW-34 & NEW-35: Dynamic Quant (%B Râu nến + CLV Spring/Upthrust)
             // Khắc phục triệt để nghịch lý hình học nến và lệch pha MTF nến 1m vs BB 15m.
             // Loại bỏ hoàn toàn bộ lọc trễ pha vwma < bb_middle theo TODO-SCN-02.
-            let bb_width = (bb_upper - bb_lower).max(1e-5);
             let pct_b_close = (close - bb_lower) / bb_width;
             let pct_b_low   = (low - bb_lower) / bb_width;
             let pct_b_high  = (high - bb_lower) / bb_width;
@@ -317,5 +331,138 @@ mod tests {
         let prop = proposal.unwrap();
         // Điểm tự tin không được thổi phồng lên > 0.85
         assert!(prop.raw_score < 0.80, "Với volume bình thường 1.8 sigma, raw_score phải < 0.80, thực tế: {}", prop.raw_score);
+    }
+
+    #[test]
+    fn test_absorption_rejects_sub_frictional_bandwidth() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 20;
+        let i = len - 1;
+        let mut lows = vec![1999.0; len];
+        let mut closes = vec![1999.0; len];
+        let mut highs = vec![1999.5; len];
+        // Nến Spring rút chân: low 1998.6 (%B_low = 0.1/3.0 = 0.033 <= 0.40), close 1999.0, high 1999.2 (CLV = +0.33)
+        lows[i] = 1998.6;
+        closes[i] = 1999.0;
+        highs[i] = 1999.2;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1998.8; len]),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        let mut config = HeliosConfigV3::default();
+        config.risk_management.risk_base.taker_fee_rate = 0.0004; // 0.04%
+        config.risk_management.risk_base.slippage_allowance_pct = 0.0005; // 0.05% -> roundtrip = 0.13%
+        config.tactical_sniper.absorption.min_activation_score = 0.05;
+        config.tactical_sniper.absorption.min_clv = 0.20;
+
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        // Dải BB siêu hẹp: width = 3.0 (tức 0.15% giá), trong khi min_required = raw_atr (1.0) + 2 * 0.0013 * 1999.0 (5.197) = 6.197
+        sensors.bb_lower = std::sync::Arc::new(vec![1998.5; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2001.5; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![1.0; len]);
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.80; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
+
+        let scanner = AbsorptionScanner;
+
+        // KỊCH BẢN 1: Dải BB quá hẹp (bb_width = 3.0 < 6.197) -> BẮT BUỘC TỪ CHỐI (None)!
+        let proposal = scanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(proposal.is_none(), "Khi dải nén nhỏ hơn (ATR + 2 * friction * close), scanner bắt buộc phải từ chối mở lệnh!");
+
+        // KỊCH BẢN 2: Dải BB đủ rộng (bb_lower = 1990.0, bb_upper = 2010.0 -> width = 20.0 > 6.197)
+        // Spring candle: low = 1992.0 (pct_b_low = 2/20 = 0.10 <= 0.40), close = 1995.0 (pct_b_close = 5/20 = 0.25 <= 0.40, close <= bb_middle 2000.0)
+        // high = 1996.0 -> candle_range = 4.0, clv = (2*1995 - 1996 - 1992)/4.0 = 2/4 = +0.50 >= 0.20
+        let mut lows_ok = vec![1999.0; len];
+        let mut closes_ok = vec![1999.0; len];
+        let mut highs_ok = vec![1999.5; len];
+        lows_ok[i] = 1992.0;
+        closes_ok[i] = 1995.0;
+        highs_ok[i] = 1996.0;
+        let raw_cache_ok = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1993.0; len]),
+            high: std::sync::Arc::new(highs_ok),
+            low: std::sync::Arc::new(lows_ok),
+            close: std::sync::Arc::new(closes_ok),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_ok = DataView::new(raw_cache_ok);
+        let tick_ok = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_ok,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        sensors.bb_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2010.0; len]);
+        let proposal_ok = scanner.scan(&tick_ok, &sensors, &matrix, &config);
+        assert!(proposal_ok.is_some(), "Khi dải BB đủ rộng, scanner phải duyệt nến Spring hợp lệ!");
+
+        // KỊCH BẢN 3: Meme coin mệnh giá siêu nhỏ ($0.000010) khi dải BB phẳng lì (width = 0.0) -> BẢO VỆ CHỐNG CHIA 0 & TỪ CHỐI!
+        let lows_meme = vec![0.000010; len];
+        let closes_meme = vec![0.000010; len];
+        let highs_meme = vec![0.000010; len];
+        let raw_cache_meme = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![0.000010; len]),
+            high: std::sync::Arc::new(highs_meme),
+            low: std::sync::Arc::new(lows_meme),
+            close: std::sync::Arc::new(closes_meme),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_meme = DataView::new(raw_cache_meme);
+        let tick_meme = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_meme,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        sensors.bb_lower = std::sync::Arc::new(vec![0.000010; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![0.000010; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![0.000010; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![0.0000001; len]);
+        let proposal_meme = scanner.scan(&tick_meme, &sensors, &matrix, &config);
+        assert!(proposal_meme.is_none(), "Khi dải BB phẳng lì width = 0.0 trên coin mệnh giá siêu nhỏ, scanner phải từ chối an toàn!");
     }
 }

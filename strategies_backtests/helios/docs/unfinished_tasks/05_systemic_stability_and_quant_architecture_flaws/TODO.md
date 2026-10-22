@@ -1085,11 +1085,11 @@
   - **Unit Tests:**
     - [ ] `test_absorption_rejects_frozen_squeeze_prolonged`
 
-- [ ] **TODO-AUDIT-NEW-176: Chốt Chặn Biên Độ Nén Nhỏ Hơn Chi Phí Sàn 2 Chiều (Sub-Frictional Compression Filter) Trong Absorption (`ABS-SUB-FRICTIONAL-FILTER`)**
+- [x] **TODO-AUDIT-NEW-176: Chốt Chặn Biên Độ Nén Nhỏ Hơn Chi Phí Sàn 2 Chiều (Sub-Frictional Compression Filter) Trong Absorption (`ABS-SUB-FRICTIONAL-FILTER`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:79-90`
   - **Mô tả:** Khi dải nén quá hẹp, độ rộng dải Bollinger $\text{BB}_{\text{Width}} < 0.20\%$ giá. Trong khi đó, phí sàn 2 chiều + trượt giá ngốn mất $0.13\%$ giá ($2.60\%$ ROE tại 20x). Tiềm năng hồi quy về trục giữa KAMA chỉ đạt $0.10\%$ giá $\implies$ Lệnh chắc chắn bị lỗ ròng sau phí. Kiểm tra điều kiện biên độ tối thiểu: $\text{BB}_{\text{Width}} \ge 2.5 \times \text{Roundtrip Friction} \approx 0.35\%$.
   - **Unit Tests:**
-    - [ ] `test_absorption_rejects_sub_frictional_bandwidth`
+    - [x] `test_absorption_rejects_sub_frictional_bandwidth`
 
 - [ ] **TODO-AUDIT-NEW-177: Chốt Chặn Xung Đột Đa Khung Thời Gian (15m Squeeze vs 1h/4h Macro Expansion Contradiction) Trong Absorption (`ABS-MACRO-EXPANSION-VETO`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `matrix.rs`
