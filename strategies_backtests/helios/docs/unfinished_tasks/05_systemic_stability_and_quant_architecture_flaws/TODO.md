@@ -98,9 +98,10 @@
 ---
 
 ### PHẦN 5: KHẮC PHỤC CÁC TỬ HUYỆN TOÁN HỌC & ĐỘNG CƠ BACKTEST (`ferro_trade`)
-- [ ] **TODO-AUDIT-FT-01: Triệt tiêu Lookahead Bias trong Sizing Margin tại Nến Khớp Lệnh**
+- [ ] **TODO-AUDIT-FT-01: Triệt tiêu Lookahead Bias trong Sizing Margin tại Nến Khớp Lệnh** `[PENDING]`
   - **File:** `ferro_trade/src/broker/broker.rs`, `ferro_trade/src/backtest/engine.rs`
   - **Mô tả:** Định cỡ và tính toán ký quỹ tại đầu nến $i$ bằng giá $Open[i]$ hoặc giá đóng nến trước đó $Close[i-1]$, tuyệt đối không dùng $Close[i]$.
+  - **Ghi chú Tạm hoãn (22/10/2026):** Tạm hoãn do hệ thống hiện tại chạy `trade_on_close = true`, `exclusive_orders = true` và đơn vị thế tuyệt đối (`is_pos_open == true -> return`). Khi mở lệnh mới `net_position_size == 0.0` nên số hạng $Close[i]$ bị nhân với 0 triệt tiêu hoàn toàn, không gây ảnh hưởng thực tế. Sẽ kích hoạt lại khi phát triển Pyramiding / DCA đa vị thế.
 - [ ] **TODO-AUDIT-FT-02: Khử Backfill (`bfill`) trong `atr_sma` và Bơm Số 0 trong `chaos_ratio`**
   - **File:** `ferro_trade/src/indicators/bulk.rs`
   - **Mô tả:** Trả về $NaN$ trong giai đoạn Warmup của ATR; ngăn chặn thổi phồng `chaos_ratio` và bảo đảm tính toàn vẹn của `actual_warmup`.
@@ -715,9 +716,12 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:169`, `mod.rs:163`
   - **Mô tả:** Tái cấu trúc truyền kết quả `gate_eval` từ `mod.rs` vào `arbiter.process_tick()`, xóa bỏ lệnh gọi lặp lại Gatekeeper trong Arbiter, tối ưu hóa tốc độ tick.
 
-- [ ] **TODO-AUDIT-NEW-117: Chuyển Đổi Sniper VETO Sang Dynamic De-leverage Trong Thẩm Định SL Cấu Trúc (`H-RSK-01`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:123-138`, `arbiter.rs`
-  - **Mô tả:** Thay vì VETO nhị phân hủy bỏ setup đẹp khi SL cấu trúc vượt nhẹ 15% ROE, tự động kẹp SL về trần an toàn và co tỷ lệ ký quỹ vị thế tương ứng để bảo toàn $Risk USD mục tiêu.
+- [x] **TODO-AUDIT-NEW-117: Chuyển Đổi Sniper VETO Sang Dynamic De-leverage Trong Thẩm Định SL Cấu Trúc (`H-RSK-01`) (BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:450-478`, `mod.rs:321-344`, `risk.rs:283-328`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100% QUA TODO-AUDIT-NEW-23 & TODO-AUDIT-NEW-55]
+    1. *Tại Arbiter (`arbiter.rs:450-478`):* Khi proposal có SL cấu trúc vượt trần ROE (`StructuralRiskVeto`), Arbiter không VETO hủy bỏ lệnh mà phê duyệt tham gia đấu thầu (`approved_proposals.push`).
+    2. *Tại Mod (`mod.rs:321-344`):* Sau khi thắng thầu, lệnh được kẹp an toàn bằng `RiskManager::clamp_sl_price` và tự động co giãn size ký quỹ theo $Risk Parity thông qua `RiskManager::calculate_dynamic_size` (Dynamic De-leverage).
+    3. *Unit Test:* `test_arbiter_structural_sl_approved_when_exceeds_roe_cap` ([`arbiter.rs:947-1019`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L947-L1019)) đã xác nhận và PASS 100%.
 
 - [ ] **TODO-AUDIT-NEW-118: Tái Cấu Trúc Định Cỡ Vị Thế Cố Định Rủi Ro Dollar ($Fixed Risk USD Sizing) (`H-RSK-02`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:158-189`
