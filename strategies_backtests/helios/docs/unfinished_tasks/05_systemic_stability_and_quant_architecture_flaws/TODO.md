@@ -371,9 +371,10 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:107-126`
   - **Mô tả:** Thay thế hàm `sat_penetration` (càng bay xa điểm càng cao) bằng hàm đo gia tốc bứt phá ban đầu; hiệu chuẩn lại hàm RSI để không dìm điểm ở chân sóng và không thưởng điểm tối đa ở đỉnh kiệt sức.
 
-- [ ] **TODO-AUDIT-NEW-46: Bổ Sung Tầng Đạo Hàm Động Lực Học (Velocity & Acceleration) Trong Matrix (`MAT-KINEMATICS`)**
+- [-] **TODO-AUDIT-NEW-46: Bổ Sung Tầng Đạo Hàm Động Lực Học (Velocity & Acceleration) Trong Matrix (`MAT-KINEMATICS`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/matrix.rs`, `sensors.rs`
-  - **Mô tả:** Tính toán vận tốc bung dải biến động $d(\text{BB}_{\text{Width}})/dt$ và gia tốc giá $d^2P/dt^2$ để cung cấp dữ liệu vi cấu trúc động lực học thực sự cho Scanner thay vì dựa vào các chỉ báo vị trí tĩnh.
+  - **Trạng thái:** `[-] (OBSOLETE / REDUNDANT)`
+  - **Mô tả:** [ĐÃ ĐÓNG / BỎ QUA - TRÁNH BẪY OVER-ENGINEERING]: Sau khi kiểm định toàn diện 11 tài liệu Bản thể học Hành vi Thị trường (Notes 31-46), xác nhận hệ thống không cần thêm 3 mảng đạo hàm toàn cục vào `MarketMatrixV3`. Mọi hành vi động lực học đã được giải quyết trọn vẹn: Vĩ mô đã có `matrix.kama_slope_atr`, `matrix.bb_middle_slope_adj` (với bước nhảy `k_bars` chống forward-fill) và `matrix.squeeze_intensity`; Vi mô đã được giải quyết trực diện $O(1)$ tại từng Scanner (nến giao cắt đầu tiên `close[i] > bb_u[i] && close[i-1] <= bb_u[i-1]` trong `NEW-44`, `delta_kama` trong `NEW-38`, và `CLV` trong `NEW-34, 51`). Bảo toàn nguyên vẹn kiến trúc 6 trục trực giao tinh gọn của `MarketMatrixV3`.
 
 - [ ] **TODO-AUDIT-NEW-47: Triển Khai Cơ Chế Thoát Lệnh Khi Bứt Phá Xịt (Impulse Stagnation Exit & Decaying TTL) Trong Risk Manager (`MOM-STAGNATION-EXIT`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `mod.rs`
