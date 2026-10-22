@@ -8,6 +8,7 @@ use serde::Deserialize;
 
 use ferro_trade::backtest::{BacktestBuilder, EarlyTermination, TerminationReason};
 use ferro_trade::optimizer::prospector::{Prospector, ProspectorConfig};
+use ferro_trade::optimizer::{Candidate, DnaKey};
 use ferro_trade::optimizer::params::DnaMappable;
 use ferro_trade::stats::StatItem;
 use helios::strategy::core_v3::HeliosStrategyV3;
@@ -293,7 +294,7 @@ impl ProspectorRunner {
         // 2. Tách toàn bộ việc dựng DataFrame, Backtest & chạy GA sang luồng Blocking riêng của Tokio (tránh nghẽn Async Event Loop)
         let prospector_db_path_owned = prospector_db_path.to_string();
 
-        let champion_opt = tokio::task::spawn_blocking(move || {
+        let top_candidates = tokio::task::spawn_blocking(move || {
             let df = Self::candles_to_df(&train_candles).map_err(|e| e.to_string())?;
 
             let mut prospector_config = full_config.prospector;
@@ -363,11 +364,17 @@ impl ProspectorRunner {
                 let _ = std::fs::create_dir_all(parent);
             }
 
+            let top_k = if prospector_config.worker_config.n_top_candidates > 0 {
+                prospector_config.worker_config.n_top_candidates
+            } else {
+                5
+            };
+
             let mut prospector = Prospector::new(prospector_config).map_err(|e| e.to_string())?;
 
             if let Some(dna) = seed_dna {
                 let mut champs = prospector.champions.write();
-                champs.push(ferro_trade::optimizer::ga_worker::Candidate {
+                champs.push(Candidate {
                     params: std::collections::HashMap::new(),
                     fitness: 0.0,
                     stats: ferro_trade::stats::PackedStats::default(),
@@ -389,69 +396,109 @@ impl ProspectorRunner {
             info!("🧬 [Optimizer] Đang chạy thuật toán Di truyền (Genetic Algorithm)...");
             prospector.run::<HeliosStrategyV3, _>(backtest, objective);
 
+            // [TODO-AUDIT-NEW-153]: Trích xuất Top-K Candidates khử trùng lặp hệ gen
             let champs = prospector.champions.read();
-            let top_champ = champs.iter().find(|c| !c.params.is_empty()).cloned().or_else(|| champs.first().cloned());
-            Ok::<_, String>(top_champ)
+            let mut top_candidates = Vec::with_capacity(top_k);
+            let mut seen_dna = std::collections::HashSet::new();
+
+            for c in champs.iter() {
+                if let Some(dna) = &c.dna {
+                    let key = DnaKey::from_genes(dna);
+                    if seen_dna.insert(key) {
+                        top_candidates.push(c.clone());
+                        if top_candidates.len() >= top_k {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            Ok::<_, String>(top_candidates)
         }).await.map_err(|e| e.to_string())??;
 
         let opt_elapsed = opt_start_timer.elapsed();
 
-        if let Some(champion) = champion_opt {
-            let ret = champion.stats.return_pct;
-            let dd = champion.stats.max_drawdown_pct;
-            let trades = champion.stats.total_trades;
-            let win_rate = champion.stats.win_rate_pct;
+        if top_candidates.is_empty() {
+            warn!("⚠️ [Optimizer] Không tìm thấy Champion nào trong In-Sample (Thời gian chạy: {:.2?}).", opt_elapsed);
+            return Ok(());
+        }
 
-            info!("⏱️ [OPTIMIZER DURATION] {:.2?} | In-Sample Candles: {} | Best Return: {:.2}% | Max DD: {:.2}% | Trades: {} (Win: {:.1}%)", 
-                  opt_elapsed, num_train_candles, ret, dd, trades, win_rate);
+        info!("🧬 [Optimizer] Trích xuất được {} ứng viên Top-K khác biệt (Thời gian chạy: {:.2?})", top_candidates.len(), opt_elapsed);
 
-            // Lưu DNA vào bảng optimized_params
-            if let Some(dna) = champion.dna {
-                // =========================================================================
-                // 🚪 WFE VALIDATION GATE: THẨM ĐỊNH OOS ĐỘC LẬP TRƯỚC KHI DEPLOY (FLAW-6.4)
-                // =========================================================================
-                if !validation_slice.is_empty() {
-                    match super::helios_bridge::HeliosBridge::diagnostic_backtest(&validation_slice, &dna) {
-                        Ok(val_res) => {
-                            let val_ret = val_res.stats.return_pct;
-                            let val_dd = val_res.stats.max_drawdown_pct;
-                            let val_trades = val_res.stats.total_trades;
-                            let val_win_rate = val_res.stats.win_rate_pct;
+        // =========================================================================
+        // 🚪 WFE VALIDATION GATE: WATERFALL THẨM ĐỊNH OOS TOP-K CANDIDATES (TODO-AUDIT-NEW-153)
+        // =========================================================================
+        let mut approved_champion: Option<Candidate> = None;
 
-                            // 🛡️ TIÊU CHUẨN THẨM ĐỊNH OOS KỶ LUẬT VÀ THÍCH ỨNG (ROBUST & ADAPTIVE WFE GATE):
-                            // 1. In-Sample: Bắt buộc phải có lệnh (trades > 0) và có lãi (ret > 0.0%).
-                            // 2. Out-Of-Sample Validation (3 ngày):
-                            //    - Nếu val_trades == 0: Đứng ngoài né bão bảo toàn 100% vốn (val_dd = 0.0%) -> SOLID PASS!
-                            //    - Nếu val_trades > 0: Bắt buộc không lỗ ròng (val_net_ret >= 0.0%) và Drawdown an toàn (val_dd <= 15.0%).
-                            let slippage_drag_roe = 2.0 * fitness_cfg.slippage_rate * leverage * 100.0;
-                            let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
+        for (idx, candidate) in top_candidates.into_iter().enumerate() {
+            let rank = idx + 1;
+            let ret = candidate.stats.return_pct;
+            let dd = candidate.stats.max_drawdown_pct;
+            let trades = candidate.stats.total_trades;
+            let win_rate = candidate.stats.win_rate_pct;
 
-                            let is_in_sample_invalid = trades == 0 || ret <= 0.0;
-                            let is_oos_failed = val_trades > 0 && (val_net_ret < 0.0 || val_dd > 15.0);
+            let Some(dna) = candidate.dna.clone() else {
+                warn!("⚠️ [WFE GATE] Rank #{}: Bỏ qua vì không có chuỗi gen DNA.", rank);
+                continue;
+            };
 
-                            if is_in_sample_invalid || is_oos_failed {
-                                warn!(
-                                    "🚨 [WFE GATE: REJECTED - INVALID OR OVERFIT] Symbol: {} | Candidate DNA Rejected! \
-                                    In-Sample Return: {:.2}% (Trades: {}) | OOS Val Return: {:+.2}% (Net: {:+.2}%, Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
-                                    -> REJECTED! Preserving active Champion DNA in DB & Actor to protect capital!",
-                                    symbol, ret, trades, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
-                                );
-                                return Ok(()); // 🛑 DỪNG LẠI, KHÔNG LƯU DB, KHÔNG BROADCAST!
-                            }
+            info!(
+                "⏱️ [OPTIMIZER CANDIDATE #{}] In-Sample Return: {:.2}% | Max DD: {:.2}% | Trades: {} (Win: {:.1}%)",
+                rank, ret, dd, trades, win_rate
+            );
 
-                            info!(
-                                "✨ [WFE GATE: SOLID PASS] Champion DNA Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% (Net: {:+.2}%) \
-                                | OOS Max DD: {:.2}% | OOS Trades: {} (Win Rate: {:.1}%) -> Approved for Deployment.",
-                                ret, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
-                            );
-                        }
-                        Err(e) => {
-                            warn!("⚠️ [WFE GATE] Lỗi khi chạy Validation Backtest: {}. Cho phép fallback deploy.", e);
-                        }
+            if validation_slice.is_empty() {
+                info!("✨ [WFE GATE] Không có dữ liệu OOS Validation. Phê duyệt Candidate #{} cho deployment.", rank);
+                approved_champion = Some(candidate);
+                break;
+            }
+
+            match super::helios_bridge::HeliosBridge::diagnostic_backtest(&validation_slice, &dna) {
+                Ok(val_res) => {
+                    let val_ret = val_res.stats.return_pct;
+                    let val_dd = val_res.stats.max_drawdown_pct;
+                    let val_trades = val_res.stats.total_trades;
+                    let val_win_rate = val_res.stats.win_rate_pct;
+
+                    // 🛡️ TIÊU CHUẨN THẨM ĐỊNH OOS KỶ LUẬT VÀ THÍCH ỨNG (ROBUST & ADAPTIVE WFE GATE):
+                    // 1. In-Sample: Bắt buộc phải có lệnh (trades > 0) và có lãi (ret > 0.0%).
+                    // 2. Out-Of-Sample Validation (3 ngày):
+                    //    - Nếu val_trades == 0: Đứng ngoài né bão bảo toàn 100% vốn (val_dd = 0.0%) -> SOLID PASS!
+                    //    - Nếu val_trades > 0: Bắt buộc không lỗ ròng (val_net_ret >= 0.0%) và Drawdown an toàn (val_dd <= 15.0%).
+                    let slippage_drag_roe = 2.0 * fitness_cfg.slippage_rate * leverage * 100.0;
+                    let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
+
+                    let is_in_sample_invalid = trades == 0 || ret <= 0.0;
+                    let is_oos_failed = val_trades > 0 && (val_net_ret < 0.0 || val_dd > 15.0);
+
+                    if is_in_sample_invalid || is_oos_failed {
+                        warn!(
+                            "🚨 [WFE GATE: REJECTED - INVALID OR OVERFIT] Symbol: {} | Candidate #{} Rejected! \
+                            In-Sample Return: {:.2}% (Trades: {}) | OOS Val Return: {:+.2}% (Net: {:+.2}%, Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
+                            -> REJECTED! Thử tiếp ứng viên kế tiếp trong Top-K...",
+                            symbol, rank, ret, trades, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
+                        );
+                        continue;
                     }
+
+                    info!(
+                        "✨ [WFE GATE: SOLID PASS] Candidate #{} Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% (Net: {:+.2}%) \
+                        | OOS Max DD: {:.2}% | OOS Trades: {} (Win Rate: {:.1}%) -> Approved for Deployment.",
+                        rank, ret, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
+                    );
+                    approved_champion = Some(candidate);
+                    break;
                 }
+                Err(e) => {
+                    warn!("⚠️ [WFE GATE] Lỗi khi chạy Validation Backtest cho Candidate #{}: {}. Cho phép fallback deploy.", rank, e);
+                    approved_champion = Some(candidate);
+                    break;
+                }
+            }
+        }
 
-
+        if let Some(champion) = approved_champion {
+            if let Some(dna) = champion.dna {
                 use crate::models::models::OptimizedDna;
                 use std::collections::HashMap;
 
@@ -468,7 +515,7 @@ impl ProspectorRunner {
                     strategy_id: strategy_id.to_string(),
                     dna: dna,
                     mapping: HashMap::new(), // Không cần mapping với DNA v2
-                    fitness: ret,
+                    fitness: champion.stats.return_pct,
                     stats: stats_map,
                     updated_at: now,
                 };
@@ -479,10 +526,14 @@ impl ProspectorRunner {
                 if let Some(tx) = &dna_tx {
                     let _ = tx.send(Some(opt_dna));
                 }
-                info!("✨ [OPTIMIZER] New DNA deployed to Actor (Fitness: {:.2}%).", ret);
+                info!("✨ [OPTIMIZER] New DNA deployed to Actor (Fitness: {:.2}%).", champion.stats.return_pct);
             }
         } else {
-            warn!("⚠️ [Optimizer] Không tìm thấy Champion nào có Return > 0 (Thời gian chạy: {:.2?}).", opt_elapsed);
+            warn!(
+                "🛑 [WFE GATE: ALL REJECTED] Symbol: {} | Toàn bộ Top-K ứng viên đều không vượt qua thẩm định OOS! \
+                Giữ nguyên DNA cũ trong DB và Actor để bảo toàn vốn.",
+                symbol
+            );
         }
 
         Ok(())
@@ -780,5 +831,175 @@ mod tests {
         let (lock, _) = &*prospector.hotspot_queue;
         let queue_len = lock.lock().len();
         assert_eq!(queue_len, 1, "Hàng đợi hotspot_queue bắt buộc phải có 1 Job được nạp!");
+    }
+
+    #[test]
+    fn test_top_k_waterfall_picks_first_passing_candidate() {
+        // [TODO-AUDIT-NEW-153]: Kiểm thử cơ chế Top-K Waterfall chọn đúng ứng viên đầu tiên vượt qua OOS Gate
+        let mut candidates = Vec::new();
+
+        // Candidate 1: In-Sample rất cao (30%), nhưng OOS bị lỗ ròng (-3%) -> Bị loại
+        let mut c1 = Candidate {
+            params: std::collections::HashMap::new(),
+            fitness: 30.0,
+            stats: ferro_trade::stats::PackedStats::default(),
+            dna: Some(vec![1.0, 2.0, 3.0]),
+        };
+        c1.stats.return_pct = 30.0;
+        c1.stats.total_trades = 15;
+        candidates.push(c1);
+
+        // Candidate 2 (Duplicate gen của Candidate 1 để test khử trùng lặp qua DnaKey)
+        let mut c1_dup = Candidate {
+            params: std::collections::HashMap::new(),
+            fitness: 28.0,
+            stats: ferro_trade::stats::PackedStats::default(),
+            dna: Some(vec![1.0, 2.0, 3.0]),
+        };
+        c1_dup.stats.return_pct = 28.0;
+        c1_dup.stats.total_trades = 14;
+        candidates.push(c1_dup);
+
+        // Candidate 2 (Thực chất Rank 2 khác biệt): In-Sample tốt (20%), OOS có lãi ròng (+4.4%) -> ĐẠT CHUẨN!
+        let mut c2 = Candidate {
+            params: std::collections::HashMap::new(),
+            fitness: 20.0,
+            stats: ferro_trade::stats::PackedStats::default(),
+            dna: Some(vec![4.0, 5.0, 6.0]),
+        };
+        c2.stats.return_pct = 20.0;
+        c2.stats.total_trades = 10;
+        candidates.push(c2);
+
+        // Candidate 3: In-Sample 15%, cũng đạt OOS nhưng vì Rank 2 đã pass nên Waterfall phải break sớm
+        let mut c3 = Candidate {
+            params: std::collections::HashMap::new(),
+            fitness: 15.0,
+            stats: ferro_trade::stats::PackedStats::default(),
+            dna: Some(vec![7.0, 8.0, 9.0]),
+        };
+        c3.stats.return_pct = 15.0;
+        c3.stats.total_trades = 8;
+        candidates.push(c3);
+
+        // 1. Kiểm tra khử trùng lặp Top-K qua DnaKey
+        let top_k = 5;
+        let mut top_candidates = Vec::with_capacity(top_k);
+        let mut seen_dna = std::collections::HashSet::new();
+
+        for c in candidates.iter() {
+            if let Some(dna) = &c.dna {
+                let key = DnaKey::from_genes(dna);
+                if seen_dna.insert(key) {
+                    top_candidates.push(c.clone());
+                    if top_candidates.len() >= top_k {
+                        break;
+                    }
+                }
+            }
+        }
+
+        assert_eq!(top_candidates.len(), 3, "Candidate trùng lặp gen bắt buộc phải bị loại bỏ");
+        assert_eq!(top_candidates[0].stats.return_pct, 30.0);
+        assert_eq!(top_candidates[1].stats.return_pct, 20.0);
+        assert_eq!(top_candidates[2].stats.return_pct, 15.0);
+
+        // 2. Mô phỏng luồng Waterfall qua WFE Gate
+        let slippage_drag_roe = 0.8; // 2 * 0.0004 * 10 * 100
+        let mut approved_champion: Option<Candidate> = None;
+
+        for (idx, candidate) in top_candidates.into_iter().enumerate() {
+            let ret = candidate.stats.return_pct;
+            let trades = candidate.stats.total_trades;
+
+            // Giả lập kết quả OOS tương ứng với từng Rank:
+            let (val_ret, val_dd, val_trades) = match idx {
+                0 => (-1.4, 6.0, 2), // Rank 1: Net = -1.4 - (2 * 0.8) = -3.0% < 0 -> FAILED!
+                1 => (6.0, 4.0, 2),  // Rank 2: Net = 6.0 - (2 * 0.8) = +4.4% >= 0, DD 4% <= 15% -> PASS!
+                _ => (5.0, 3.0, 2),  // Rank 3: Không bao giờ được duyệt tới do Rank 2 đã break
+            };
+
+            let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
+            let is_in_sample_invalid = trades == 0 || ret <= 0.0;
+            let is_oos_failed = val_trades > 0 && (val_net_ret < 0.0 || val_dd > 15.0);
+
+            if is_in_sample_invalid || is_oos_failed {
+                continue;
+            }
+
+            approved_champion = Some(candidate);
+            break;
+        }
+
+        assert!(approved_champion.is_some(), "Waterfall bắt buộc phải tìm được ứng viên hợp lệ");
+        let winner = approved_champion.unwrap();
+        assert_eq!(winner.stats.return_pct, 20.0, "Người chiến thắng phải là Candidate Rank 2 (Return 20%)");
+        assert_eq!(winner.dna, Some(vec![4.0, 5.0, 6.0]), "Chuỗi gen phải thuộc về Rank 2");
+    }
+
+    #[test]
+    fn test_top_k_waterfall_all_reject_preserves_state() {
+        // [TODO-AUDIT-NEW-153]: Kiểm thử khi toàn bộ Top-K đều trượt OOS -> Không phê duyệt cá thể nào
+        let mut candidates = Vec::new();
+
+        // Candidate 1: OOS lỗ ròng
+        let mut c1 = Candidate {
+            params: std::collections::HashMap::new(),
+            fitness: 25.0,
+            stats: ferro_trade::stats::PackedStats::default(),
+            dna: Some(vec![1.0]),
+        };
+        c1.stats.return_pct = 25.0;
+        c1.stats.total_trades = 10;
+        candidates.push(c1);
+
+        // Candidate 2: OOS Drawdown vượt ngưỡng 15.0%
+        let mut c2 = Candidate {
+            params: std::collections::HashMap::new(),
+            fitness: 20.0,
+            stats: ferro_trade::stats::PackedStats::default(),
+            dna: Some(vec![2.0]),
+        };
+        c2.stats.return_pct = 20.0;
+        c2.stats.total_trades = 8;
+        candidates.push(c2);
+
+        // Candidate 3: In-Sample không có trade nào (trades = 0)
+        let mut c3 = Candidate {
+            params: std::collections::HashMap::new(),
+            fitness: 0.0,
+            stats: ferro_trade::stats::PackedStats::default(),
+            dna: Some(vec![3.0]),
+        };
+        c3.stats.return_pct = 0.0;
+        c3.stats.total_trades = 0;
+        candidates.push(c3);
+
+        let slippage_drag_roe = 0.8;
+        let mut approved_champion: Option<Candidate> = None;
+
+        for (idx, candidate) in candidates.into_iter().enumerate() {
+            let ret = candidate.stats.return_pct;
+            let trades = candidate.stats.total_trades;
+
+            let (val_ret, val_dd, val_trades) = match idx {
+                0 => (-2.0, 5.0, 2),  // Net < 0
+                1 => (4.0, 22.0, 2),  // DD > 15%
+                _ => (0.0, 0.0, 0),   // trades = 0 in sample
+            };
+
+            let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
+            let is_in_sample_invalid = trades == 0 || ret <= 0.0;
+            let is_oos_failed = val_trades > 0 && (val_net_ret < 0.0 || val_dd > 15.0);
+
+            if is_in_sample_invalid || is_oos_failed {
+                continue;
+            }
+
+            approved_champion = Some(candidate);
+            break;
+        }
+
+        assert!(approved_champion.is_none(), "Khi toàn bộ Top-K đều trượt, approved_champion bắt buộc phải là None để bảo vệ vốn!");
     }
 }
