@@ -271,9 +271,18 @@
 - [ ] **TODO-AUDIT-NEW-31: Dọn Dẹp Triệt Để 8 Biến Ma & Trường Rác Khỏi `ArbiterConfig` (`ZOMBIE-ARBITER-CFG`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs:450-478`
   - **Mô tả:** Xóa bỏ 6 dead fields cũ và 2 trường bù nhìn (`max_chaos_penalty`, `conflict_confidence_margin`), tách các trường thuộc Cầu Dao sang `GatekeeperConfig`.
-- [ ] **TODO-AUDIT-NEW-32: Vá Lỗ Hổng Inverted SL & Động Hóa MMR Theo Tier Sàn (`TODO-ARB-02-R2`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:84-138`
-  - **Mô tả:** Bổ sung `is_long: bool` vào `validate_structural_sl` (Long bắt buộc $SL < P$, Short $SL > P$); nạp MMR động theo Tier sàn thay vì áp đặt cứng $1.0\%$ làm tê liệt đòn bẩy cao $\ge 100\text{x}$.
+- [x] **TODO-AUDIT-NEW-32: Vá Lỗ Hổng Inverted SL & Động Hóa MMR Theo Tier Sàn (`TODO-ARB-02-R2`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:32-138`, `trading_bot/bot_engine/src/models/market_info.rs`, `trading_bot/bot_engine/src/controller/asset_actor.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH TOÀN DIỆN]
+    1. *Vế 1 (Inverted SL):* Đã được bảo vệ 100% trong `TODO-AUDIT-NEW-05` với `SlValidationResult::InvertedSlVeto`.
+    2. *Vế 2 (Động hóa MMR - Phòng vệ 2 tầng Hybrid Defense-in-Depth):*
+       - **Pha 1 (`helios` Core):** Thêm `RiskManager::resolve_effective_mmr(configured_mmr, leverage)` tự động nội suy Tier 1 chuẩn sàn Binance (0.40% cho >100x, 0.50% cho >50x, 0.65% cho >20x, 1.00% cho <=20x) khi `configured_mmr <= 0.0 || NaN` (Backtest offline), trong khi vẫn tôn trọng 100% MMR cấu hình tường minh của Altcoin.
+       - **Pha 2 (`trading_bot` Engine):** Bổ sung `BracketTier` và `resolve_mmr_for_notional` trong `MarketFilter`; thêm `fetch_leverage_brackets` vào `AccountManager`; nạp brackets từ Binance REST API lúc startup và cập nhật tự động `sync_dynamic_mmr()` trong `AssetActor` theo quy mô vị thế `Notional = Allocated Capital * Leverage`.
+  - **Unit Tests:**
+    - [x] `test_resolve_effective_mmr_tier_mapping` (Helios)
+    - [x] `test_resolve_effective_mmr_preserves_explicit_custom_mmr` (Helios)
+    - [x] `test_validate_structural_sl_approves_high_leverage_btc_scalp` (Helios)
+    - [x] `test_resolve_mmr_for_notional` (Bot Engine)
 - [-] **TODO-AUDIT-NEW-33: Triển Khai Post-Storm Ramp-up Filter Sau Bão (`POST-STORM-BLINDNESS`) (PENDING: TẠM DỪNG CHỜ THỰC NGHIỆM)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `gatekeeper.rs:177-206`
   - **Mô tả:** [PENDING: ĐỐI CHẤT PHƯƠNG ÁN A & B TRƯỚC KHI QUYẾT ĐỊNH] Đánh giá nhu cầu kiểm soát rủi ro sau khi thoát bão biến động cực hạn (`CircuitBreaker` mở lại) để phòng ngừa trượt giá và râu nến quét SL khi sổ lệnh còn mỏng.

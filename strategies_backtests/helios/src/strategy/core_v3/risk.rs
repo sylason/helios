@@ -32,6 +32,29 @@ pub enum SlValidationResult {
 }
 
 impl RiskManager {
+    /// 🛡️ [TODO-AUDIT-NEW-32]: Xác định tỷ lệ ký quỹ duy trì hiệu dụng (Effective MMR)
+    /// dựa trên mức MMR cấu hình và đòn bẩy thực tế của vị thế theo quy chuẩn Binance Futures Tier 1.
+    pub fn resolve_effective_mmr(configured_mmr: f64, leverage: f64) -> f64 {
+        let lev = if leverage <= 0.0 || leverage.is_nan() { 1.0 } else { leverage };
+
+        // 1. Trường hợp caller không truyền MMR (<= 0.0 hoặc NaN):
+        // Tự động suy luận MMR sàn Binance chuẩn theo Tier 1 của mức đòn bẩy đó:
+        if configured_mmr <= 0.0 || configured_mmr.is_nan() {
+            return if lev > 100.0 {
+                0.0040 // BTCUSDT Tier 1: 0.40% MMR tại 125x
+            } else if lev > 50.0 {
+                0.0050 // ETHUSDT Tier 1: 0.50% MMR tại 100x
+            } else if lev > 20.0 {
+                0.0065 // Top Altcoins Tier 1: 0.65% MMR tại 50x
+            } else {
+                0.0100 // Chuẩn an toàn 1.00% cho đòn bẩy <= 20x
+            };
+        }
+
+        // 2. Tôn trọng 100% giá trị cấu hình tường minh của sàn/người dùng truyền vào
+        configured_mmr
+    }
+
     /// 🛡️ Tính toán khoảng cách Stop Loss tối đa cho phép (% giá) đảm bảo đồng thời 2 lớp phòng vệ:
     /// 1. Trần ROE chiến thuật (playbook_max_sl_roe.min(GLOBAL_HARD_MAX_ROE)).
     /// 2. Chốt chặn khoảng cách thanh lý sàn Binance (Isolated Margin MMR & Fee Guard).
@@ -54,7 +77,7 @@ impl RiskManager {
         };
         let cap_price_pct = roe_cap / lev;
 
-        let effective_mmr = if mmr <= 0.0 { 0.01 } else { mmr };
+        let effective_mmr = Self::resolve_effective_mmr(mmr, lev);
         let fee = if taker_fee_rate < 0.0 { 0.0004 } else { taker_fee_rate };
         let buf_ratio = if buffer_ratio <= 0.0 { 0.15 } else { buffer_ratio.min(0.50) };
         let min_pct = if min_initial_sl_pct <= 0.0 { 0.0015 } else { min_initial_sl_pct };
@@ -111,7 +134,7 @@ impl RiskManager {
             (sl - price) / price
         };
 
-        let effective_mmr = if mmr <= 0.0 { 0.01 } else { mmr };
+        let effective_mmr = Self::resolve_effective_mmr(mmr, lev);
         let fee = if taker_fee_rate < 0.0 { 0.0004 } else { taker_fee_rate };
         let buf_ratio = if buffer_ratio <= 0.0 { 0.15 } else { buffer_ratio.min(0.50) };
         let min_pct = if min_initial_sl_pct <= 0.0 { 0.0015 } else { min_initial_sl_pct };
@@ -1853,5 +1876,76 @@ mod tests {
 
         assert_eq!(target_sl, min_be_price, "Sàn cứng min_be_price 2503.25 bảo vệ tuyệt đối, cấm dynamic floor tụt xuống 2490.0!");
         assert!(target_sl > entry_price, "Mức dừng lỗ sau bảo vệ kiên cố luôn nằm trên Entry price!");
+    }
+
+    #[test]
+    fn test_resolve_effective_mmr_tier_mapping() {
+        // 🛡️ [TODO-AUDIT-NEW-32]: Kiểm chứng nội suy Tier 1 chuẩn sàn Binance theo đòn bẩy khi mmr <= 0.0 hoặc NaN
+        assert_eq!(RiskManager::resolve_effective_mmr(0.0, 125.0), 0.0040);
+        assert_eq!(RiskManager::resolve_effective_mmr(0.0, 100.0), 0.0050);
+        assert_eq!(RiskManager::resolve_effective_mmr(0.0, 50.0), 0.0065);
+        assert_eq!(RiskManager::resolve_effective_mmr(0.0, 20.0), 0.0100);
+        assert_eq!(RiskManager::resolve_effective_mmr(f64::NAN, 100.0), 0.0050);
+        assert_eq!(RiskManager::resolve_effective_mmr(-1.0, 100.0), 0.0050);
+    }
+
+    #[test]
+    fn test_resolve_effective_mmr_preserves_explicit_custom_mmr() {
+        // 🛡️ [TODO-AUDIT-NEW-32]: Giữ nguyên cấu hình tường minh của người dùng / sàn chỉ định
+        // Altcoin rác có MMR 2.5% tại đòn bẩy 40x
+        assert_eq!(RiskManager::resolve_effective_mmr(0.025, 40.0), 0.0250);
+        // Cấu hình thủ công BTC 0.4% tại 100x
+        assert_eq!(RiskManager::resolve_effective_mmr(0.004, 100.0), 0.0040);
+        // Cấu hình 1.0% tại 20x
+        assert_eq!(RiskManager::resolve_effective_mmr(0.010, 20.0), 0.0100);
+    }
+
+    #[test]
+    fn test_validate_structural_sl_approves_high_leverage_btc_scalp() {
+        // 🛡️ [TODO-AUDIT-NEW-32]: Phá bỏ bẫy tê liệt đòn bẩy 100x
+        let entry_price = 60000.0;
+        let suggested_sl = 59940.0; // cách 60 giá = 0.10% giá (10% ROE tại 100x <= 15% ROE cap)
+        let max_roe_cap = 0.15;     // trần 15% ROE
+        let leverage = 100.0;
+        let mmr = 0.0040;           // MMR chuẩn Tier 1 của Binance cho BTC (hoặc 0.0)
+        let taker_fee = 0.0004;
+        let buffer_ratio = 0.15;
+        let min_initial_sl_pct = 0.0008;
+
+        let res = RiskManager::validate_structural_sl(
+            true,
+            entry_price,
+            suggested_sl,
+            max_roe_cap,
+            leverage,
+            mmr,
+            taker_fee,
+            buffer_ratio,
+            min_initial_sl_pct,
+        );
+
+        assert_eq!(
+            res,
+            SlValidationResult::Acceptable,
+            "Lệnh BTC Scalp 100x với SL cách 0.10% PHẢI được chấp thuận thay vì bị LiquidationRiskVeto!"
+        );
+
+        // Kiểm tra trường hợp mmr = 0.0 (chưa nạp, tự động nội suy Tier 1 = 0.0050)
+        let res_auto = RiskManager::validate_structural_sl(
+            true,
+            entry_price,
+            suggested_sl,
+            max_roe_cap,
+            leverage,
+            0.0,
+            taker_fee,
+            buffer_ratio,
+            min_initial_sl_pct,
+        );
+        assert_eq!(
+            res_auto,
+            SlValidationResult::Acceptable,
+            "Lệnh BTC Scalp 100x với mmr = 0.0 (tự nội suy) PHẢI được chấp thuận!"
+        );
     }
 }
