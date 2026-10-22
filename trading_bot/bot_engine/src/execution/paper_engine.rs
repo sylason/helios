@@ -180,6 +180,18 @@ impl ExecutionEngine for PaperExecutionEngine {
     fn get_closed_trades(&self) -> Vec<crate::execution::paper_trader::PaperTradeRecord> {
         self.paper_trader.closed_trades.clone()
     }
+
+    fn get_market_filter(&self) -> Option<crate::models::market_info::MarketFilter> {
+        Some(self.core.market_filter.clone())
+    }
+
+    fn update_market_filter(&mut self, filter: crate::models::market_info::MarketFilter) {
+        self.core.market_filter = filter;
+    }
+
+    fn get_allocated_capital(&self) -> f64 {
+        self.core.allocated_capital
+    }
 }
 
 #[cfg(test)]

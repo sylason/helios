@@ -11,7 +11,7 @@ use binance_sdk::derivatives_trading_usds_futures::{
 use binance_sdk::derivatives_trading_usds_futures::rest_api::trade_api::{
     CancelAllOpenOrdersParams, CancelAllAlgoOpenOrdersParams, NewOrderParams, NewOrderSideEnum, NewOrderTypeEnum
 };
-use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use tracing::{info, error};
 use tokio::sync::broadcast;
 use crate::models::account_state::AccountEvent;
@@ -247,5 +247,42 @@ impl AccountManager {
                 Err(e.into())
             }
         }
+    }
+
+    /// 🛡️ [TODO-AUDIT-NEW-32]: Truy vấn bảng quy định hạn mức và MMR (Notional and Leverage Brackets) của symbol từ Binance Futures
+    pub async fn fetch_leverage_brackets(&self, symbol: &str) -> Result<Vec<crate::models::market_info::BracketTier>, BotError> {
+        let params = binance_sdk::derivatives_trading_usds_futures::rest_api::NotionalAndLeverageBracketsParams::builder()
+            .symbol(symbol.to_string())
+            .build()
+            .map_err(|e| BotError::Internal(e.to_string()))?;
+
+        self.monitor.wait_if_needed(1).await;
+        let resp = self.rest_client.notional_and_leverage_brackets(params).await
+            .map_err(|e| BotError::Internal(format!("Lỗi truy vấn leverage bracket: {}", e)))?;
+
+        let data = resp.data().await.map_err(|e| BotError::Internal(format!("Lỗi parse data leverage bracket: {}", e)))?;
+
+        let mut bracket_tiers = Vec::new();
+        match data {
+            binance_sdk::derivatives_trading_usds_futures::rest_api::NotionalAndLeverageBracketsResponse::NotionalAndLeverageBracketsResponse1(items) => {
+                for item in items {
+                    if let Some(brackets) = item.brackets {
+                        for b in brackets {
+                            bracket_tiers.push(crate::models::market_info::BracketTier {
+                                bracket: b.bracket.unwrap_or(1) as i32,
+                                initial_leverage: b.initial_leverage.unwrap_or(20) as i32,
+                                notional_cap: b.notional_cap.unwrap_or(50_000) as f64,
+                                notional_floor: b.notional_floor.unwrap_or(0) as f64,
+                                maint_margin_ratio: b.maint_margin_ratio.and_then(|d| ToPrimitive::to_f64(&d)).unwrap_or(0.01),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        info!("📋 [{}] Đã tải thành công {} hạn mức Leverage Brackets từ Binance", symbol, bracket_tiers.len());
+        Ok(bracket_tiers)
     }
 }

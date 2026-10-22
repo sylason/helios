@@ -318,6 +318,18 @@ impl ExecutionEngine for BinanceLiveExecutionEngine {
     fn take_last_closed_trade(&mut self) -> Option<PaperTradeRecord> {
         self.recently_closed_trade.take()
     }
+
+    fn get_market_filter(&self) -> Option<crate::models::market_info::MarketFilter> {
+        Some(self.core.market_filter.clone())
+    }
+
+    fn update_market_filter(&mut self, filter: crate::models::market_info::MarketFilter) {
+        self.core.market_filter = filter;
+    }
+
+    fn get_allocated_capital(&self) -> f64 {
+        self.core.allocated_capital
+    }
 }
 
 #[cfg(test)]
@@ -329,7 +341,7 @@ mod tests {
         let filter = MarketFilter::default();
         let core = ExecutionCore::new(
             "BTCUSDT".to_string(),
-            filter,
+            filter.clone(),
             100.0,
             20.0,
         );

@@ -141,7 +141,7 @@ impl AssetActor {
         execution_engine: Box<dyn ExecutionEngine>,
         config: EngineConfig,
     ) -> Self {
-        Self {
+        let mut actor = Self {
             symbol: symbol.clone(),
             strategy_id,
             state: AssetState::InitialSync,
@@ -165,6 +165,26 @@ impl AssetActor {
             helios_config: HeliosConfigV3::default(),
             previous_position: None,
             last_closed_trade_for_bridge: None,
+        };
+        actor.sync_dynamic_mmr();
+        actor
+    }
+
+    /// 🛡️ [TODO-AUDIT-NEW-32]: Đồng bộ MMR theo quy mô vị thế Notional từ MarketFilter vào HeliosConfig
+    pub fn sync_dynamic_mmr(&mut self) {
+        if let Some(mf) = self.execution_engine.get_market_filter() {
+            let leverage = self.helios_config.risk_management.risk_base.leverage.max(1.0);
+            let allocated = {
+                let cap = self.execution_engine.get_allocated_capital();
+                if cap > 0.0 {
+                    cap
+                } else {
+                    self.config.initial_cash
+                }
+            };
+            let notional = allocated * leverage;
+            let dynamic_mmr = mf.resolve_mmr_for_notional(notional);
+            self.helios_config.risk_management.risk_base.maintenance_margin_rate = dynamic_mmr;
         }
     }
 
@@ -359,15 +379,9 @@ impl AssetActor {
                             self.pending_dna = Some(dna.clone());
                         } else {
                             // Không có vị thế (Flat) -> Cập nhật trực tiếp vào strategy ngay lập tức
-                            if let Some(ref mut strategy) = self.strategy {
-                                strategy.update_from_dna(&dna.dna);
-                                info!(
-                                    "🧬 [DNA HOT-SWAP APPLIED] Symbol: {} | Account FLAT -> New DNA Deployed (Fitness: {:.2}%, Dim: {})",
-                                    self.symbol, dna.fitness, dna.dna.len()
-                                );
+                            if self.apply_dna(&dna.dna, dna.fitness, "DNA Hot-Swap Flat") {
+                                self.pending_dna = None;
                             }
-                            self.helios_config.update_from_dna(&dna.dna);
-                            self.pending_dna = None;
                         }
 
                         let candles_vec = self.asset.get_candles_vec();
@@ -485,6 +499,8 @@ impl AssetActor {
         self.helios_config.update_from_dna(dna_slice);
         // 🛡️ TODO-AUDIT-NEW-60 (H-CFG-05): Khóa bất biến thứ bậc phân tầng Trailing Stop cho bản sao helios_config
         self.helios_config.risk_management.stop_management.enforce_tsl_hierarchy();
+        // 🛡️ [TODO-AUDIT-NEW-32]: Đồng bộ lại MMR khi DNA có thể đã cập nhật đòn bẩy
+        self.sync_dynamic_mmr();
         info!(
             "✨ [{}] Áp dụng DNA thành công [{}]! (Fitness: {:.2}%, Dim: {})",
             self.symbol, context, fitness, dna_slice.len()
@@ -526,8 +542,8 @@ impl AssetActor {
     /// Kiểm tra và cập nhật DNA từ Receiver nếu có DNA mới từ Re-Optimizer
     pub fn check_and_update_dna(&mut self) {
         if self.dna_rx.has_changed().unwrap_or(false) {
-            let dna_data = self.dna_rx.borrow_and_update();
-            if let Some(ref dna) = *dna_data {
+            let dna_opt = self.dna_rx.borrow_and_update().clone();
+            if let Some(dna) = dna_opt {
                 if let Some(pos) = self.execution_engine.get_position() {
                     let side_str = if pos.position_amt > 0.0 { "LONG" } else { "SHORT" };
                     let current_bars = self.processed_candles_count.saturating_sub(pos.live_entry_bar);
@@ -536,14 +552,11 @@ impl AssetActor {
                         | Postponing DNA update (Fitness: {:.2}%) until position closes! Storing in pending_dna.",
                         self.symbol, side_str, pos.entry_price, current_bars, dna.fitness
                     );
-                    self.pending_dna = Some(dna.clone());
+                    self.pending_dna = Some(dna);
                 } else {
-                    if let Some(ref mut strategy) = self.strategy {
-                        strategy.update_from_dna(&dna.dna);
-                        info!("✨ [{}] Đã cập nhật bộ não Helios với DNA mới từ Re-Optimizer! (Fitness: {:.4})", self.symbol, dna.fitness);
+                    if self.apply_dna(&dna.dna, dna.fitness, "Re-Optimizer Check") {
+                        self.pending_dna = None;
                     }
-                    self.helios_config.update_from_dna(&dna.dna);
-                    self.pending_dna = None;
                 }
             }
         }

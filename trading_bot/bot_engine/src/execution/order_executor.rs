@@ -681,6 +681,7 @@ mod tests {
             min_qty: 0.001,
             max_qty: 1000.0,
             min_notional: 5.0,
+            ..Default::default()
         };
         let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
         let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
@@ -701,6 +702,7 @@ mod tests {
             min_qty: 1.0,
             max_qty: 10000000.0,
             min_notional: 5.0,
+            ..Default::default()
         };
         let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
         let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));
@@ -749,6 +751,7 @@ mod tests {
             min_qty: 1.0,
             max_qty: 10000000.0,
             min_notional: 5.0,
+            ..Default::default()
         };
         let db_store = Arc::new(SqliteStore::new(":memory:").unwrap());
         let monitor = Arc::new(crate::models::weight_monitor::WeightMonitor::new(2400));

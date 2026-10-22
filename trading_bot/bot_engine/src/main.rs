@@ -71,7 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 6. Lấy Market Filter từ sàn (Tick size, step size...)
-    let market_filter = match syncer.fetch_market_filter(&symbol).await {
+    let mut market_filter = match syncer.fetch_market_filter(&symbol).await {
         Ok(filter) => filter,
         Err(e) => {
             warn!("⚠️ Không lấy được Market Filter cho {}: {}. Sử dụng mặc định.", symbol, e);
@@ -165,6 +165,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     if let Err(e) = account_manager.initialize_account(&symbol, 20).await {
         tracing::error!("❌ Lỗi khởi tạo tài khoản ban đầu: {}", e);
+    }
+
+    // 🛡️ [TODO-AUDIT-NEW-32]: Tải bảng Leverage Brackets từ sàn để động hóa Maintenance Margin Rate
+    match account_manager.fetch_leverage_brackets(&symbol).await {
+        Ok(brackets) => {
+            market_filter.brackets = brackets;
+            market_filter.maintenance_margin_rate = market_filter.resolve_mmr_for_notional(60.0 * 20.0);
+            tracing::info!(
+                "✅ [{}] Đã nạp thành công {} Brackets MMR từ sàn (MMR ban đầu: {:.4})",
+                symbol,
+                market_filter.brackets.len(),
+                market_filter.maintenance_margin_rate
+            );
+        }
+        Err(e) => {
+            tracing::warn!("⚠️ [{}] Không thể tải Leverage Brackets: {}. Tiếp tục dùng MMR mặc định.", symbol, e);
+        }
     }
 
     // 9. Khởi chạy Asset Actor (Nhạc trưởng) với HeliosStrategyV3

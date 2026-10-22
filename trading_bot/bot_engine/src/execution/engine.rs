@@ -65,6 +65,19 @@ pub trait ExecutionEngine: Send + Sync {
     fn get_closed_trades(&self) -> Vec<crate::execution::paper_trader::PaperTradeRecord> {
         Vec::new()
     }
+
+    /// 🛡️ [TODO-AUDIT-NEW-32]: Lấy MarketFilter hiện tại của Engine
+    fn get_market_filter(&self) -> Option<crate::models::market_info::MarketFilter> {
+        None
+    }
+
+    /// 🛡️ [TODO-AUDIT-NEW-32]: Cập nhật MarketFilter động cho Engine (ví dụ nạp brackets từ Binance API)
+    fn update_market_filter(&mut self, _filter: crate::models::market_info::MarketFilter) {}
+
+    /// 🛡️ [TODO-AUDIT-NEW-32]: Lấy mức vốn được cấp phát (Allocated Capital) của Engine
+    fn get_allocated_capital(&self) -> f64 {
+        0.0
+    }
 }
 
 /// Thành phần cốt lõi dùng chung (ExecutionCore) cho các Engine

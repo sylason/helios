@@ -1,12 +1,23 @@
 use crate::models::error::BotError;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BracketTier {
+    pub bracket: i32,
+    pub initial_leverage: i32,
+    pub notional_cap: f64,
+    pub notional_floor: f64,
+    pub maint_margin_ratio: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct MarketFilter {
     pub tick_size: f64,
     pub step_size: f64,
     pub min_qty: f64,
     pub max_qty: f64,
     pub min_notional: f64,
+    pub maintenance_margin_rate: f64,
+    pub brackets: Vec<BracketTier>,
 }
 
 impl Default for MarketFilter {
@@ -17,11 +28,23 @@ impl Default for MarketFilter {
             min_qty: 0.001,
             max_qty: 1000000.0,
             min_notional: 5.0,
+            maintenance_margin_rate: 0.01,
+            brackets: Vec::new(),
         }
     }
 }
 
 impl MarketFilter {
+    /// Tra cứu MMR tương ứng với quy mô vị thế (Notional = Allocated Capital * Leverage).
+    /// Nếu không có danh sách brackets hoặc không khớp bracket nào, fallback về maintenance_margin_rate.
+    pub fn resolve_mmr_for_notional(&self, notional: f64) -> f64 {
+        for b in &self.brackets {
+            if notional >= b.notional_floor && notional <= b.notional_cap {
+                return b.maint_margin_ratio;
+            }
+        }
+        self.maintenance_margin_rate
+    }
     /// Làm tròn giá theo quy định tick_size của sàn.
     pub fn round_price(&self, price: f64) -> f64 {
         if self.tick_size <= 0.0 {
@@ -154,6 +177,7 @@ mod tests {
             min_qty: 0.01,
             max_qty: 100.0,
             min_notional: 5.0,
+            ..Default::default()
         };
 
         // Valid order: price 10.0, qty 0.6 -> notional = 6.0 > 5.0
@@ -168,5 +192,36 @@ mod tests {
         // Invalid: notional < min_notional
         // price = 10.0, qty = 0.1 -> notional = 1.0 < 5.0
         assert!(filter.validate_order(10.0, 0.1).is_err());
+    }
+
+    #[test]
+    fn test_resolve_mmr_for_notional() {
+        let mut filter = MarketFilter::default();
+        filter.brackets = vec![
+            BracketTier {
+                bracket: 1,
+                initial_leverage: 125,
+                notional_floor: 0.0,
+                notional_cap: 50_000.0,
+                maint_margin_ratio: 0.004,
+            },
+            BracketTier {
+                bracket: 2,
+                initial_leverage: 100,
+                notional_floor: 50_000.0,
+                notional_cap: 250_000.0,
+                maint_margin_ratio: 0.005,
+            },
+        ];
+
+        // 1. Notional nhỏ $1,200 (Tier 1) -> 0.004
+        assert_eq!(filter.resolve_mmr_for_notional(1200.0), 0.004);
+        // 2. Notional $50,000 (Tier 1 trần) -> 0.004
+        assert_eq!(filter.resolve_mmr_for_notional(50_000.0), 0.004);
+        // 3. Notional lớn $100,000 (Tier 2) -> 0.005
+        assert_eq!(filter.resolve_mmr_for_notional(100_000.0), 0.005);
+        // 4. Khi danh sách brackets rỗng -> fallback maintenance_margin_rate
+        let empty_filter = MarketFilter::default();
+        assert_eq!(empty_filter.resolve_mmr_for_notional(1200.0), 0.010);
     }
 }
