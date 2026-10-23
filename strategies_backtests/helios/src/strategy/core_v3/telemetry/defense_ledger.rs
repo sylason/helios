@@ -454,6 +454,8 @@ mod tests {
     fn test_tier3_sniper_veto_and_clamping_counters() {
         let mut ledger = DefenseLedger::new();
 
+        use crate::strategy::core_v3::gatekeeper::GateEvaluation;
+
         let decision = ArbiterDecision {
             is_approved: false,
             final_signal: None,
@@ -464,6 +466,7 @@ mod tests {
             chaos_val: 0.15,
             chaos_penalty: 0.0,
             gate_veto: None,
+            gate_eval: GateEvaluation::default(),
             auction_ledger: vec![
                 AuctionCandidate {
                     scanner_id: ScannerId::AbsorptionScout,

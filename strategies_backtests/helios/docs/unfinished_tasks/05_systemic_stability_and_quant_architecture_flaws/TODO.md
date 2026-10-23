@@ -102,9 +102,13 @@
   - **File:** `ferro_trade/src/broker/broker.rs`, `ferro_trade/src/backtest/engine.rs`
   - **Mô tả:** Định cỡ và tính toán ký quỹ tại đầu nến $i$ bằng giá $Open[i]$ hoặc giá đóng nến trước đó $Close[i-1]$, tuyệt đối không dùng $Close[i]$.
   - **Ghi chú Tạm hoãn (22/10/2026):** Tạm hoãn do hệ thống hiện tại chạy `trade_on_close = true`, `exclusive_orders = true` và đơn vị thế tuyệt đối (`is_pos_open == true -> return`). Khi mở lệnh mới `net_position_size == 0.0` nên số hạng $Close[i]$ bị nhân với 0 triệt tiêu hoàn toàn, không gây ảnh hưởng thực tế. Sẽ kích hoạt lại khi phát triển Pyramiding / DCA đa vị thế.
-- [ ] **TODO-AUDIT-FT-02: Khử Backfill (`bfill`) trong `atr_sma` và Bơm Số 0 trong `chaos_ratio`**
-  - **File:** `ferro_trade/src/indicators/bulk.rs`
-  - **Mô tả:** Trả về $NaN$ trong giai đoạn Warmup của ATR; ngăn chặn thổi phồng `chaos_ratio` và bảo đảm tính toàn vẹn của `actual_warmup`.
+- [x] **TODO-AUDIT-FT-02: Khử Backfill (`bfill`) trong `atr_sma` và Bơm Số 0 trong `chaos_ratio`**
+  - **File:** `ferro_trade/src/indicators/calculate/bulk.rs`, `tests/backtests/strategies/sma_cross_trailing.rs`
+  - **Mô tả:** Trả về $NaN$ trong giai đoạn Warmup của ATR; ngăn chặn thổi phồng `chaos_ratio` và bảo đảm tính toàn vẹn của `actual_warmup`. Cung cấp helper `atr_sma_bfill` bảo toàn đối chứng 1:1 với Python golden test.
+  - **Unit Tests:**
+    - [x] `test_atr_sma_warmup_returns_nan_without_bfill`
+    - [x] `test_chaos_ratio_returns_nan_during_warmup`
+    - [x] `test_trailing_1d` (0 failures, 100% Python parity)
 - [ ] **TODO-AUDIT-FT-03: Sửa Công Thức Geometric Mean ($N$ thay vì $N+1$) trong Thống Kê**
   - **File:** `ferro_trade/src/backtest/stats/core.rs`
   - **Mô tả:** Chuẩn hóa công thức $gmean$ theo đúng số bước thời gian $N$.
@@ -120,9 +124,12 @@
   - **Unit Tests:**
     - [x] `test_reversal_volume_exhaustion_behavior`
     - [x] `test_dna_width_and_parameter_defs_integrity`
-- [ ] **TODO-AUDIT-H-02: Phá Bẫy Catch-22 Giữa Stop Loss Cấu Trúc và VETO ROE**
+- [x] **TODO-AUDIT-H-02: Phá Bẫy Catch-22 Giữa Stop Loss Cấu Trúc và VETO ROE (BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH 100%)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `anomaly.rs`, `arbiter.rs`
-  - **Mô tả:** Cho phép Scanner tự động co hẹp SL về trần an toàn $15\%$ ROE thay vì bị Arbiter giết chết toàn bộ tín hiệu biên độ lớn.
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH 100% QUA TODO-AUDIT-NEW-04, NEW-37, NEW-55, NEW-117]
+    1. *Tại Arbiter (`arbiter.rs:450-478`):* Khi proposal có SL cấu trúc vượt trần ROE (`StructuralRiskVeto`), Arbiter không VETO mà phê duyệt tham gia đấu thầu (`approved_proposals.push`).
+    2. *Tại Mod (`mod.rs:321-344`):* Proposal thắng thầu được kẹp an toàn bằng `RiskManager::clamp_sl_price` và tự động co giãn size ký quỹ theo $Risk Parity qua `RiskManager::calculate_dynamic_size` (Dynamic De-leverage).
+    3. *Unit Test:* `test_arbiter_structural_sl_approved_when_exceeds_roe_cap` (`arbiter.rs:947-1019`) đã chứng minh dứt khoát và PASS 100%.
 - [ ] **TODO-AUDIT-H-03: Xử Lý Mã Nguồn Ma `range_osc.rs` & Chuẩn Hóa Điểm Số Arbiter**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`, `arbiter.rs`
   - **Mô tả:** Tích hợp hoặc loại bỏ an toàn `range_osc`; chuẩn hóa phân phối điểm số (Z-Score scaling) giữa các Scanner trong sàn đấu Arbiter.
@@ -242,9 +249,9 @@
 - [x] **TODO-AUDIT-NEW-24: Tách Bạch Micro NATR vs Macro NATR Cho Cầu Dao Flatline (`NEW-NATR-4H-BLIND`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:24-32`
   - **Mô tả:** Sử dụng nến vi mô 1m/5m cho chốt chặn Flatline thay vì dùng NATR khung 4h, khắc phục triệt để bẫy mù thanh khoản khi thị trường đứng im.
-- [ ] **TODO-AUDIT-NEW-25: Gỡ Bỏ Lệnh Đánh Giá Lặp Lại Gatekeeper Trong Arbiter (`NEW-DOUBLE-EVAL`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:168-173`
-  - **Mô tả:** Loại bỏ lệnh gọi `gatekeeper.evaluate` lần 2 trong `process_tick()`, thống nhất quyền kiểm soát cửa ngõ duy nhất tại `core_v3/mod.rs:241`.
+- [x] **TODO-AUDIT-NEW-25: Gỡ Bỏ Lệnh Đánh Giá Lặp Lại Gatekeeper Trong Arbiter (`NEW-DOUBLE-EVAL`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:168-173`, `mod.rs:248-281`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100% - HỢP NHẤT VÀO TODO-AUDIT-NEW-54]. Đã thống nhất `HeliosArbiter::process_tick()` làm Single Source of Truth sở hữu Gatekeeper, gắn trường `pub gate_eval: GateEvaluation` vào `ArbiterDecision`. `core_v3/mod.rs` gọi `process_tick()` trước và tái sử dụng trực tiếp `&decision.gate_eval` cho `DefenseLedger`, triệt tiêu hoàn toàn lệnh gọi kép `RegimeGatekeeper::evaluate`. Unit test `test_single_gatekeeper_eval_propagated_through_arbiter_decision` đã kiểm chứng chuỗi 2 nến (Vào bão $\rightarrow$ Tan bão) và pass 100%.
 - [ ] **TODO-AUDIT-NEW-26: Dọn Cảm Biến Mồ Côi & Gỡ Ô Nhiễm Tham Số ATR Khỏi Độ Dốc KAMA (`ORPHAN-SENS`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:114-120`
   - **Mô tả:** Xóa bỏ `sensors.kama_slope` không sử dụng; thay `ind.atr.period` bằng `ind.kama.short_period` trong hàm gọi `ctx.kama_slope` để tránh ô nhiễm tham số SL vào KAMA.
@@ -421,9 +428,12 @@
     - [x] `test_update_from_dna_safe_on_empty_sensors`
     - [x] `test_update_from_dna_updates_matrix_when_sensors_present`
 
-- [ ] **TODO-AUDIT-NEW-54: Loại Bỏ Lệnh Gọi Cầu Dao Đánh Giá Lặp Lại Tại `mod.rs` (`H-MOD-02`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:241`, `arbiter.rs:168-173`
-  - **Mô tả:** Xóa bỏ lệnh gọi `RegimeGatekeeper::evaluate` thừa thãi tại `mod.rs:241` khi có defense_ledger, thống nhất quyền đánh giá duy nhất bên trong `arbiter.process_tick()`.
+- [x] **TODO-AUDIT-NEW-54: Loại Bỏ Lệnh Gọi Cầu Dao Đánh Giá Lặp Lại Tại `mod.rs` (`H-MOD-02`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:248-281`, `arbiter.rs:88, 357, 592, 670, 709`, `gatekeeper.rs:79`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100%]. Đã giải quyết đồng bộ và triệt để cùng `TODO-AUDIT-NEW-25` và `TODO-AUDIT-NEW-116`. Thêm `Copy` trait cho `GateEvaluation`, bổ sung `pub gate_eval: GateEvaluation` vào `ArbiterDecision`. Di chuyển `arbiter.process_tick()` lên trước khối `defense_ledger` trong `core_v3/mod.rs:next()` và xóa bỏ hoàn toàn dòng gọi `RegimeGatekeeper::evaluate(...)` độc lập. Tái sử dụng trực tiếp `&decision.gate_eval` cho `ledger.on_gatekeeper_tick()` và `ledger.check_hourly_heartbeat()`. Đảm bảo Zero-Heap-Allocation trên từng tick, giữ nguyên 100% cấu trúc DNA (`DNA_WIDTH = 110`).
+  - **Unit Tests:**
+    - [x] `test_single_gatekeeper_eval_propagated_through_arbiter_decision` (Kiểm chứng chuỗi 2 nến: Nến 1 vào bão `chaos_ratio = 3.5, ER = 0.0` $\rightarrow$ VETO `ChaosWhipsaw`, Ledger ghi nhận `STORM_ALERT`; Nến 2 tan bão `chaos_ratio = 0.20` $\rightarrow$ `passed == true`, Ledger đóng zone bão và cập nhật `CLEAR`).
+    - [x] Toàn bộ 168/168 unit tests của `helios` pass 100%.
 
 - [x] **TODO-AUDIT-NEW-55: Chuyển Đổi Veto Structural SL Sang Dynamic De-leverage Co Size Động (`H-MOD-03`, `H-MOD-04`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:277-283, 332-370`, `risk.rs:156-189`
@@ -711,10 +721,18 @@
     - [x] `test_regime_data_anomaly_on_nan_inputs`
     - [x] `test_selective_routing_matrix_contract`
     - [x] `test_arbiter_process_tick_selective_routing_ledger`
+  - **⚠️ [DEFECT PHÁT HIỆN HẬU KIỂM - CẦN MỞ TASK REVIEW HIỆU NĂNG]:**
+    - **Vấn đề cốt tử (Sai lệch nguyên tắc "Loại ngay từ vòng gửi xe"):**
+      Trong thiết kế ban đầu, cam kết của tính năng phân luồng Playbook là *"loại ngay từ vòng gửi xe, không tốn công phân tích sâu"*.
+    - **Hiện trạng thực tế trong `arbiter.rs:372-388`:**
+      Vòng lặp duyệt qua từng scanner hiện tại vẫn gọi `scanner.scan(tick, sensors, matrix, config)` chạy xong xuôi, tiêu tốn chu kỳ CPU tính toán chỉ báo vi mô, hình học nến và chấm điểm của Scanner đó rồi MỚI gọi `Self::is_scanner_eligible_for_regime(id, gate_eval.regime)` để gạt bỏ!
+    - **Hậu quả:** Gây lãng phí tài nguyên CPU nghiêm trọng trên hàng triệu nến Backtest GA (đặc biệt khi thị trường rơi vào các chế độ chiếm 60-70% thời gian như RangeBound hay Trend kéo dài nhưng các scanner đối lập vẫn bị ép chạy `scan()`).
+    - **Hành vi chuẩn mực cần đạt:** Phải kiểm tra `if !Self::is_scanner_eligible_for_regime(id, gate_eval.regime) { continue; }` ngay **TRƯỚC KHI** gọi `scanner.scan()`. Nếu không thuộc chế độ hợp lệ thì bỏ qua tức thì ($O(1)$), tiết kiệm $100\%$ chi phí quét nến của Scanner đó.
+    - **Hành động tiếp theo:** Đã lên lịch rà soát và tối ưu lại vị trí đặt cổng kiểm tra `is_eligible` trong đợt refactor hiệu năng Arbiter tiếp theo.
 
-- [ ] **TODO-AUDIT-NEW-116: Triệt Tiêu Đánh Giá Lặp Lại `RegimeGatekeeper::evaluate` Tại Arbiter (`H-GATE-03`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:169`, `mod.rs:163`
-  - **Mô tả:** Tái cấu trúc truyền kết quả `gate_eval` từ `mod.rs` vào `arbiter.process_tick()`, xóa bỏ lệnh gọi lặp lại Gatekeeper trong Arbiter, tối ưu hóa tốc độ tick.
+- [x] **TODO-AUDIT-NEW-116: Triệt Tiêu Đánh Giá Lặp Lại `RegimeGatekeeper::evaluate` Tại Arbiter (`H-GATE-03`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:88, 357, 592, 670, 709`, `mod.rs:248-281`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100% - HỢP NHẤT VÀO TODO-AUDIT-NEW-54]. Đã đóng gói thẩm quyền đánh giá Gatekeeper tập trung duy nhất bên trong `HeliosArbiter::process_tick()`, trả về `gate_eval` trong `ArbiterDecision`. Xóa bỏ hoàn toàn lệnh gọi lặp lại độc lập ngoài `mod.rs`, tối ưu hóa tốc độ tick và bảo toàn tính toàn vẹn thông tin cho `defense_ledger`. Unit test `test_single_gatekeeper_eval_propagated_through_arbiter_decision` pass 100%.
 
 - [x] **TODO-AUDIT-NEW-117: Chuyển Đổi Sniper VETO Sang Dynamic De-leverage Trong Thẩm Định SL Cấu Trúc (`H-RSK-01`) (BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:450-478`, `mod.rs:321-344`, `risk.rs:283-328`

@@ -4,7 +4,7 @@ use ferro_trade::strategy::TickContext;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::config::HeliosConfigV3;
-use crate::strategy::core_v3::gatekeeper::{RegimeGatekeeper, GateVetoReason, MarketRegime};
+use crate::strategy::core_v3::gatekeeper::{RegimeGatekeeper, GateVetoReason, MarketRegime, GateEvaluation};
 use crate::strategy::core_v3::risk::{RiskManager, SlValidationResult};
 use tracing::info;
 
@@ -85,6 +85,7 @@ pub struct ArbiterDecision {
     pub chaos_val: f64,
     pub chaos_penalty: f64,
     pub gate_veto: Option<GateVetoReason>,
+    pub gate_eval: GateEvaluation,
     pub auction_ledger: Vec<AuctionCandidate>,
 }
 
@@ -355,6 +356,7 @@ impl HeliosArbiter {
                 chaos_val: gate_eval.current_chaos,
                 chaos_penalty: 0.0,
                 gate_veto: gate_eval.veto_reason,
+                gate_eval,
                 auction_ledger: Vec::new(),
             };
         }
@@ -590,6 +592,7 @@ impl HeliosArbiter {
                 chaos_val,
                 chaos_penalty,
                 gate_veto: None,
+                gate_eval,
                 auction_ledger,
             };
         }
@@ -667,6 +670,7 @@ impl HeliosArbiter {
                 chaos_val,
                 chaos_penalty,
                 gate_veto: None,
+                gate_eval,
                 auction_ledger,
             }
         } else {
@@ -706,6 +710,7 @@ impl HeliosArbiter {
                 chaos_val,
                 chaos_penalty,
                 gate_veto: None,
+                gate_eval,
                 auction_ledger,
             }
         }

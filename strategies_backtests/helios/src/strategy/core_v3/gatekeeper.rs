@@ -76,7 +76,7 @@ impl MarketRegime {
 }
 
 /// Kết quả thẩm định trạng thái thị trường của Gatekeeper
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct GateEvaluation {
     /// 🏛️ Chế độ thị trường vĩ mô được phân loại khách quan
     pub regime: MarketRegime,

@@ -246,16 +246,19 @@ impl Strategy for HeliosStrategyV3 {
             return; 
         }
 
+        // 🎯 KHỐI 3 (TASK-ARB-05 / TODO-AUDIT-NEW-54): Đánh giá Gatekeeper & Đấu thầu tập trung 1 lần duy nhất tại Arbiter
+        let decision = self.arbiter.process_tick(tick, &self.sensors, &self.matrix, &self.config, self.debug_mode);
+
         // 🛡️ THEO DÕI MA TRẬN PHÒNG THỦ VỐN (Zero-cost trong GA, Some trong Live/Paper)
+        // Tái sử dụng trực tiếp decision.gate_eval, triệt tiêu hoàn toàn lệnh gọi Gatekeeper::evaluate lần 2!
         if let Some(ref mut ledger) = self.defense_ledger {
             // Tầng 1: Chuyển đổi trạng thái Gatekeeper (Vào bão / Ra bão)
             let candle_ts = tick.data_view.raw_cache().datetime.get(tick.i).copied().unwrap_or(0) / 1_000_000;
-            let gate_eval = crate::strategy::core_v3::gatekeeper::RegimeGatekeeper::evaluate(tick, &self.sensors, &self.matrix, &self.config);
-            if let Some(msg) = ledger.on_gatekeeper_tick(tick.i, candle_ts, &gate_eval) {
+            if let Some(msg) = ledger.on_gatekeeper_tick(tick.i, candle_ts, &decision.gate_eval) {
                 self.last_decision_telemetry = Some(msg);
             } else if self.last_decision_telemetry.is_none() {
                 let price = tick.closes().get(tick.i).copied().unwrap_or(0.0);
-                if let Some(hb_msg) = ledger.check_hourly_heartbeat(tick.i, price, &gate_eval) {
+                if let Some(hb_msg) = ledger.check_hourly_heartbeat(tick.i, price, &decision.gate_eval) {
                     self.last_decision_telemetry = Some(hb_msg);
                 }
             }
@@ -275,9 +278,6 @@ impl Strategy for HeliosStrategyV3 {
                 pb_cfg.max_boundary_z,
             );
         }
-
-        // 🎯 KHỐI 3 (TASK-ARB-05): Tối ưu Zero-Allocation - Sử dụng arbiter đã khởi tạo sẵn
-        let decision = self.arbiter.process_tick(tick, &self.sensors, &self.matrix, &self.config, self.debug_mode);
 
         if decision.is_approved {
             if let Some(signal) = decision.final_signal {
@@ -519,6 +519,138 @@ mod tests {
         assert_eq!(sensors.z_score[len - 1], 0.0, "Price Z-Score phải phản ánh giá phẳng = 0.0");
         // Volume Z-Score phải phản ứng độc lập với Vol Z-Score = 3.5 -> phát hiện bùng nổ thanh khoản
         assert!(sensors.vol_z_score[len - 1] > 3.0, "Vol Z-Score phải độc lập phản ánh bùng nổ thanh khoản!");
+    }
+
+    #[test]
+    fn test_single_gatekeeper_eval_propagated_through_arbiter_decision() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use ferro_trade::strategy::Strategy;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+        use crate::strategy::core_v3::gatekeeper::GateVetoReason;
+        use crate::strategy::core_v3::telemetry::defense_ledger::DefenseLedger;
+
+        let len = 50;
+        let opens = vec![2000.0; len];
+        let highs = vec![2010.0; len];
+        let lows = vec![1990.0; len];
+        let closes = vec![2000.0; len];
+        let volumes = vec![1000.0; len];
+        let datetimes = vec![0i64; len];
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(datetimes),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(volumes),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        // 1. Khởi tạo Strategy với Telemetry Enabled và Defense Ledger
+        let params = HashMap::new();
+        let mut strategy = HeliosStrategyV3::new(&params);
+        strategy.set_telemetry_enabled(true);
+        strategy.defense_ledger = Some(DefenseLedger::new());
+
+        // Khởi tạo Sensors giả lập
+        let mut sensors = HeliosSensors::default();
+        sensors.closes = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.highs = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.lows = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.volumes = std::sync::Arc::new(vec![1000.0; len]);
+        sensors.natr = std::sync::Arc::new(vec![1.5; len]);
+        sensors.micro_natr = std::sync::Arc::new(vec![1.0; len]);
+        sensors.z_score = std::sync::Arc::new(vec![0.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![0.0; len]);
+        sensors.mfi = std::sync::Arc::new(vec![50.0; len]);
+        sensors.efficiency_ratio = std::sync::Arc::new(vec![0.5; len]);
+        sensors.adx = std::sync::Arc::new(vec![25.0; len]);
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.kc_upper = std::sync::Arc::new(vec![2012.0; len]);
+        sensors.kc_lower = std::sync::Arc::new(vec![1988.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+
+        // ==========================================
+        // NẾN 1: BÃO DỮ DỘI (chaos_ratio = 3.5, efficiency_ratio = 0.0 -> chaos_index = (tanh(2.5) * 1.0) ~ 0.98 > t_enter ~ 0.70)
+        // ==========================================
+        let mut chaos_vec_storm = vec![0.5; len];
+        chaos_vec_storm[len - 1] = 3.5;
+        sensors.chaos_ratio = std::sync::Arc::new(chaos_vec_storm);
+
+        let mut er_vec_storm = vec![0.5; len];
+        er_vec_storm[len - 1] = 0.0; // Thị trường hoàn toàn nhiễu loạn giật cục
+        sensors.efficiency_ratio = std::sync::Arc::new(er_vec_storm);
+
+        strategy.sensors = sensors.clone();
+        strategy.matrix = MarketMatrixV3::from_sensors(&strategy.config, &strategy.sensors);
+
+        let mut tick_1 = ferro_trade::strategy::TickContext {
+            i: len - 1,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        strategy.next(&mut tick_1);
+
+        // Kiểm tra Decision trực tiếp từ Arbiter và Gatekeeper Evaluation
+        let dec_1 = strategy.arbiter.process_tick(&tick_1, &strategy.sensors, &strategy.matrix, &strategy.config, false);
+        assert!(!dec_1.is_approved, "Bão thị trường phải VETO không phê duyệt lệnh!");
+        assert!(!dec_1.gate_eval.passed, "gate_eval.passed phải là false!");
+        assert_eq!(dec_1.gate_eval.veto_reason, Some(GateVetoReason::ChaosWhipsaw), "Lý do Veto phải là ChaosWhipsaw!");
+
+        // Kiểm tra Defense Ledger đã nhận gate_eval thông qua arbiter.process_tick() trong next() và ghi nhận bão
+        let ledger = strategy.defense_ledger.as_ref().expect("Phải có ledger");
+        assert_eq!(ledger.prev_gate_veto, Some(GateVetoReason::ChaosWhipsaw), "Ledger phải ghi nhận veto ChaosWhipsaw!");
+        assert_eq!(ledger.chaos_whipsaw_bars, 1, "Ledger phải tăng đếm chaos_whipsaw_bars lên 1!");
+
+        // ==========================================
+        // NẾN 2: TAN BÃO (chaos_ratio = 0.20 < ngưỡng 0.70)
+        // ==========================================
+        let mut chaos_vec_calm = vec![0.5; len];
+        chaos_vec_calm[len - 1] = 0.20;
+        sensors.chaos_ratio = std::sync::Arc::new(chaos_vec_calm);
+        strategy.sensors = sensors;
+        strategy.matrix = MarketMatrixV3::from_sensors(&strategy.config, &strategy.sensors);
+
+        let mut tick_2 = ferro_trade::strategy::TickContext {
+            i: len - 1,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        strategy.next(&mut tick_2);
+
+        // Kiểm tra Decision từ Arbiter nến 2
+        let dec_2 = strategy.arbiter.process_tick(&tick_2, &strategy.sensors, &strategy.matrix, &strategy.config, false);
+        assert!(dec_2.gate_eval.passed, "Nến 2 tan bão thì gate_eval.passed phải là true!");
+        assert_eq!(dec_2.gate_eval.veto_reason, None, "Không được có Veto!");
+
+        // Kiểm tra Defense Ledger cập nhật trạng thái tan bão (prev_gate_veto quay về None và lưu zone)
+        let ledger_2 = strategy.defense_ledger.as_ref().expect("Phải có ledger");
+        assert_eq!(ledger_2.prev_gate_veto, None, "Ledger phải giải phóng veto khi tan bão!");
+        assert_eq!(ledger_2.zones.len(), 1, "Ledger phải đóng lại 1 zone bão đã qua!");
     }
 
 
