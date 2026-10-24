@@ -221,9 +221,9 @@
 - [ ] **TODO-AUDIT-NEW-16: Chuẩn Hóa `apply_dna` Cho Toàn Bộ Điểm Cập Nhật DNA Nóng (`TODO-ACT-05`)**
   - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:338, 515`
   - **Mô tả:** Thay thế các lệnh gọi trực tiếp `update_from_dna` bằng `self.apply_dna(...)` để kiểm tra kích thước DNA (103 chiều) và chặn triệt để `NaN`/`Inf`.
-- [ ] **TODO-AUDIT-NEW-17: Khử Bom Nổ Chậm Panic Crash Trong `RangeOsc` & Dọn Cảm Biến Rỗng (`TODO-SEN-08`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs:77-78`, `core_v3/mod.rs:148-173`
-  - **Mô tả:** Thêm guard kiểm tra độ dài vector trước khi index `sensors.stoch_range_k[i]`, tránh crash ứng dụng khi tái kích hoạt Scanner.
+- [x] **TODO-AUDIT-NEW-17: Khử Bom Nổ Chậm Panic Crash Trong `RangeOsc` & Dọn Cảm Biến Rỗng (`TODO-SEN-08`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs:51-83`, `core_v3/mod.rs:3955-4011`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]: Chuyển đổi toàn bộ 7 vị trí indexing thô `[i]` sang `.get(i).copied().unwrap_or(f64::NAN)` (`bb_upper/middle/lower`, `bb_width_norm`, `trend_strength`, `stoch_range_k/d`), mở rộng early exit NaN guard. Đã kiểm chứng qua unit test `test_range_osc_empty_sensors_no_panic` (174/174 tests pass).
 - [ ] **TODO-AUDIT-NEW-18: Thẩm Định Ngoài Mẫu OOS Thuần Khiết Cắt Bỏ Nhiễm Bẩn Warmup (`TODO-PROS-02`)**
   - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:410-435`
   - **Mô tả:** Chỉ tính toán thống kê WFE Gate trên các lệnh có `entry_bar >= warmup_offset`, loại bỏ hoàn toàn 5,760 nến In-Sample gối đầu.
@@ -1357,4 +1357,41 @@
     - [x] `test_gatekeeper_state_transition_edge_detection`
     - [x] `test_veto_card_formatting_and_suppression_logic`
     - [x] `test_paper_trader_trailing_sl` & `test_monotonic_ratchet_guard` (10/10 tests pass)
+
+- [ ] **TODO-AUDIT-NEW-206: Tái Cấu Trúc Phân Rã `risk.rs` & `manage_trailing_stop` Thành Package Module Chuyên Biệt (`RISK-MODULAR-DECOMPOSITION`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk/` (`mod.rs`, `sizing.rs`, `initial_sl.rs`, `trailing.rs`, `ratchet.rs`, `stagnation.rs`)
+  - **Mô tả:** Phân rã file `risk.rs` đồ sộ (~2,221 dòng) và hàm `manage_trailing_stop` thành thư mục module hóa `risk/`. Mỗi file phụ trách đúng 1 miền nghiệp vụ (Single Responsibility Principle):
+    - `sizing.rs`: Tính toán kích thước vị thế $Risk Parity phi thứ nguyên.
+    - `initial_sl.rs`: Xác định và kẹp biên Stop Loss ban đầu khi vào lệnh.
+    - `trailing.rs`: Cập nhật trailing stop loss thích ứng (ATR, Dynamic TSL).
+    - `ratchet.rs`: Khóa lợi nhuận phân tầng (Tiered Profit Lock & Break-Even).
+    - `stagnation.rs`: Phát hiện vị thế ngâm vốn, xịt xung lực và giải phóng margin.
+  - Triệt tiêu hoàn toàn nợ kỹ thuật spaghetti code và rủi ro dẫm chân logic.
+  - **Unit Tests:**
+    - [ ] `test_risk_modular_subsystem_compilation_and_parity`
+    - [ ] `test_risk_sizing_matches_legacy`
+    - [ ] `test_risk_trailing_matches_legacy`
+
+- [ ] **TODO-AUDIT-NEW-207: Độc Quyền Hóa Stop Loss & Sizing Về Risk Manager (Khử Ô Nhiễm Khỏi 6 Scanners) (`RISK-SCANNER-SEPARATION-OF-CONCERNS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/*.rs`, `arbiter.rs`, `risk.rs`, `mod.rs`
+  - **Mô tả:** Loại bỏ việc 6 Scanners tự đo râu nến/ATR để tính `suggested_sl` và can thiệp sizing, vi phạm nguyên tắc phân định trách nhiệm Quant:
+    - *Scanner:* Chỉ làm nhiệm vụ nhận diện bối cảnh thị trường (Có tín hiệu không? Điểm tự tin `confidence` bao nhiêu? Mốc tham chiếu cấu trúc nến nếu có).
+    - *Risk Manager:* Độc quyền tính toán vị trí Stop Loss thực tế, độ đệm Buffer ATR, quy mô vị thế ($Risk Parity Notional), và kiểm soát đòn bẩy.
+    - Quy tụ toàn bộ luồng tính toán SL/Sizing về một cổng duy nhất tại Risk Manager.
+  - **Unit Tests:**
+    - [ ] `test_scanner_outputs_pure_signal_without_sl_computation`
+    - [ ] `test_risk_manager_exclusive_sl_and_size_arbitration`
+
+- [ ] **TODO-AUDIT-NEW-208: Nghiên Cứu & Thiết Kế Giao Thức Nhồi Lệnh An Toàn Risk-Free Pyramiding (`RISK-FREE-PYRAMIDING-PROTOCOL`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `trading_bot/bot_engine/src/controller/asset_actor.rs`
+  - **Mô tả:** Nghiên cứu mở rộng cơ chế gia tăng lợi nhuận theo chiều hướng có lợi (Pyramiding / Scale-In) khi thị trường vào siêu sóng:
+    - Hiện tại hệ thống vận hành theo cơ chế 1 vị thế duy nhất (`exclusive_orders = true`), vốn chỉ tăng qua lãi kép (Compounding) ở chu kỳ lệnh tiếp theo.
+    - Xây dựng mô hình toán học cho phép nhồi thêm vị thế (Scale-in) khi và chỉ khi:
+      1. Vị thế ban đầu đã dời SL qua điểm hòa vốn (Break-Even) hoặc khóa lãi (Tier 1 Ratchet), tức Rủi ro danh mục của vị thế gốc $= 0$ (Free Risk).
+      2. Mức rủi ro tối đa của phần lệnh nhồi mới không bao giờ được xâm phạm vào vốn gốc cơ sở ($Target\_Risk \le \text{Unrealized PnL Locked}$).
+      3. Tổng đòn bẩy sau khi nhồi vẫn nằm trong giới hạn an toàn của `PortfolioGuardian`.
+  - **Unit Tests:**
+    - [ ] `test_risk_free_pyramiding_requires_locked_break_even`
+    - [ ] `test_pyramiding_max_risk_bounded_by_unrealized_profit`
+
 

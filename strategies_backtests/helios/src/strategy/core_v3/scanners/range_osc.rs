@@ -48,15 +48,16 @@ impl TacticalScanner for RangeOscScanner {
         let high = tick.highs()[i];
         let low = tick.lows()[i];
 
-        let bb_u = sensors.bb_upper[i];
-        let bb_m = sensors.bb_middle[i];
-        let bb_l = sensors.bb_lower[i];
-        let bb_w_norm = matrix.bb_width_norm[i];
+        let bb_u = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
+        let bb_m = sensors.bb_middle.get(i).copied().unwrap_or(f64::NAN);
+        let bb_l = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
+        let bb_w_norm = matrix.bb_width_norm.get(i).copied().unwrap_or(f64::NAN);
+        let trend_strength = matrix.trend_strength.get(i).copied().unwrap_or(f64::NAN);
         // 🚀 TASK-MAT-01: Chuẩn hóa Volume Z-Score về thang đo [0.0, 1.0] tương thích với range_cfg.volume_max_threshold
         let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
         let vol_force = sat_unbounded(raw_vol_z, 2.0);
         
-        if bb_u.is_nan() || bb_m.is_nan() || bb_l.is_nan() || close <= 0.0 {
+        if bb_u.is_nan() || bb_m.is_nan() || bb_l.is_nan() || bb_w_norm.is_nan() || trend_strength.is_nan() || close <= 0.0 {
             return None;
         }
 
@@ -67,7 +68,7 @@ impl TacticalScanner for RangeOscScanner {
 
         // 1.1 BỘ LỌC XU HƯỚNG QUANT: Cấm đánh Range khi thị trường có Trend mạnh
         let max_trend = range_cfg.max_trend_strength.max(0.01);
-        if matrix.trend_strength[i] > max_trend {
+        if trend_strength > max_trend {
             return None;
         }
 
@@ -75,8 +76,8 @@ impl TacticalScanner for RangeOscScanner {
         let bb_slope = matrix.bb_middle_slope_adj.get(i).copied().unwrap_or(0.0);
         let max_bb_slope = range_cfg.max_bb_slope.max(0.01);
 
-        let stoch_k = sensors.stoch_range_k[i];
-        let stoch_d = sensors.stoch_range_d[i];
+        let stoch_k = sensors.stoch_range_k.get(i).copied().unwrap_or(f64::NAN);
+        let stoch_d = sensors.stoch_range_d.get(i).copied().unwrap_or(f64::NAN);
         if stoch_k.is_nan() || stoch_d.is_nan() {
             return None;
         }

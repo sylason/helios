@@ -3951,6 +3951,61 @@ mod tests {
         };
         assert!(should_emit_31m, "Sau 30 phút, thẻ VETO phải được phép phát lại để cập nhật trạng thái!");
     }
+
+    /// 🛡️ TODO-AUDIT-NEW-17 (TODO-SEN-08): Khử bom nổ chậm Panic Crash trong RangeOsc khi cảm biến rỗng
+    #[test]
+    fn test_range_osc_empty_sensors_no_panic() {
+        use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
+
+        let len = 50;
+        let i = 25;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new((0..len).map(|idx| (idx * 60_000) as i64).collect()),
+            open: std::sync::Arc::new(vec![100.0; len]),
+            high: std::sync::Arc::new(vec![105.0; len]),
+            low: std::sync::Arc::new(vec![95.0; len]),
+            close: std::sync::Arc::new(vec![100.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        // 1. Cảm biến hoàn toàn rỗng mặc định (như khi stoch_range bị tắt trong init())
+        let empty_sensors = HeliosSensors::default();
+        let empty_matrix = MarketMatrixV3::default();
+        let config = HeliosConfigV3::default();
+
+        let scanner = RangeOscScanner;
+        // Bắt buộc không được panic và trả về None an toàn
+        let result = scanner.scan(&tick, &empty_sensors, &empty_matrix, &config);
+        assert!(result.is_none(), "RangeOscScanner phải trả về None mà không panic khi cảm biến rỗng!");
+
+        // 2. Cảm biến có BB nhưng stoch_range_k/d vẫn rỗng
+        let mut partial_sensors = HeliosSensors::default();
+        partial_sensors.bb_upper = std::sync::Arc::new(vec![105.0; len]);
+        partial_sensors.bb_middle = std::sync::Arc::new(vec![100.0; len]);
+        partial_sensors.bb_lower = std::sync::Arc::new(vec![95.0; len]);
+        let mut partial_matrix = MarketMatrixV3::default();
+        partial_matrix.bb_width_norm = std::sync::Arc::new(vec![0.10; len]);
+        partial_matrix.trend_strength = std::sync::Arc::new(vec![0.02; len]);
+
+        let result2 = scanner.scan(&tick, &partial_sensors, &partial_matrix, &config);
+        assert!(result2.is_none(), "RangeOscScanner phải trả về None mà không panic khi stoch_range_k/d rỗng!");
+    }
 }
 
 
