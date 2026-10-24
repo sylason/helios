@@ -83,11 +83,14 @@ impl TacticalScanner for MomentumIgnitionScanner {
             return None; // Nến rút chân / râu ngược (Shooting Star / Hammer) -> Loại bỏ bẫy fakeout
         };
 
-        // 🛡️ VẤN ĐỀ 3 (TODO-P0-05): Macro Trend Veto (Chống bắt dao rơi & cản đầu xe tăng)
+        // 🛡️ VẤN ĐỀ 3 (TODO-P0-05 / TODO-STAB-04): Macro Trend Veto (Chống bắt dao rơi & cản đầu xe tăng)
         let kama_slope = matrix.kama_slope_atr.get(i).copied()
             .or_else(|| sensors.kama_slope_adj.get(i).copied())
             .unwrap_or(0.0);
-        let max_adverse = if mom_cfg.max_adverse_slope <= 0.0 { 0.15 } else { mom_cfg.max_adverse_slope.max(0.01) };
+        if !kama_slope.is_finite() {
+            return None;
+        }
+        let max_adverse = mom_cfg.max_adverse_slope.clamp(0.0, 0.05);
         match signal_type {
             SignalType::Long => {
                 if kama_slope < -max_adverse {

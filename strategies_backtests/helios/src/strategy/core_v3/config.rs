@@ -760,8 +760,8 @@ pub struct TacticalMomentumParams {
     #[serde(default = "default_momentum_min_clv")]
     pub min_clv: f64,
 
-    /// 🛡️ Ngưỡng dốc xu hướng KAMA tối đa cấm bùng nổ ngược sóng (0.05 -> 0.35, Step 0.02 -> 16 nấc)
-    #[dna(min = 0.05, max = 0.35, step = 0.02)]
+    /// 🛡️ Ngưỡng dốc xu hướng KAMA tối đa cấm bùng nổ ngược sóng (0.00 -> 0.05, Step 0.01 -> 6 nấc)
+    #[dna(min = 0.00, max = 0.05, step = 0.01)]
     #[serde(default = "default_momentum_max_adverse_slope")]
     pub max_adverse_slope: f64,
 
@@ -1425,7 +1425,7 @@ fn default_momentum_min_clv() -> f64 {
 }
 
 fn default_momentum_max_adverse_slope() -> f64 {
-    0.15
+    0.02
 }
 
 fn default_momentum_w_breakout() -> f64 {

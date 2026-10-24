@@ -46,11 +46,11 @@
     - [x] `test_selective_routing_matrix_contract`
     - [x] `test_arbiter_process_tick_selective_routing_ledger`
 
-- [ ] **TODO-STAB-04: Bổ sung Chốt Chặn Đồng Thuận Pha Đa Khung Thời Gian (MTF Phase Coherence Gate)**
+- [x] **TODO-STAB-04: Bổ sung Chốt Chặn Đồng Thuận Pha Đa Khung Thời Gian (MTF Phase Coherence Gate)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `momentum_ignition.rs`
   - **Mô tả:** Chỉ cho phép vào lệnh 1m khi xu hướng khung 15m/1h đồng thuận pha (KAMA 15m cùng chiều, không đối nghịch).
   - **Unit Tests:**
-    - [ ] `test_mtf_phase_coherence_blocks_counter_trend_micro_noise`
+    - [x] `test_mtf_phase_coherence_blocks_counter_trend_micro_noise`
 
 ---
 
@@ -109,9 +109,9 @@
     - [x] `test_atr_sma_warmup_returns_nan_without_bfill`
     - [x] `test_chaos_ratio_returns_nan_during_warmup`
     - [x] `test_trailing_1d` (0 failures, 100% Python parity)
-- [ ] **TODO-AUDIT-FT-03: Sửa Công Thức Geometric Mean ($N$ thay vì $N+1$) trong Thống Kê**
-  - **File:** `ferro_trade/src/backtest/stats/core.rs`
-  - **Mô tả:** Chuẩn hóa công thức $gmean$ theo đúng số bước thời gian $N$.
+- [x] **TODO-AUDIT-FT-03: Sửa Công Thức Geometric Mean ($N$ thay vì $N+1$) trong Thống Kê (BÁO ĐỘNG GIẢ / KHÔNG TỒN TẠI LỖI)**
+  - **File:** `ferro_trade/src/stats/core.rs`
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / KHÔNG TỒN TẠI LỖI] Đã thẩm định thực nghiệm độc lập qua `/helios-verify`: Biến đếm `welford_count` trong `core.rs` chỉ đếm số bước tỷ suất sinh lời ($D - 1$). Biểu thức `total_days = welford_count + 1 = D` chính xác là tổng số ngày quan sát, khớp 100% với `len(returns)` của Python `backtesting.py` (nơi ngày đầu tiên là NaN được fillna(0) + 1). Parity 1:1 với Python đạt tuyệt đối (`Diff = 0.000000` trên toàn bộ golden tests như `test_trailing_1d`, `test_sl_tp_sma_cross_30d`). Việc đổi thành $N-1$ sẽ làm gãy golden test suite.
 - [ ] **TODO-AUDIT-FT-04: Sửa Logic Pessimistic Execution cho Stop Entry & Bảo Toàn Vốn Hedging**
   - **File:** `ferro_trade/src/broker/broker.rs`
   - **Mô tả:** Khớp SL bảo thủ ngay trong nến nếu vi phạm mức dừng lỗ; tính đúng Unrealized PnL khi vị thế ròng về 0.

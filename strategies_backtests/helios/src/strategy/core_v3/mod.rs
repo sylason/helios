@@ -3482,7 +3482,7 @@ mod tests {
         let mut config = HeliosConfigV3::default();
         config.tactical_sniper.momentum.rsi_threshold = 60.0;
         config.tactical_sniper.momentum.vol_z_threshold = 1.0;
-        config.tactical_sniper.momentum.max_adverse_slope = 0.15;
+        config.tactical_sniper.momentum.max_adverse_slope = 0.02;
 
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
@@ -3495,7 +3495,7 @@ mod tests {
         let matrix = MarketMatrixV3::default();
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
-        assert!(prop.is_none(), "Bùng nổ Long khi macro trend dốc xuống quá ngưỡng adverse_slope (0.25 > 0.15) PHẢI bị VETO!");
+        assert!(prop.is_none(), "Bùng nổ Long khi macro trend dốc xuống quá ngưỡng adverse_slope (0.25 > 0.02) PHẢI bị VETO!");
     }
 
     #[test]
@@ -3619,6 +3619,100 @@ mod tests {
         sensors.rsi_momentum = std::sync::Arc::new(vec![70.0; len]);
         let prop_strong = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop_strong.is_some(), "Khi RSI = 70.0 vượt ngưỡng xung lực, scanner phải kích hoạt bùng nổ Long hợp lệ!");
+    }
+
+    #[test]
+    fn test_mtf_phase_coherence_blocks_counter_trend_micro_noise() {
+        let len = 50;
+        let i = 49;
+
+        // Nến 1m bùng nổ vượt đỉnh BB Upper (Long candidate):
+        // Open=2015, High=2026, Low=2014, Close=2025 > bb_upper 2020.0 (CLV = 0.833, close > open)
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2015.0; len]),
+            high: std::sync::Arc::new(vec![2026.0; len]),
+            low: std::sync::Arc::new(vec![2014.0; len]),
+            close: std::sync::Arc::new(vec![2025.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.rsi_threshold = 60.0;
+        config.tactical_sniper.momentum.vol_z_threshold = 1.0;
+        config.tactical_sniper.momentum.min_activation_score = 0.20;
+        config.tactical_sniper.momentum.max_adverse_slope = 0.02; // Ngưỡng dung sai vi sai 0.02 (0.4% ATR)
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+
+        // 1. Kịch bản Ca 1: Vĩ mô 15m/1h dốc âm mạnh (Downtrend thác lũ -0.10 < -0.02)
+        // Dù nến 1m bùng nổ rất đẹp, MTF Phase Coherence Gate PHẢI VETO cấm bắt dao rơi!
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.10; len]);
+        let prop_veto = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_veto.is_none(), "Bùng nổ Long khi macro KAMA dốc âm mạnh (-0.10 < -0.02) PHẢI bị VETO!");
+
+        // 2. Kịch bản Ca 2: Vĩ mô 15m/1h đi ngang phẳng trong vùng nén tích lũy (-0.01 nằm trong [-0.02, 0.02])
+        // Chốt chặn cho phép nổ bứt phá chân sóng Altcoin, KHÔNG được bóp nghẹt!
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.01; len]);
+        let prop_flat = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_flat.is_some(), "Bùng nổ Long khi macro KAMA đi ngang tích lũy (-0.01 >= -0.02) PHẢI được DUYỆT!");
+
+        // 3. Kịch bản Ca 3: Vĩ mô 15m/1h đồng thuận pha dốc lên (+0.15)
+        // Thuận sóng vĩ mô -> DUYỆT!
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
+        let prop_aligned = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_aligned.is_some(), "Bùng nổ Long khi macro KAMA đồng thuận pha dốc lên (+0.15) PHẢI được DUYỆT!");
+
+        // 4. Kịch bản Ca 4: Nến 1m Short (close < bb_lower) nhưng vĩ mô dốc dương mạnh (+0.10 > 0.02)
+        // Cản đầu xe tăng -> VETO!
+        let raw_cache_short = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1985.0; len]),
+            high: std::sync::Arc::new(vec![1986.0; len]),
+            low: std::sync::Arc::new(vec![1974.0; len]),
+            close: std::sync::Arc::new(vec![1975.0; len]), // < bb_lower 1980.0
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_short = DataView::new(raw_cache_short);
+        let mut actions_short = SmallVec::new();
+        let trades_short = Vec::new();
+        let tick_short = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_short,
+            indicator_manager: &indicator_manager,
+            trades: &trades_short,
+            last_closed_trade: None,
+            actions: &mut actions_short,
+            position: Position::default(),
+        };
+        sensors.rsi_momentum = std::sync::Arc::new(vec![25.0; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.10; len]);
+        let prop_short_veto = MomentumIgnitionScanner.scan(&tick_short, &sensors, &matrix, &config);
+        assert!(prop_short_veto.is_none(), "Bùng nổ Short khi macro KAMA dốc dương mạnh (+0.10 > 0.02) PHẢI bị VETO!");
     }
 
     #[test]
