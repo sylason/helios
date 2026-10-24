@@ -608,6 +608,47 @@ impl RiskManager {
             // 5. Kích hoạt theo Chốt Chặn Kép: Vượt sàn kinh tế DNA VÀ vượt đệm biến động Regime
             let is_be_triggered = peak_dist >= required_price_gain && peak_roe >= be_trigger_roe;
 
+            // =========================================================================
+            // 🛡️ TODO-AUDIT-NEW-48: MÁY TRẠNG THÁI HẬU KÍCH HỎA (POST-TRIGGER FSM) CHO MOMENTUM_IGN
+            // =========================================================================
+            // Nến t+1 ngay sau cú bứt phá xung lực (bars_held == 1) là chốt chặn vi cấu trúc sinh tử:
+            // 1. Nhánh Bứt Phá Xịt (Failed Breakout): Đóng nến thủng chiến lũy Open nến kích hoạt -> Thoát ngay cắt lỗ vi mô!
+            // 2. Nhánh Tiếp Diễn (Follow-Through): Tạo đỉnh cao hơn nến t & lãi đỉnh vượt phí sàn -> Kéo ngay SL lên hòa vốn sau phí!
+            let mut is_momentum_post_trigger_be = false;
+            if tag_str == "MOMENTUM_IGN" && bars_held == 1 {
+                let prev_open = if entry_bar < tick.opens().len() { tick.opens()[entry_bar] } else { trade.entry_price };
+                let prev_high = if entry_bar < tick.highs().len() { tick.highs()[entry_bar] } else { trade.entry_price };
+                let prev_low = if entry_bar < tick.lows().len() { tick.lows()[entry_bar] } else { trade.entry_price };
+
+                if trade.is_long() {
+                    if current_close < prev_open {
+                        if _debug_mode {
+                            tracing::info!(
+                                "🚨 [MOMENTUM FADE EXIT] Bar: {} | Trade #{:?} Long | Close: {:.2} < Open_t: {:.2} -> Failed Breakout Immediate Exit",
+                                i, trade.id, current_close, prev_open
+                            );
+                        }
+                        tick.close(None);
+                        continue;
+                    } else if peak_val > prev_high && peak_dist >= trade.entry_price * fee_buffer_pct {
+                        is_momentum_post_trigger_be = true;
+                    }
+                } else {
+                    if current_close > prev_open {
+                        if _debug_mode {
+                            tracing::info!(
+                                "🚨 [MOMENTUM FADE EXIT] Bar: {} | Trade #{:?} Short | Close: {:.2} > Open_t: {:.2} -> Failed Breakdown Immediate Exit",
+                                i, trade.id, current_close, prev_open
+                            );
+                        }
+                        tick.close(None);
+                        continue;
+                    } else if peak_val < prev_low && peak_dist >= trade.entry_price * fee_buffer_pct {
+                        is_momentum_post_trigger_be = true;
+                    }
+                }
+            }
+
             // 1. Kiểm tra chế độ Siêu Sóng Mega Trend
             let mega_trend_trigger_pnl = risk_cfg.mega_trend_pnl_trigger * trade.entry_price * trade.size.abs();
             let is_mega_trend = current_pnl > 0.0 && (current_pnl >= mega_trend_trigger_pnl || current_roe >= 0.50);
@@ -702,7 +743,7 @@ impl RiskManager {
             // =========================================================================
             // 🛡️ [TIERED PROFIT RATCHET: MONOTONIC DUAL-CRITERION PROFIT RETENTION]
             // =========================================================================
-            if is_be_triggered || is_mega_trend {
+            if is_be_triggered || is_mega_trend || is_momentum_post_trigger_be {
                 // 🛡️ [TODO-AUDIT-NEW-166]: Định nghĩa 4 tầng bậc đơn điệu tuyệt đối (Chống 100% Tier Inversion)
                 let tier1_hurdle = be_trigger_roe;
                 let tier2_hurdle = tier1_hurdle.max(0.10);
@@ -802,7 +843,8 @@ impl RiskManager {
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
             // 🛡️ TODO-SEM-03: Bổ sung `|| is_be_triggered`. Khi vị thế đã thỏa mãn BE từ đỉnh High Watermark,
             // SL hòa vốn mới (min_be) vẫn được gửi sang Broker/Sàn ngay cả khi nến hiện tại đang retest quanh Entry (current_pnl <= 0.0).
-            if current_pnl > 0.0 || is_be_triggered || is_mega_trend {
+            // 🛡️ TODO-AUDIT-NEW-48: Cho phép đồng bộ SL hòa vốn khi nến t+1 thỏa mãn Follow-Through của MOMENTUM_IGN.
+            if current_pnl > 0.0 || is_be_triggered || is_mega_trend || is_momentum_post_trigger_be {
                 // KHI CÓ LÃI DANH NGHĨA HOẶC ĐÃ THỎA MÃN BREAK-EVEN / MEGA TREND: Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
                 let sl_changed = if trade.is_long() {
                     calculated_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
@@ -2038,5 +2080,142 @@ mod tests {
         assert!(!loss_is_strong);
         let should_exit_loss = max_hold > 0 && bars_held >= max_hold && !loss_is_strong;
         assert!(should_exit_loss, "Lệnh lỗ ngâm 200 nến PHẢI bị đóng để giải phóng vốn!");
+    }
+
+    #[test]
+    fn test_momentum_post_trigger_fsm_behavior() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use ferro_trade::broker::trade::Trade;
+        use ferro_trade::broker::actions::Action;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 10;
+        let entry_bar = 5;
+        let i = 6; // bars_held = 1 (Nến t+1 ngay sau kích hỏa)
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1995.0; len];
+        let mut closes = vec![2000.0; len];
+
+        // Nến kích hoạt t (entry_bar = 5): Open = 2000, High = 2020, Low = 1998, Close = 2018
+        opens[entry_bar] = 2000.0;
+        highs[entry_bar] = 2020.0;
+        lows[entry_bar] = 1998.0;
+        closes[entry_bar] = 2018.0;
+
+        // KỊCH BẢN 1: Bứt phá xịt (Failed Breakout)
+        // Nến t+1 (i = 6) đóng nến thủng chiến lũy Open_t (Close = 1995.0 < Open_t 2000.0) -> PHẢI THOÁT NGAY!
+        opens[i] = 2015.0;
+        highs[i] = 2016.0;
+        lows[i] = 1990.0;
+        closes[i] = 1995.0;
+
+        let raw_cache_1 = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens.clone()),
+            high: std::sync::Arc::new(highs.clone()),
+            low: std::sync::Arc::new(lows.clone()),
+            close: std::sync::Arc::new(closes.clone()),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_1 = DataView::new(raw_cache_1);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions_1 = SmallVec::new();
+        let mut trade_1 = Trade::new(1, 1.0, 2018.0, entry_bar, None, Some("MOMENTUM_IGN".to_string()));
+        trade_1.sl_price = Some(1980.0);
+        let trades_1 = vec![trade_1];
+
+        let mut tick_1 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_1,
+            indicator_manager: &indicator_manager,
+            trades: &trades_1,
+            last_closed_trade: None,
+            actions: &mut actions_1,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.risk_management.risk_base.taker_fee_rate = 0.0004;
+        config.risk_management.risk_base.slippage_allowance_pct = 0.0002;
+        let matrix = MarketMatrixV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_1, &sensors, false);
+        assert!(!actions_1.is_empty(), "Kịch bản 1: Bứt phá xịt nến t+1 thủng Open_t PHẢI phát sinh lệnh đóng vị thế!");
+        match &actions_1[0] {
+            Action::ClosePosition { .. } | Action::CloseLongs { .. } => {},
+            other => panic!("Kỳ vọng Action::ClosePosition hoặc CloseLongs, thực tế: {:?}", other),
+        }
+
+        // KỊCH BẢN 2: Tiếp diễn thuận lợi (Follow-Through)
+        // Nến t+1 (i = 6) tạo đỉnh cao hơn (High = 2030 > High_t 2020) và đóng nến 2025 -> PHẢI DỜI SL LÊN HÒA VỐN!
+        highs[i] = 2030.0;
+        closes[i] = 2025.0;
+        let raw_cache_2 = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens.clone()),
+            high: std::sync::Arc::new(highs.clone()),
+            low: std::sync::Arc::new(lows.clone()),
+            close: std::sync::Arc::new(closes.clone()),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_2 = DataView::new(raw_cache_2);
+        let mut actions_2 = SmallVec::new();
+        let mut trade_2 = Trade::new(2, 1.0, 2018.0, entry_bar, None, Some("MOMENTUM_IGN".to_string()));
+        trade_2.sl_price = Some(1980.0);
+        trade_2.highest_favorable_price = 2030.0; // peak_val
+        let trades_2 = vec![trade_2];
+
+        let mut tick_2 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_2,
+            indicator_manager: &indicator_manager,
+            trades: &trades_2,
+            last_closed_trade: None,
+            actions: &mut actions_2,
+            position: Position::default(),
+        };
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_2, &sensors, false);
+        assert!(!actions_2.is_empty(), "Kịch bản 2: Follow-Through PHẢI cập nhật dời SL lên hòa vốn sau phí!");
+        match &actions_2[0] {
+            Action::UpdateTradeSlTp { trade_id, new_sl_price, .. } => {
+                assert_eq!(*trade_id, 2);
+                let updated_sl = new_sl_price.expect("SL phải được gán");
+                // Phí sàn 2 chiều = 0.10% (0.04%*2 + 0.02% slippage + 0.03% cushion) -> min_be_price > 2018.0
+                assert!(updated_sl > 2018.0, "SL mới phải vượt giá Entry 2018.0 để bảo vệ phí sàn, thực tế: {}", updated_sl);
+            },
+            other => panic!("Kỳ vọng Action::UpdateTradeSlTp, thực tế: {:?}", other),
+        }
+
+        // KỊCH BẢN 3: Lệnh của Playbook khác (TREND_PB) không bị ảnh hưởng bởi Fade Exit
+        let mut actions_3 = SmallVec::new();
+        let mut trade_3 = Trade::new(3, 1.0, 2018.0, entry_bar, None, Some("TREND_PB".to_string()));
+        trade_3.sl_price = Some(1980.0);
+        let trades_3 = vec![trade_3];
+
+        let mut tick_3 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_1, // Dùng lại data nến sập của Kịch bản 1
+            indicator_manager: &indicator_manager,
+            trades: &trades_3,
+            last_closed_trade: None,
+            actions: &mut actions_3,
+            position: Position::default(),
+        };
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_3, &sensors, false);
+        let has_close_action = actions_3.iter().any(|a| matches!(a, Action::ClosePosition { .. } | Action::CloseLongs { .. }));
+        assert!(!has_close_action, "Kịch bản 3: TREND_PB TUYỆT ĐỐI KHÔNG bị Fade Exit đóng lệnh ở nến t+1!");
     }
 }

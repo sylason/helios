@@ -397,9 +397,11 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `mod.rs`
   - **Mô tả:** Nếu sau $N \le 4$ nến kể từ khi kích hoạt Momentum Ignition mà giá không tiếp tục tạo đỉnh cao hơn (Higher High), tự động kích hoạt Stagnation Exit để cắt lỗ vi mô ($1\% \sim 2\%$ ROE) thay vì thả trôi cho dính full Stop Loss cấu trúc.
 
-- [ ] **TODO-AUDIT-NEW-48: Thiết Lập Máy Trạng Thái Giám Sát Sau Kích Hỏa (Post-Trigger State Machine) (`POST-TRIGGER-FSM`)**
+- [x] **TODO-AUDIT-NEW-48: Thiết Lập Máy Trạng Thái Giám Sát Sau Kích Hỏa (Post-Trigger State Machine) (`POST-TRIGGER-FSM`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `mod.rs`, `risk.rs`
-  - **Mô tả:** Chuyển hệ thống sang chế độ giám sát nến xác nhận $t+1$ ngay sau khi kích hỏa: Nếu có Follow-through bar thì kéo ngay SL về hòa vốn; nếu bị từ chối đóng ngược vào dải BB thì kích hoạt Emergency Fade Exit.
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Thiết lập máy trạng thái vi cấu trúc nến $t+1$ ngay sau khi kích hỏa cho `MOMENTUM_IGN`: Nếu nến $t+1$ bị đạp gãy chiến lũy $Open_t$ của nến bùng nổ ($Close_{t+1} < Open_t$ cho Long, hoặc $Close_{t+1} > Open_t$ cho Short) $\implies$ Thoát ngay bằng lệnh Market (`tick.close(None)`) để cắt lỗ vi mô chỉ $-1\% \sim -2\%$ ROE thay vì thả trôi dính full Stop Loss $-15\%$ ROE; nếu có Follow-through bar (tạo đỉnh cao hơn $High_t$ và lãi đỉnh vượt phí sàn) $\implies$ Dời ngay Stop Loss lên mức giá hòa vốn kinh tế sau phí (`min_be_price = Entry * (1 + net_be_roe / leverage)`), đưa vị thế về trạng thái Free-Trade. Giữ nguyên 0 gen DNA mới. Unit test 3/3 kịch bản pass 100%.
+  - **Unit Tests:**
+    - [x] `test_momentum_post_trigger_fsm_behavior`
 
 - [ ] **TODO-AUDIT-NEW-49: Triển Khai Bộ Nhớ Sự Kiện Chuỗi Hấp Thụ Đa Nến (Multi-bar Absorption Sequence) (`ABS-SEQUENCE`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `arbiter.rs`
