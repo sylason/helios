@@ -35,6 +35,8 @@ pub enum GateVetoReason {
     MicroFlatline,
     /// Bất thường dữ liệu (NaN, Inf, hoặc chưa đủ warmup)
     DataAnomaly,
+    /// 🌪️ Cú sốc nến râu quét thanh khoản / tiêu tán động năng (TODO-AUDIT-NEW-164)
+    DissipationShock,
 }
 
 impl GateVetoReason {
@@ -45,6 +47,7 @@ impl GateVetoReason {
             GateVetoReason::MacroFlatline => "MACRO_FLATLINE",
             GateVetoReason::MicroFlatline => "MICRO_FLATLINE",
             GateVetoReason::DataAnomaly => "DATA_ANOMALY",
+            GateVetoReason::DissipationShock => "DISSIPATION_SHOCK",
         }
     }
 }
@@ -229,10 +232,12 @@ impl RegimeGatekeeper {
         }
 
         // 2.3. Cầu Dao Khẩn Cấp Flash Crash & Liquidity Vacuum Circuit Breaker (TODO-AUDIT-NEW-161)
+        // Kèm Chốt Chặn Tiêu Tán Động Năng / Quét Râu Thanh Khoản (TODO-AUDIT-NEW-164)
         let cb_cfg = &config.circuit_breaker;
         let freeze_bars = cb_cfg.freeze_bars.max(1);
         let start_shock_idx = i.saturating_sub(freeze_bars.saturating_sub(1));
-        let mut shock_detected = false;
+        let mut flash_shock_detected = false;
+        let mut dissipation_shock_detected = false;
 
         for j in (start_shock_idx..=i).rev() {
             let high = tick.highs().get(j).copied().unwrap_or(0.0);
@@ -241,22 +246,40 @@ impl RegimeGatekeeper {
             let vol_z = sensors.vol_z_score.get(j).copied().unwrap_or(0.0);
 
             if atr > 1e-9 && high >= low {
-                let span_ratio = (high - low) / atr;
+                let span = high - low;
+                let span_ratio = span / atr;
                 let is_vol_shock = span_ratio >= cb_cfg.atr_shock_threshold && vol_z >= cb_cfg.vol_z_shock_threshold;
                 let is_vacuum_shock = span_ratio >= cb_cfg.vacuum_atr_threshold;
 
                 if is_vol_shock || is_vacuum_shock {
-                    shock_detected = true;
+                    flash_shock_detected = true;
+                    break;
+                }
+
+                let open = tick.opens().get(j).copied().unwrap_or(0.0);
+                let close = tick.closes().get(j).copied().unwrap_or(0.0);
+                let body_ratio = if span > 1e-9 { (close - open).abs() / span } else { 1.0 };
+                let is_dissipation = span_ratio >= cb_cfg.dissipation_span_threshold
+                    && vol_z >= 1.5
+                    && body_ratio <= cb_cfg.dissipation_max_body_ratio;
+
+                if is_dissipation {
+                    dissipation_shock_detected = true;
                     break;
                 }
             }
         }
 
-        if shock_detected {
+        if flash_shock_detected || dissipation_shock_detected {
+            let veto_reason = if flash_shock_detected {
+                GateVetoReason::FlashCrashFreeze
+            } else {
+                GateVetoReason::DissipationShock
+            };
             return GateEvaluation {
                 regime: MarketRegime::TurbulentChaos,
                 passed: false,
-                veto_reason: Some(GateVetoReason::FlashCrashFreeze),
+                veto_reason: Some(veto_reason),
                 current_chaos,
                 market_natr_pct,
                 micro_natr_pct,
@@ -375,7 +398,7 @@ impl RegimeGatekeeper {
     ) -> MarketRegime {
         if let Some(reason) = veto_reason {
             return match reason {
-                GateVetoReason::FlashCrashFreeze => MarketRegime::TurbulentChaos,
+                GateVetoReason::FlashCrashFreeze | GateVetoReason::DissipationShock => MarketRegime::TurbulentChaos,
                 GateVetoReason::MacroFlatline | GateVetoReason::MicroFlatline => MarketRegime::VolatilityFlatline,
                 GateVetoReason::ChaosWhipsaw => MarketRegime::TurbulentChaos,
                 GateVetoReason::DataAnomaly => MarketRegime::DataAnomaly,
@@ -1050,13 +1073,15 @@ mod tests {
         // Nến breakout bình thường tại i = 5: span = 22.0 / 10.0 = 2.2 ATR
         highs[5] = 2011.0;
         lows[5] = 1989.0;
+        let mut closes = vec![2000.0; len];
+        closes[5] = 2010.0; // Nến bứt phá có thân dài dứt khoát 1 chiều (Close = 2010 so với Open = 2000)
 
         let raw_cache = RawDataCache {
             datetime: Arc::new(vec![0i64; len]),
             open: Arc::new(vec![2000.0; len]),
             high: Arc::new(highs),
             low: Arc::new(lows),
-            close: Arc::new(vec![2000.0; len]),
+            close: Arc::new(closes),
             volume: Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -1094,5 +1119,97 @@ mod tests {
         assert!(eval.passed, "Nến bứt phá lành mạnh 2.2 ATR không được kích hoạt Cầu dao Flash Crash!");
         assert_eq!(eval.veto_reason, None);
         assert!(!eval.is_shock_freeze_active);
+    }
+
+    #[test]
+    fn test_session_open_volatility_buffer_cooldown() {
+        // 🌪️ [TODO-AUDIT-NEW-164]: Kiểm chứng Cú sốc tiêu tán động năng (Dissipation Shock / Wick Sweep)
+        // Nến tại i = 5 có biên độ 2.0 ATR, Vol_Z = 2.5, nhưng thân nến teo tóp (|Close - Open| / Span = 2.0 / 20.0 = 10%)
+        let config = HeliosConfigV3::default();
+        let len = 30;
+        let mut highs = vec![2005.0; len];
+        let mut lows = vec![1995.0; len];
+        let mut closes = vec![2000.0; len];
+
+        // Nến râu quét tại i = 5: Span = 20.0 / 10.0 = 2.0 ATR, Close = 2002.0, Open = 2000.0
+        highs[5] = 2010.0;
+        lows[5] = 1990.0;
+        closes[5] = 2002.0;
+
+        let raw_cache = RawDataCache {
+            datetime: Arc::new(vec![0i64; len]),
+            open: Arc::new(vec![2000.0; len]),
+            high: Arc::new(highs),
+            low: Arc::new(lows),
+            close: Arc::new(closes),
+            volume: Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+        sensors.natr = Arc::new(vec![0.50; len]);
+        sensors.micro_natr = Arc::new(vec![0.10; len]);
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        sensors.efficiency_ratio = Arc::new(vec![0.50; len]);
+        sensors.adx = Arc::new(vec![30.0; len]);
+        let mut vol_z = vec![0.0; len];
+        vol_z[5] = 2.5; // Xung lực Volume bất thường
+        sensors.vol_z_score = Arc::new(vol_z);
+        matrix.chaos_index = Arc::new(vec![0.20; len]);
+        matrix.squeeze_intensity = Arc::new(vec![0.20; len]);
+
+        // 1. Tại nến i = 5 (ngay khi cú sốc xảy ra): Phải bị Veto DissipationShock!
+        let tick_shock = TickContext {
+            i: 5,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let eval_shock = RegimeGatekeeper::evaluate(&tick_shock, &sensors, &matrix, &config);
+        assert!(!eval_shock.passed, "Cú sốc tiêu tán động năng PHẢI bị Gatekeeper phủ quyết!");
+        assert_eq!(eval_shock.veto_reason, Some(GateVetoReason::DissipationShock));
+        assert!(eval_shock.is_shock_freeze_active);
+        assert_eq!(eval_shock.regime, MarketRegime::TurbulentChaos);
+
+        // 2. Tại nến i = 10 (trong cửa sổ đóng băng freeze_bars = 20 nến): Vẫn phải bị đóng băng bảo vệ vốn!
+        let tick_frozen = TickContext {
+            i: 10,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let eval_frozen = RegimeGatekeeper::evaluate(&tick_frozen, &sensors, &matrix, &config);
+        assert!(!eval_frozen.passed, "Vẫn trong thời gian cooldown 20 nến thì PHẢI tiếp tục đóng băng!");
+        assert_eq!(eval_frozen.veto_reason, Some(GateVetoReason::DissipationShock));
+
+        // 3. Tại nến i = 26 (sau khi hết 20 nến freeze_bars tính từ nến 5: 5 + 20 = 25): Tự động giải phóng!
+        let tick_resumed = TickContext {
+            i: 26,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let eval_resumed = RegimeGatekeeper::evaluate(&tick_resumed, &sensors, &matrix, &config);
+        assert!(eval_resumed.passed, "Sau khi hết thời gian cooldown freeze_bars, Gatekeeper PHẢI mở cửa trở lại!");
+        assert_eq!(eval_resumed.veto_reason, None);
+        assert!(!eval_resumed.is_shock_freeze_active);
     }
 }

@@ -1750,7 +1750,31 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 112, "DNA_WIDTH phải là 112 chiều sau khi thêm 2 gen toàn năng của Reversal Macro Gate (TODO-AUDIT-NEW-191)!");
+        assert_eq!(width, 114, "DNA_WIDTH phải là 114 chiều sau khi thêm 2 gen tiêu tán động năng của Circuit Breaker (TODO-AUDIT-NEW-164)!");
+
+        let diss_span_def = defs.iter().find(|(name, _)| name.contains("circuit_breaker.dissipation_span_threshold"));
+        assert!(diss_span_def.is_some(), "defs phải chứa circuit_breaker.dissipation_span_threshold!");
+        let (_, diss_span_attr) = diss_span_def.unwrap();
+        match diss_span_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert!((min - 1.0).abs() < 1e-12, "dissipation_span_threshold min phải là 1.0");
+                assert!((max - 2.5).abs() < 1e-12, "dissipation_span_threshold max phải là 2.5");
+                assert_eq!(*step, Some(0.1), "dissipation_span_threshold step phải là Some(0.1)");
+            }
+            _ => panic!("dissipation_span_threshold phải là ParamDefinition::Range"),
+        }
+
+        let diss_body_def = defs.iter().find(|(name, _)| name.contains("circuit_breaker.dissipation_max_body_ratio"));
+        assert!(diss_body_def.is_some(), "defs phải chứa circuit_breaker.dissipation_max_body_ratio!");
+        let (_, diss_body_attr) = diss_body_def.unwrap();
+        match diss_body_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert!((min - 0.15).abs() < 1e-12, "dissipation_max_body_ratio min phải là 0.15");
+                assert!((max - 0.45).abs() < 1e-12, "dissipation_max_body_ratio max phải là 0.45");
+                assert_eq!(*step, Some(0.05), "dissipation_max_body_ratio step phải là Some(0.05)");
+            }
+            _ => panic!("dissipation_max_body_ratio phải là ParamDefinition::Range"),
+        }
 
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
         assert_eq!(count_struct_sl, 3, "defs phải chứa chính xác 3 gene struct_sl_buffer_atr cho 3 Scanners (pullback, momentum, absorption)!");

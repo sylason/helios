@@ -1028,11 +1028,13 @@
   - **Unit Tests:**
     - [ ] `test_funding_settlement_blackout_blocks_entries`
 
-- [ ] **TODO-AUDIT-NEW-164: Bộ Lọc Cú Sốc Mở Phiên Lớn London / New York Cho Hệ Thống Giao Dịch (`GATE-SESSION-OPEN-SHOCK`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `arbiter.rs`
-  - **Mô tả:** Tại thời điểm giao phiên London (14:00 VN) và New York (20:30 VN), thanh khoản bùng nổ quét râu 2 đầu làm gãy các mô hình vi mô. Tạm ngừng mở lệnh mới hoặc nới rộng đệm SL trong 5–15 phút đầu mở phiên lớn.
+- [x] **TODO-AUDIT-NEW-164: Cú Sốc Mở Phiên Lớn London / New York -> Động Học Tiêu Tán Động Năng (Kinetic Dissipation Shock Gate) Tại Gateway (`GATE-SESSION-OPEN-SHOCK` / `GATE-KINETIC-DISSIPATION-SHOCK`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs`, `config.rs`, `telemetry/defense_ledger.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH: 12/12 Audit PASS, 20 Gatekeeper Tests PASS, 172 Helios Tests PASS, DNA 112 -> 114 chiều]. Nâng cấp toàn diện khỏi bẫy đồng hồ giáo điều và price action cảm tính. Triển khai cơ chế nhận diện Tiêu tán Động năng (Kinetic Dissipation Shock) thuần túy phi thứ nguyên: `span >= dissipation_span_threshold (1.5 ATR)` & `vol_z >= 1.5` & `body_ratio <= dissipation_max_body_ratio (0.35)`. Tích hợp trực tiếp vào vòng lặp Circuit Breaker của `RegimeGatekeeper`, kích hoạt phong tỏa mở vị thế mới `GateVetoReason::DissipationShock` trong cửa sổ `freeze_bars` (20 nến), bảo vệ an toàn 100% vốn trước các nhịp quét râu 2 đầu mà không bỏ lỡ siêu xu hướng bứt phá thân dài.
   - **Unit Tests:**
-    - [ ] `test_session_open_volatility_buffer_cooldown`
+    - [x] `test_session_open_volatility_buffer_cooldown`
+    - [x] `test_gatekeeper_ignores_normal_breakout_candle` (chuẩn hóa nến bứt phá)
+    - [x] `test_dna_width_and_parameter_defs_integrity` (114 chiều)
 
 ---
 

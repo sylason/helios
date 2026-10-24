@@ -505,6 +505,16 @@ pub struct FlashCrashBreakerConfig {
     #[dna(min = 10.0, max = 40.0, step = 5.0)]
     #[serde(default = "default_shock_freeze_bars", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
     pub freeze_bars: usize,
+
+    /// 🌪️ Ngưỡng biên độ nến giãn nở tối thiểu (span / atr) để phát hiện cú sốc tiêu tán (1.0 -> 2.5, step 0.1)
+    #[dna(min = 1.0, max = 2.5, step = 0.1)]
+    #[serde(default = "default_dissipation_span_threshold")]
+    pub dissipation_span_threshold: f64,
+
+    /// 🌪️ Ngưỡng tỷ lệ thân nến tối đa (|close - open| / span) để phát hiện cạn kiệt động năng (0.15 -> 0.45, step 0.05)
+    #[dna(min = 0.15, max = 0.45, step = 0.05)]
+    #[serde(default = "default_dissipation_max_body_ratio")]
+    pub dissipation_max_body_ratio: f64,
 }
 
 impl Default for FlashCrashBreakerConfig {
@@ -514,6 +524,8 @@ impl Default for FlashCrashBreakerConfig {
             vol_z_shock_threshold: default_vol_z_shock_threshold(),
             vacuum_atr_threshold: default_vacuum_atr_threshold(),
             freeze_bars: default_shock_freeze_bars(),
+            dissipation_span_threshold: default_dissipation_span_threshold(),
+            dissipation_max_body_ratio: default_dissipation_max_body_ratio(),
         }
     }
 }
@@ -522,6 +534,8 @@ fn default_atr_shock_threshold() -> f64 { 3.5 }
 fn default_vol_z_shock_threshold() -> f64 { 4.0 }
 fn default_vacuum_atr_threshold() -> f64 { 4.5 }
 fn default_shock_freeze_bars() -> usize { 20 }
+fn default_dissipation_span_threshold() -> f64 { 1.5 }
+fn default_dissipation_max_body_ratio() -> f64 { 0.35 }
 
 
 /// ============================================================================

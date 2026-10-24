@@ -196,6 +196,21 @@ impl DefenseLedger {
                         None
                     }
                 }
+                GateVetoReason::DissipationShock => {
+                    self.flash_crash_freeze_bars += 1;
+                    if self.prev_gate_veto.is_none() {
+                        self.prev_gate_veto = Some(reason);
+                        self.veto_start_bar = current_bar;
+                        self.veto_start_ts = current_ts;
+                        self.gatekeeper_state_transitions += 1;
+                        Some(format!(
+                            "🌪️ [GATEKEEPER ENGAGED] [{}] Bar: {} | Veto: DissipationShock | Kinetic Dissipation Shock detected (Wick Sweep)! | Entering Shelter!",
+                            time_str, current_bar
+                        ))
+                    } else {
+                        None
+                    }
+                }
             };
             msg
         } else {
