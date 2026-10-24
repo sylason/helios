@@ -1337,3 +1337,20 @@
     - [ ] `test_lifecycle_friction_escape_to_break_even`
     - [ ] `test_lifecycle_fair_value_limit_anchor_execution`
     - [ ] `test_lifecycle_momentum_runner_promotion_on_climax_breakout`
+
+- [x] **TODO-OBS-01: Tái Cấu Trúc Khung Chẩn Đoán & Khắc Phục Lỗi Telemetry / Observability Toàn Diện (`TODO-OBS-01`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/telemetry/defense_ledger.rs`, `cards.rs`, `core_v3/mod.rs`, `trading_bot/bot_engine/src/execution/paper_trader.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100%].
+    1. Chuẩn hóa nguồn dữ liệu `Datetime` từ `ferro_trade` (`RawDataCache.datetime` và `TickContext::current_timestamp_ms()`), khắc phục triệt để lỗi đếm bar trừu tượng `Bar: 57599` khiến Heartbeat tê liệt trong Live/Paper Actor.
+    2. Cập nhật `check_hourly_heartbeat`: kích hoạt chuẩn xác mỗi 60 phút theo timestamp nến thật (`>= 3600_000 ms`), hiển thị đầy đủ mốc giờ UTC, Macro Regime (`Trending`, `RangeBound`, `Breakout`, `Chaos`, `Flatline`, `DataAnomaly`), độ dốc KAMA, Squeeze và danh sách các Scanner được cấp quyền (`Eligible Scanners`).
+    3. Cập nhật `on_gatekeeper_tick`: tính thời lượng bão `Storm Duration` bằng phút/giờ thực tế từ timestamp thay vì `0 bars`.
+    4. Cập nhật `format_veto_card`: sửa câu lệnh `if` trong `core_v3/mod.rs` để bắt trọn vẹn cả `AuctionStatus::RegimeIneligible(_)` (Phân luồng Thẩm quyền cấm quyền Scanner) và `AuctionStatus::FrictionalHurdleVeto`. Bổ sung hiển thị `Macro Regime`, `Eligible Scanners`, và `TIER 1.5 (STRUCTURAL ELIGIBILITY ROUTING)`.
+    5. Triển khai cơ chế **First-Strike & Suppression**: chỉ xuất Thẻ Đỏ chi tiết ở lần đầu tiên; nén im lặng nếu lặp lại cùng một lý do trong vòng 30 phút để triệt tiêu 100% nguy cơ spam log trên terminal.
+    6. Cập nhật log `[TRAILING SL UPDATE]` trong `paper_trader.rs`: bổ sung khoảng cách % so với giá vào lệnh, thông số ROE bảo hiểm (`Locked ROE: {:+.1}%`), và gắn nhãn tầng Ratchet (`[BREAK-EVEN]`, `[TIER 2 HALF-BACK]`, `[MEGA TREND]`).
+  - **Unit Tests:**
+    - [x] `test_hourly_heartbeat_timestamp_based_in_actor_sliding_window`
+    - [x] `test_gatekeeper_hourly_heartbeat`
+    - [x] `test_gatekeeper_state_transition_edge_detection`
+    - [x] `test_veto_card_formatting_and_suppression_logic`
+    - [x] `test_paper_trader_trailing_sl` & `test_monotonic_ratchet_guard` (10/10 tests pass)
+

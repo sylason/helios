@@ -74,7 +74,7 @@ pub struct AuctionCandidate {
     pub reason: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ArbiterDecision {
     pub is_approved: bool,
     pub final_signal: Option<SignalType>,

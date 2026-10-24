@@ -40,6 +40,8 @@ pub struct HeliosStrategyV3 {
     pub last_decision_telemetry: Option<String>,
     /// Sổ Cái Quản Trị & Kiểm Toán Ma Trận Phòng Thủ Vốn (Zero-cost trong GA, Some trong Live/Paper)
     pub defense_ledger: Option<DefenseLedger>,
+    /// Chữ ký và mốc thời gian của lần phát Thẻ Đỏ VETO gần nhất (hỗ trợ First-Strike & Suppression chống spam)
+    pub last_veto_signature: Option<(String, i64)>,
 }
 
 impl Strategy for HeliosStrategyV3 {
@@ -61,6 +63,7 @@ impl Strategy for HeliosStrategyV3 {
             telemetry_enabled: false,
             last_decision_telemetry: None,
             defense_ledger: None,
+            last_veto_signature: None,
         }
     }
 
@@ -254,20 +257,21 @@ impl Strategy for HeliosStrategyV3 {
         if let Some(ref mut ledger) = self.defense_ledger {
             // Tầng 1: Chuyển đổi trạng thái Gatekeeper (Vào bão / Ra bão)
             let candle_ts = tick.data_view.raw_cache().datetime.get(tick.i).copied().unwrap_or(0) / 1_000_000;
+            let squeeze = self.matrix.squeeze_intensity.get(tick.i).copied().unwrap_or(0.0);
+            let kama_slope = self.matrix.kama_slope_atr.get(tick.i).copied()
+                .unwrap_or_else(|| self.sensors.kama_slope_adj.get(tick.i).copied().unwrap_or(0.0));
+
             if let Some(msg) = ledger.on_gatekeeper_tick(tick.i, candle_ts, &decision.gate_eval) {
                 self.last_decision_telemetry = Some(msg);
             } else if self.last_decision_telemetry.is_none() {
                 let price = tick.closes().get(tick.i).copied().unwrap_or(0.0);
-                if let Some(hb_msg) = ledger.check_hourly_heartbeat(tick.i, price, &decision.gate_eval) {
+                if let Some(hb_msg) = ledger.check_hourly_heartbeat(tick.i, candle_ts, price, &decision.gate_eval, kama_slope, squeeze) {
                     self.last_decision_telemetry = Some(hb_msg);
                 }
             }
 
             // Tầng 2: Chốt chặn Boundary Guard & Chop Zone của TrendPB
             let pb_cfg = &self.config.tactical_sniper.pullback;
-            let squeeze = self.matrix.squeeze_intensity.get(tick.i).copied().unwrap_or(0.0);
-            let kama_slope = self.matrix.kama_slope_atr.get(tick.i).copied()
-                .unwrap_or_else(|| self.sensors.kama_slope_adj.get(tick.i).copied().unwrap_or(0.0));
             let z_score = self.sensors.z_score.get(tick.i).copied().unwrap_or(0.0);
             ledger.on_trend_pb_tick(
                 squeeze,
@@ -419,23 +423,54 @@ impl Strategy for HeliosStrategyV3 {
                 ledger.on_auction_decision(&decision);
             }
 
-            // 🛑 QUANT DECISION TELEMETRY: Xuất Thẻ Đỏ VETO nếu có proposal bị Sniper Guard, Liquidation Guard hoặc Gatekeeper VETO
+            // 🛑 QUANT DECISION TELEMETRY: Xuất Thẻ Đỏ VETO nếu có proposal bị Sniper Guard, Liquidation Guard, Phân luồng Thẩm quyền hoặc Gatekeeper VETO
             if self.telemetry_enabled {
                 let has_structural_veto = decision.auction_ledger.iter().any(|c| {
-                    c.status == AuctionStatus::StructuralRiskVeto || c.status == AuctionStatus::LiquidationRiskVeto
+                    c.status == AuctionStatus::StructuralRiskVeto
+                        || c.status == AuctionStatus::LiquidationRiskVeto
+                        || matches!(c.status, AuctionStatus::RegimeIneligible(_))
+                        || c.status == AuctionStatus::FrictionalHurdleVeto
                 });
                 let has_candidates = decision.auction_ledger.iter().any(|c| c.status != AuctionStatus::NotTriggered);
                 if has_structural_veto || (decision.gate_veto.is_some() && has_candidates) {
-                    let price = tick.closes()[tick.i];
-                    let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
-                    self.last_decision_telemetry = Some(DecisionCardFormatter::format_veto_card(
-                        tick,
-                        &self.sensors,
-                        &self.matrix,
-                        &decision,
-                        price,
-                        leverage,
-                    ));
+                    let candle_ts = tick.data_view.raw_cache().datetime.get(tick.i).copied().unwrap_or(0) / 1_000_000;
+
+                    // Tạo chữ ký VETO đại diện: Scanner đầu tiên bị veto + Trạng thái
+                    let primary_veto = decision.auction_ledger.iter()
+                        .find(|c| c.status != AuctionStatus::NotTriggered && c.status != AuctionStatus::LowConfidence)
+                        .map(|c| format!("{}:{:?}", c.scanner_id.as_str(), c.status))
+                        .unwrap_or_else(|| format!("GATE:{:?}", decision.gate_veto));
+
+                    // Giao thức First-Strike & Suppression: Chỉ xuất thẻ lần đầu; nén nếu lặp lại cùng lý do trong vòng 30 phút
+                    let should_emit = match &self.last_veto_signature {
+                        Some((last_sig, last_ts)) => {
+                            if last_sig == &primary_veto {
+                                if candle_ts > 0 && *last_ts > 0 {
+                                    candle_ts.saturating_sub(*last_ts) >= 30 * 60 * 1000
+                                } else {
+                                    tick.i.saturating_sub(*last_ts as usize) >= 30
+                                }
+                            } else {
+                                true
+                            }
+                        }
+                        None => true,
+                    };
+
+                    if should_emit {
+                        let record_ts = if candle_ts > 0 { candle_ts } else { tick.i as i64 };
+                        self.last_veto_signature = Some((primary_veto, record_ts));
+                        let price = tick.closes()[tick.i];
+                        let leverage = self.config.risk_management.risk_base.leverage.max(1.0);
+                        self.last_decision_telemetry = Some(DecisionCardFormatter::format_veto_card(
+                            tick,
+                            &self.sensors,
+                            &self.matrix,
+                            &decision,
+                            price,
+                            leverage,
+                        ));
+                    }
                 }
             }
         }
@@ -3803,6 +3838,94 @@ mod tests {
         let actual_val = strategy.matrix.kama_slope_atr[0];
         let expected_val = (0.40 / 0.40_f64).tanh();
         assert!((actual_val - expected_val).abs() < 1e-4, "kama_slope_atr phải được re-scale chính xác: expected {}, actual {}", expected_val, actual_val);
+    }
+
+    #[test]
+    fn test_veto_card_formatting_and_suppression_logic() {
+        use ferro_trade::strategy::Strategy;
+        use crate::strategy::core_v3::arbiter::{ArbiterDecision, AuctionCandidate, AuctionStatus, ScannerId};
+        use crate::strategy::core_v3::gatekeeper::MarketRegime;
+
+        let mut strategy = HeliosStrategyV3::new(&std::collections::HashMap::new());
+        strategy.set_telemetry_enabled(true);
+        assert!(strategy.telemetry_enabled);
+        assert!(strategy.last_veto_signature.is_none());
+
+        // Giả lập candidate bị RegimeIneligible
+        let mut decision = ArbiterDecision::default();
+        decision.gate_eval.regime = MarketRegime::RangeBound;
+        decision.auction_ledger.push(AuctionCandidate {
+            scanner_id: ScannerId::TrendPullback,
+            signal_type: Some(crate::strategy::core_v3::arbiter::SignalType::Long),
+            raw_score: 0.85,
+            confidence: 0.80,
+            status: AuctionStatus::RegimeIneligible(MarketRegime::RangeBound),
+            reason: "Disabled in RangeBound".to_string(),
+        });
+
+        // 1. Kiểm tra format_veto_card có chứa đầy đủ thông tin TIER 1.5 và Macro Regime
+        let len = 50;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![1_700_000_000_000_000_000i64; len]),
+            open: std::sync::Arc::new(vec![2000.0; len]),
+            high: std::sync::Arc::new(vec![2010.0; len]),
+            low: std::sync::Arc::new(vec![1990.0; len]),
+            close: std::sync::Arc::new(vec![2005.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: len - 1,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let card = DecisionCardFormatter::format_veto_card(
+            &tick,
+            &strategy.sensors,
+            &strategy.matrix,
+            &decision,
+            2005.0,
+            20.0,
+        );
+        assert!(card.contains("ORDER DEFENSE VETO"));
+        assert!(card.contains("TIER 1.5 (STRUCTURAL ELIGIBILITY ROUTING)"));
+        assert!(card.contains("Macro Regime: RANGE_BOUND"));
+        assert!(card.contains("Eligible: [RangeOsc, ClimaxRev, AbsScout, AnomalyFade]"));
+        assert!(card.contains("TREND_PB"));
+        assert!(card.contains("[REGIME-VETO]"));
+
+        // 2. Kiểm tra cơ chế First-Strike & Suppression
+        let sig = format!("{}:{:?}", ScannerId::TrendPullback.as_str(), AuctionStatus::RegimeIneligible(MarketRegime::RangeBound));
+        let ts_init = 1_700_000_000_000i64;
+
+        // Lần đầu ghi nhận signature
+        strategy.last_veto_signature = Some((sig.clone(), ts_init));
+
+        // Nến tiếp theo sau 5 phút (cùng signature): Phải bị nén (should_emit = false)
+        let ts_5m = ts_init + 5 * 60 * 1000;
+        let should_emit_5m = match &strategy.last_veto_signature {
+            Some((last_sig, last_ts)) if last_sig == &sig => ts_5m.saturating_sub(*last_ts) >= 30 * 60 * 1000,
+            _ => true,
+        };
+        assert!(!should_emit_5m, "Cùng lý do VETO trong 30 phút bắt buộc phải bị NÉN (chống spam)!");
+
+        // Nến sau 31 phút (cùng signature): Đã qua 30 phút -> Phải cho phép phát lại (should_emit = true)
+        let ts_31m = ts_init + 31 * 60 * 1000;
+        let should_emit_31m = match &strategy.last_veto_signature {
+            Some((last_sig, last_ts)) if last_sig == &sig => ts_31m.saturating_sub(*last_ts) >= 30 * 60 * 1000,
+            _ => true,
+        };
+        assert!(should_emit_31m, "Sau 30 phút, thẻ VETO phải được phép phát lại để cập nhật trạng thái!");
     }
 }
 

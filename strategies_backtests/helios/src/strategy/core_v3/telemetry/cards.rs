@@ -213,10 +213,12 @@ impl DecisionCardFormatter {
 
         let veto_tier_str = if decision.gate_veto.is_some() {
             "TIER 1 (REGIME GATEKEEPER)"
-        } else if decision.auction_ledger.iter().any(|c| c.status == AuctionStatus::StructuralRiskVeto) {
-            "TIER 3 (SNIPER ENTRY GUARD)"
+        } else if decision.auction_ledger.iter().any(|c| matches!(c.status, AuctionStatus::RegimeIneligible(_))) {
+            "TIER 1.5 (STRUCTURAL ELIGIBILITY ROUTING)"
         } else if decision.auction_ledger.iter().any(|c| c.status == AuctionStatus::FrictionalHurdleVeto) {
             "TIER 2.5 (EV FRICTION HURDLE GATE)"
+        } else if decision.auction_ledger.iter().any(|c| c.status == AuctionStatus::StructuralRiskVeto) {
+            "TIER 3 (SNIPER ENTRY GUARD)"
         } else {
             "ARBITER AUCTION FILTER"
         };
@@ -251,6 +253,16 @@ impl DecisionCardFormatter {
             );
             lines.push(format!("║ 🛑 {:<97} ║", veto_info));
         }
+
+        let regime_str = decision.gate_eval.regime.as_str();
+        let eligible_str = match decision.gate_eval.regime {
+            crate::strategy::core_v3::gatekeeper::MarketRegime::Trending => "[TrendPB, MomIGN, AbsScout]",
+            crate::strategy::core_v3::gatekeeper::MarketRegime::RangeBound => "[RangeOsc, ClimaxRev, AbsScout, AnomalyFade]",
+            crate::strategy::core_v3::gatekeeper::MarketRegime::Breakout => "[MomIGN, AbsScout]",
+            _ => "[] (All Blocked)",
+        };
+        let regime_info = format!("Macro Regime: {:<17} | Eligible: {:<40}", regime_str, eligible_str);
+        lines.push(format!("║ 🧭 {:<97} ║", regime_info));
 
         lines.push("╠═══════════════════════════════════════════════════════════════════════════════════════════════════════╣".to_string());
         lines.push("║ ⚖️ VETOED CANDIDATES & AUCTION LEDGER:                                                                ║".to_string());
