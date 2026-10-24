@@ -715,7 +715,38 @@ impl PaperTrader {
                         let should_log = self.current_sl_price.map_or(true, |old_sl| (new_sl - old_sl).abs() > 1e-4);
                         if should_log {
                             let old_sl_str = self.current_sl_price.map(|p| format!("{:.2}", p)).unwrap_or_else(|| "None".to_string());
-                            info!("🛡️ [TRAILING SL UPDATE] Symbol: {} | SL Ratchet: {} -> {:.2}", self.symbol, old_sl_str, new_sl);
+                            let (sl_dist_pct, locked_roe) = if self.entry_price > 0.0 {
+                                match self.position_type {
+                                    PositionType::Long => {
+                                        let dist = (new_sl - self.entry_price) / self.entry_price * 100.0;
+                                        (dist, dist * self.leverage)
+                                    }
+                                    PositionType::Short => {
+                                        let dist = (self.entry_price - new_sl) / self.entry_price * 100.0;
+                                        (dist, dist * self.leverage)
+                                    }
+                                    PositionType::None => (0.0, 0.0),
+                                }
+                            } else {
+                                (0.0, 0.0)
+                            };
+
+                            let tier_tag = if locked_roe >= 20.0 {
+                                " [MEGA TREND]"
+                            } else if locked_roe >= 3.5 {
+                                " [TIER 2 HALF-BACK]"
+                            } else if locked_roe >= 1.0 {
+                                " [BREAK-EVEN]"
+                            } else if locked_roe > 0.0 {
+                                " [PROFIT PROTECT]"
+                            } else {
+                                " [RISK REDUCTION]"
+                            };
+
+                            info!(
+                                "🛡️ [TRAILING SL UPDATE] Symbol: {} | SL Ratchet: {} -> {:.2} ({:+.2}% from Entry) | Locked ROE: {:+.1}%{}",
+                                self.symbol, old_sl_str, new_sl, sl_dist_pct, locked_roe, tier_tag
+                            );
                         }
                     }
                     self.current_sl_price = safe_sl_price;
