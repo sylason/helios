@@ -782,9 +782,11 @@
     - [x] `test_calculate_size_nan_resilience_and_cap`
     - [x] `test_calculate_size_futures_min_notional_rejection`
 
-- [ ] **TODO-AUDIT-NEW-119: Tách Biệt Nhóm Kích Hoạt Break-Even Cho Absorption Khỏi TrendPB (`H-RSK-03`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:407-411`
-  - **Mô tả:** Tách `ABSORPTION` thành nhóm tham số Break-Even độc lập với ngưỡng kích hoạt $1.2 - 1.5\ \text{ATR}$ thay vì ép chung mốc $2.5\ \text{ATR}$ của TrendPB, bảo toàn lợi nhuận săn nén vi mô.
+- [x] **TODO-AUDIT-NEW-119: Tách Biệt Nhóm Kích Hoạt Break-Even Cho Absorption Khỏi TrendPB (`H-RSK-03`) (BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:596-599`, `config.rs:1227-1234, 1377-1378`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100%]. Absorption đã được tách thành nhóm tham số Break-Even độc lập với `be_atr_trigger_absorption` (DNA min 0.8, max 3.0, mặc định 1.2 ATR) và `be_buffer_atr_absorption` (mặc định 0.8 ATR) thay vì bị ép chung mốc 2.0 - 2.5 ATR của TrendPB, bảo toàn 100% lợi nhuận săn nến vi mô. Đã bổ sung unit test khóa cứng `test_absorption_break_even_separate_from_trend_pb`.
+  - **Unit Tests:**
+    - [x] `test_absorption_break_even_separate_from_trend_pb`
 
 - [ ] **TODO-AUDIT-NEW-120: Đồng Bộ Khép Kín Trạng Thái Stop Loss Sàn Giữa RAM Và Cloud Binance (`H-RSK-04`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:650-653`, `trading_bot/bot_engine/src/execution/order_executor.rs`
