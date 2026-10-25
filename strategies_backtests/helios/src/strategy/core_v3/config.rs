@@ -696,8 +696,8 @@ pub struct TacticalPullbackParams {
     #[serde(default = "default_min_activation_score")]
     pub min_activation_score: f64,
 
-    /// Đệm ATR bảo vệ qua KAMA / đáy nhịp hồi (0.10 -> 3.00 ATR, Step 0.15 -> 20 nấc)
-    #[dna(min = 0.10, max = 3.00, step = 0.15)]
+    /// Đệm ATR bảo vệ qua đáy nhịp hồi vi mô (0.10 -> 2.00 ATR, Step 0.10 -> 20 nấc)
+    #[dna(min = 0.10, max = 2.00, step = 0.10)]
     #[serde(default = "default_pullback_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
 

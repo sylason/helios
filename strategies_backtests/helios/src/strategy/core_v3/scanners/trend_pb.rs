@@ -81,7 +81,7 @@ impl TacticalScanner for TrendPBScanner {
         }
 
         let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
-        let buffer_mult = pb_cfg.struct_sl_buffer_atr.clamp(0.10, 1.20);
+        let buffer_mult = pb_cfg.struct_sl_buffer_atr.clamp(0.10, 2.00);
         let buffer = current_atr * buffer_mult;
 
         // 🧭 Quy đổi ATR vi mô sang hệ quy chiếu khung thời gian KAMA (Scale-Invariant MTF ATR):
@@ -1110,5 +1110,50 @@ mod tests {
 
         let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "TrendPB PHẢI chặn đứng vị thế khi Squeeze = 0.85 > 0.75 mà độ dốc KAMA chưa đủ mạnh (Chop Zone)!");
+    }
+
+    #[test]
+    fn test_trend_pb_sl_buffer_supports_up_to_2_0_atr() {
+        // 🛡️ [TODO-AUDIT-NEW-184]: Kiểm chứng clamp struct_sl_buffer_atr đã nới lên 2.0 ATR (không còn bị bóp nghẹt ở 1.20 ATR)
+        let len = 50;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2010.0; len];
+        let lows = vec![1990.0; len];
+        let closes = vec![2008.0; len];
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.struct_sl_buffer_atr = 2.00; // Đệm 2.0 ATR
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]); // ATR = 5.0 -> Buffer = 10.0
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some());
+        let sl = prop.unwrap().suggested_sl.unwrap();
+
+        // Low = 1990.0, Buffer = 5.0 * 2.0 = 10.0 -> SL phải là 1980.0 (nếu bị kẹp ở 1.20 cũ thì sẽ là 1990.0 - 6.0 = 1984.0)
+        assert!((sl - 1980.0).abs() < 1e-4, "SL phải hỗ trợ buffer tới 2.0 ATR (1980.0), thực tế: {}", sl);
     }
 }

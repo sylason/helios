@@ -1200,12 +1200,12 @@
     - [ ] `test_trend_pb_temporal_ratio_guard_rejects_dragged_pullback`
     - [ ] `test_trend_pb_stagnation_exit_6_bars`
 
-- [ ] **TODO-AUDIT-NEW-184: Cơ Chế Cắt Lỗ Cấu Trúc Khi Gãy Cấu Trúc Thị Trường (Market Structure Break - MSB Exit Thủng Higher Low) (`TREND-MSB-EXIT`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `arbiter.rs`
-  - **Mô tả:** Khi đang nắm giữ vị thế thuận xu hướng, nếu nến đóng cửa xuyên thủng đáy sóng hồi gần nhất ($Higher\ Low$ - MSB / CHoCH), xu hướng đã chính thức tử trận. Thay vì thụ động chờ giá rơi tiếp để quét dính Trailing Stop ATR cách xa, Risk Manager kích hoạt Structural Invalidation Exit đóng vị thế ngay lập tức tại giá đóng nến $Close[i]$ để bảo toàn phần lớn vốn.
+- [x] **TODO-AUDIT-NEW-184: Cơ Chế Cắt Lỗ Cấu Trúc Khi Gãy Cấu Trúc Thị Trường (Market Structure Break - MSB Exit Thủng Higher Low) (`TREND-MSB-EXIT`) (BÁO ĐỘNG GIẢ / THIẾT KẾ BỊ BÁC BỎ - FALSIFIED)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs`, `trend_pb.rs`
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / THIẾT KẾ BỊ BÁC BỎ] Qua thẩm tra `/verify`, `/debate` và `/audit`, cơ chế chém lệnh Market khi $Close[i] < Low[\text{entry\_bar}]$ trên nến đơn lẻ 1m mang lại nguy cơ Whipsaw / Đóng non cực cao, phá hủy kỳ vọng toán học ($EV$) do các pha retest 2 đáy vi mô lành mạnh. Initial Structural SL ($Low - \text{buffer ATR}$) trên sàn đã làm trọn vẹn nhiệm vụ bảo vệ cấu trúc, và Tiered Ratchet (Nấc 3) bảo vệ khi có lãi. Đã chuẩn hóa đồng bộ dải DNA và clamp của `struct_sl_buffer_atr` về $[0.10, 2.00]\ \text{ATR}$ (step 0.10).
   - **Unit Tests:**
-    - [ ] `test_risk_manager_triggers_msb_exit_on_higher_low_breach`
-    - [ ] `test_risk_manager_holds_trend_position_while_higher_low_intact`
+    - [x] `test_trend_pb_sl_buffer_supports_up_to_2_0_atr` (Đã xác minh nới clamp lên 2.0 ATR)
+    - [x] `test_trend_pb_single_bar_sl_anchoring` (Xác minh neo SL chuẩn cấu trúc)
 
 - [ ] **TODO-AUDIT-NEW-185: Chốt Chặn R:R Kỳ Vọng TrendPB $\ge 1.5$ & Ngoại Lệ Squeeze Cho Mô Hình Cờ Tăng Bull Flag (`TREND-RR-HURDLE-AND-FLAG-EXCEPTION`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`

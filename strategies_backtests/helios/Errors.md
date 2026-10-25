@@ -185,3 +185,19 @@
      - Viết mới 3 tests: `test_trend_pb_hook_guard_blocks_zero_and_hundred_saturation`, `test_trend_pb_hook_guard_blocks_deadzone_falling`, `test_trend_pb_hook_guard_climax_dual_confirmation`.
      - 17/17 tests `trend_pb` pass 100%.
      - `test_dna_width_and_parameter_defs_integrity` pass 100% (bảo toàn 107 chiều DNA).
+
+---
+
+### ❌ Lỗi #012: Bẫy Đóng Lệnh Non Whipsaw Trên Nến 1m Do Nhầm Lẫn Giữa Micro Retest & Macro Structure Break (TODO-AUDIT-NEW-184 / TREND-MSB-EXIT)
+- **Hiện tượng & Giả định ngầm ban đầu:**
+  - Đề xuất task `TODO-AUDIT-NEW-184` yêu cầu kích hoạt cắt lỗ khẩn cấp bằng lệnh Market khi nến 1m đóng cửa $Close[i] < Low[\text{entry\_bar}]$ (Long) hoặc $Close[i] > High[\text{entry\_bar}]$ (Short) vì cho rằng "đáy nến vào lệnh là Higher Low bất khả xâm phạm, nếu nến sau đóng thủng thì xu hướng tăng đã tử trận".
+- **Phân tích bản chất vi cấu trúc & Nguyên nhân bị bác bỏ (Falsified):**
+  1. *Nhiễu vi mô 1m (High Noise):* Nến 1m có tỷ số tín hiệu trên nhiễu (SNR) cực thấp. Nhịp thoái lui thực tế của thị trường là một cụm $3 \sim 8$ cây nến. Đáy của cây nến vào lệnh chỉ là đáy vi mô cục bộ, không phải True Swing Low của toàn bộ xu hướng.
+  2. *Bẫy mô hình 2 đáy & Phá hủy kỳ vọng ($EV$):* Thị trường thường xuyên tạo mô hình Double Bottom hoặc Spring test (Wyckoff) nhúng nhẹ qua đáy nến trước để vét nốt thanh khoản trước khi đảo chiều tăng thật. Nếu chém lệnh ngay tại $Close[i] < Low[\text{entry\_bar}]$, hệ thống sẽ cắt non ngay tại chân sóng, biến các lệnh thắng tiềm năng $+20\%$ ROE thành các khoản lỗ nhỏ $-3\%$ ROE liên tiếp kèm phí sàn, làm sụp đổ hoàn toàn kỳ vọng toán học ($EV$) của chiến lược.
+  3. *Phát hiện lệch pha DNA & Clamp ngầm:* Trong quá trình thẩm định Initial SL, phát hiện `config.rs` cấu hình DNA `struct_sl_buffer_atr` từ $[0.10, 3.00]\ \text{ATR}$ nhưng trong `trend_pb.rs` lại bị clamp cứng ở `1.20` (lãng phí 60% không gian tìm kiếm của GA Optimizer).
+- **Giải pháp chuẩn hóa đã thực hiện:**
+  1. *Bác bỏ cơ chế chém non nến đơn lẻ:* Khẳng định $\text{Initial Structural SL} = Low[\text{entry\_bar}] - \text{buffer ATR}$ đã là một chốt chặn bảo vệ cấu trúc hoàn chỉnh trên sàn (được bảo hiểm trần ở $15\%$ ROE bởi `RiskManager::clamp_sl_price`), và `Tiered Profit Ratchet` (Nấc 3) bảo vệ khi có lãi.
+  2. *Chuẩn hóa đồng bộ 1:1 giữa DNA và Clamp:* Nới clamp trong `trend_pb.rs` từ `1.20` lên `2.00` và thắt chặt DNA trong `config.rs` về $[0.10, 2.00]\ \text{ATR}$ (step $0.10 \implies 20$ nấc gene thực chất), đồng bộ chuẩn mực với các Scanner lân cận (`Momentum`: $[0.20, 2.00]$, `Absorption`: $[0.10, 2.50]$).
+  3. *Kiểm thử 100% Zero-Regression:*
+     - Viết mới `test_trend_pb_sl_buffer_supports_up_to_2_0_atr` xác minh đệm $2.0\ \text{ATR}$ không còn bị nghẽn.
+     - 180/180 tests `helios::lib` pass 100%.
