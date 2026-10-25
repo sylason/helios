@@ -741,14 +741,43 @@ impl AssetActor {
         }
     }
 
+    /// Thanh lý khẩn cấp toàn bộ vị thế đang mở và hủy các lệnh Algo SL treo trước khi dừng Actor
+    pub async fn emergency_liquidate_position(&mut self, reason: &str) {
+        if let Some(pos) = self.execution_engine.get_position() {
+            let current_price = self.asset
+                .get_candles_vec()
+                .last()
+                .map(|c| c.close)
+                .unwrap_or(pos.entry_price);
+
+            warn!(
+                "🚨 [{}] EMERGENCY CLOSE ({}): Liquidating active position (Amt: {:.4}, Entry: {:.2}) @ price {:.2}",
+                self.symbol, reason, pos.position_amt, pos.entry_price, current_price
+            );
+
+            let action = Action::ClosePosition { portion: 1.0 };
+            if let Err(e) = self.execution_engine.execute_action(&action, current_price).await {
+                error!("❌ [{}] Failed to execute emergency close: {:?}", self.symbol, e);
+            } else {
+                info!("✅ [{}] Emergency close action dispatched successfully.", self.symbol);
+            }
+        } else {
+            info!("ℹ️ [{}] Emergency stop requested but position is already Flat.", self.symbol);
+        }
+    }
+
     async fn handle_emergency(&mut self, cmd: EmergencyCmd) -> bool {
         match cmd {
-            EmergencyCmd::PanicCloseAll => {
-                warn!("🚨 [{}] PANIC RECEIVED! Stopping...", self.symbol);
+            EmergencyCmd::PanicCloseAll | EmergencyCmd::SystemShutdown => {
+                warn!("🚨 [{}] PANIC / SYSTEM SHUTDOWN RECEIVED! Liquidating active positions...", self.symbol);
+                self.emergency_liquidate_position("PANIC / SYSTEM SHUTDOWN").await;
+                self.update_state(AssetState::Stopped, "Panic / System Shutdown executed").await;
                 true
             }
             EmergencyCmd::StopAsset(s) if s == self.symbol => {
-                info!("🛑 [{}] Stopping as requested.", self.symbol);
+                info!("🛑 [{}] Stop requested for this asset. Liquidating active positions...", self.symbol);
+                self.emergency_liquidate_position("STOP ASSET").await;
+                self.update_state(AssetState::Stopped, "Stop requested").await;
                 true
             }
             _ => false
@@ -928,5 +957,190 @@ mod tests {
         // Logic mới (chuẩn): current_bar_idx.saturating_sub(live_entry_bar) -> 50,119 - 50,000 = 119
         let new_fixed_age = current_bar_idx.saturating_sub(live_entry_bar);
         assert_eq!(new_fixed_age, 119, "Logic mới phản ánh chuẩn xác 119 nến đã trôi qua!");
+    }
+
+    // =========================================================================
+    // 🛡️ TODO-STAB-07: Unit Tests Cầu Dao Khẩn Cấp & Thanh Lý Vị Thế An Toàn
+    // =========================================================================
+
+    #[derive(Default)]
+    struct MockExecutionEngine {
+        position: Option<LivePositionState>,
+        executed_actions: Vec<Action>,
+    }
+
+    #[async_trait::async_trait]
+    impl ExecutionEngine for MockExecutionEngine {
+        async fn execute_action(&mut self, action: &Action, _current_price: f64) -> Result<(), BotError> {
+            self.executed_actions.push(action.clone());
+            if let Action::ClosePosition { .. } = action {
+                self.position = None;
+            }
+            Ok(())
+        }
+
+        async fn on_candle(&mut self, _candle: &Candle) -> Result<(), BotError> {
+            Ok(())
+        }
+
+        fn get_equity(&self) -> f64 {
+            1000.0
+        }
+
+        fn get_position(&self) -> Option<LivePositionState> {
+            self.position.clone()
+        }
+
+        async fn on_account_event(&mut self, _event: &AccountEvent) {}
+    }
+
+    fn create_test_actor(
+        symbol: &str,
+        position: Option<LivePositionState>,
+    ) -> (AssetActor, mpsc::Receiver<StatusUpdate>) {
+        let store = Arc::new(crate::data_engine::sqlite_impl::SqliteStore::new(":memory:").unwrap());
+        let candle_repo: Arc<dyn CandleRepository> = store.clone();
+        let strategy_repo: Arc<dyn StrategyRepository> = store;
+
+        let (_dna_tx, dna_rx) = tokio::sync::watch::channel(None);
+        let (data_tx, _) = broadcast::channel(16);
+        let (_emergency_tx, emergency_rx) = mpsc::channel(16);
+        let (status_tx, status_rx) = mpsc::channel(16);
+        let (_account_tx, account_rx) = broadcast::channel(16);
+        let config = EngineConfig::default();
+
+        let mock_engine = Box::new(MockExecutionEngine {
+            position,
+            executed_actions: Vec::new(),
+        });
+
+        let actor = AssetActor::new(
+            symbol.to_string(),
+            "HELIOS_V3".to_string(),
+            candle_repo,
+            strategy_repo,
+            dna_rx,
+            data_tx,
+            emergency_rx,
+            status_tx,
+            account_rx,
+            mock_engine,
+            config,
+        );
+
+        (actor, status_rx)
+    }
+
+    #[tokio::test]
+    async fn test_handle_emergency_panic_close_all_liquidates_position() {
+        let pos = LivePositionState {
+            symbol: "BTCUSDT".to_string(),
+            position_amt: 0.5,
+            entry_price: 50_000.0,
+            entry_timestamp: 1000,
+            live_entry_bar: 10,
+            current_sl_price: Some(49_000.0),
+            current_tp_price: None,
+            opening_playbook_tag: Some("TREND_PB".to_string()),
+            highest_favorable_price: 50_500.0,
+            peak_timestamp: 1050,
+        };
+
+        let (mut actor, mut status_rx) = create_test_actor("BTCUSDT", Some(pos));
+        assert!(actor.execution_engine.get_position().is_some());
+
+        let stopped = actor.handle_emergency(EmergencyCmd::PanicCloseAll).await;
+        assert!(stopped, "PanicCloseAll phải trả về true để thoát Actor loop");
+        assert!(actor.execution_engine.get_position().is_none(), "Vị thế phải được thanh lý hoàn toàn (Zero Orphaned Position)!");
+        assert_eq!(actor.state, AssetState::Stopped);
+
+        let status = status_rx.try_recv().expect("Phải bắn status update lên EventBus");
+        assert_eq!(status.state, AssetState::Stopped);
+    }
+
+    #[tokio::test]
+    async fn test_handle_emergency_stop_asset_matching_symbol() {
+        let pos = LivePositionState {
+            symbol: "ETHUSDT".to_string(),
+            position_amt: -2.0,
+            entry_price: 3_000.0,
+            entry_timestamp: 1000,
+            live_entry_bar: 5,
+            current_sl_price: Some(3_100.0),
+            current_tp_price: None,
+            opening_playbook_tag: Some("REVERSAL".to_string()),
+            highest_favorable_price: 2_950.0,
+            peak_timestamp: 1030,
+        };
+
+        let (mut actor, mut status_rx) = create_test_actor("ETHUSDT", Some(pos));
+        let stopped = actor.handle_emergency(EmergencyCmd::StopAsset("ETHUSDT".to_string())).await;
+        assert!(stopped, "StopAsset với symbol khớp phải trả về true");
+        assert!(actor.execution_engine.get_position().is_none(), "Vị thế phải được thanh lý khi StopAsset khớp symbol");
+        assert_eq!(actor.state, AssetState::Stopped);
+
+        let status = status_rx.try_recv().expect("Phải bắn status update lên EventBus");
+        assert_eq!(status.state, AssetState::Stopped);
+    }
+
+    #[tokio::test]
+    async fn test_handle_emergency_stop_asset_mismatched_symbol_ignored() {
+        let pos = LivePositionState {
+            symbol: "BTCUSDT".to_string(),
+            position_amt: 0.5,
+            entry_price: 50_000.0,
+            entry_timestamp: 1000,
+            live_entry_bar: 10,
+            current_sl_price: Some(49_000.0),
+            current_tp_price: None,
+            opening_playbook_tag: Some("TREND_PB".to_string()),
+            highest_favorable_price: 50_500.0,
+            peak_timestamp: 1050,
+        };
+
+        let (mut actor, mut status_rx) = create_test_actor("BTCUSDT", Some(pos));
+        let stopped = actor.handle_emergency(EmergencyCmd::StopAsset("SOLUSDT".to_string())).await;
+        assert!(!stopped, "StopAsset với symbol khác KHÔNG được làm dừng Actor hiện tại!");
+        assert!(actor.execution_engine.get_position().is_some(), "Vị thế phải được giữ nguyên vẹn!");
+        assert_ne!(actor.state, AssetState::Stopped);
+        assert!(status_rx.try_recv().is_err(), "Không được bắn status update Stopped!");
+    }
+
+    #[tokio::test]
+    async fn test_handle_emergency_system_shutdown() {
+        let pos = LivePositionState {
+            symbol: "BNBUSDT".to_string(),
+            position_amt: 10.0,
+            entry_price: 600.0,
+            entry_timestamp: 1000,
+            live_entry_bar: 2,
+            current_sl_price: Some(580.0),
+            current_tp_price: None,
+            opening_playbook_tag: Some("ABSORPTION".to_string()),
+            highest_favorable_price: 610.0,
+            peak_timestamp: 1020,
+        };
+
+        let (mut actor, mut status_rx) = create_test_actor("BNBUSDT", Some(pos));
+        let stopped = actor.handle_emergency(EmergencyCmd::SystemShutdown).await;
+        assert!(stopped, "SystemShutdown phải trả về true để dừng Actor");
+        assert!(actor.execution_engine.get_position().is_none(), "Vị thế phải được thanh lý khi SystemShutdown!");
+        assert_eq!(actor.state, AssetState::Stopped);
+
+        let status = status_rx.try_recv().expect("Phải bắn status update");
+        assert_eq!(status.state, AssetState::Stopped);
+    }
+
+    #[tokio::test]
+    async fn test_handle_emergency_flat_position_transitions_cleanly() {
+        let (mut actor, mut status_rx) = create_test_actor("BTCUSDT", None);
+        assert!(actor.execution_engine.get_position().is_none());
+
+        let stopped = actor.handle_emergency(EmergencyCmd::PanicCloseAll).await;
+        assert!(stopped, "PanicCloseAll khi Flat vẫn phải dừng Actor an toàn");
+        assert_eq!(actor.state, AssetState::Stopped);
+
+        let status = status_rx.try_recv().expect("Phải bắn status update Stopped");
+        assert_eq!(status.state, AssetState::Stopped);
     }
 }

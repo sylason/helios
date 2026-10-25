@@ -48,7 +48,7 @@ rust_decimal = "1.42.1"
 
 
 [profile.release]
-opt-level = 3       # Mặc định tối ưu cao nhất (-O3) cho code dự án (bot_engine)
+opt-level = 2       # Mặc định tối ưu cao nhất (-O3) cho code dự án (bot_engine)
 lto = false         # Tắt LTO toàn cục để tránh nghẽn Linker
 codegen-units = 16  # Phân chia 16 luồng biên dịch song song
 panic = "abort"     # Tắt unwinding để giảm dung lượng file exe
