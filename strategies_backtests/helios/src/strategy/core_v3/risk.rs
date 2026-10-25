@@ -244,6 +244,10 @@ impl RiskManager {
 
     /// Tính toán Size dựa trên Fixed Percentage (Fraction của Ký quỹ) nhưng đảm bảo Min Order Size.
     /// Trả về một giá trị < 1.0 (ví dụ 0.1 = 10%) để `ferro_trade` dùng làm Initial Margin.
+    #[deprecated(
+        since = "3.0.0",
+        note = "Sử dụng RiskManager::calculate_dynamic_size để định cỡ vị thế theo $Risk Parity chuẩn Quant (TODO-AUDIT-NEW-118)"
+    )]
     pub fn calculate_size(equity: f64, risk_pct: f64, min_order_usd: f64, leverage: f64, max_cap_fraction: f64) -> f64 {
         // 🛡️ TIỀN ĐIỀU KIỆN (PRE-CONDITION WHITELIST - TODO-MATH-03):
         // Bắt buộc 4 biến số cốt lõi phải là số thực dương hữu hạn (> 0.0 và không phải NaN / Inf)
@@ -993,6 +997,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_calculate_size_nan_resilience_and_cap() {
         // 1. Trường hợp bình thường: vốn $100, risk 20%, đòn bẩy 20x -> order $400 >= $21 -> size = 20%
         let size = RiskManager::calculate_size(100.0, 0.20, 21.0, 20.0, 0.25);
@@ -1519,6 +1524,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_calculate_size_futures_min_notional_rejection() {
         // Tài khoản bình thường $60: Margin $12, Notional $240 >= $21 -> Thành công
         let size_normal = RiskManager::calculate_size(60.0, 0.20, 21.0, 20.0, 0.25);
@@ -1947,6 +1953,61 @@ mod tests {
 
         assert_eq!(target_sl, min_be_price, "Sàn cứng min_be_price 2503.25 bảo vệ tuyệt đối, cấm dynamic floor tụt xuống 2490.0!");
         assert!(target_sl > entry_price, "Mức dừng lỗ sau bảo vệ kiên cố luôn nằm trên Entry price!");
+    }
+
+    #[test]
+    fn test_absorption_break_even_separate_from_trend_pb() {
+        // 🛡️ [TODO-AUDIT-NEW-119 / H-RSK-03]: Kiểm chứng Absorption tách riêng ngưỡng kích hoạt BE (1.2 ATR) khỏi TrendPB (2.0 ATR)
+        let config = crate::strategy::core_v3::config::HeliosConfigV3::default();
+        let risk_cfg = &config.risk_management.stop_management;
+
+        let entry_price: f64 = 2500.0;
+        let leverage: f64 = 20.0;
+        let current_atr: f64 = 10.0;
+
+        // Sàn kinh tế hòa vốn bù phí sàn 2 chiều + cushion
+        let round_trip_fee = 2.0 * config.risk_management.risk_base.taker_fee_rate;
+        let slippage = config.risk_management.risk_base.slippage_allowance_pct;
+        let fee_buffer_pct = round_trip_fee + slippage;
+        let friction_roe = fee_buffer_pct * leverage;
+        let net_be_roe = friction_roe + (0.0003 * leverage);
+        let be_trigger_roe = risk_cfg.base_be_roe_trigger.max(net_be_roe);
+
+        // Kịch bản giá bứt phá vi mô: Giá tăng +15.0 điểm (tương đương 1.5 ATR)
+        let peak_val: f64 = entry_price + 15.0;
+        let peak_dist: f64 = peak_val - entry_price; // 15.0
+        let peak_roe: f64 = (peak_dist / entry_price) * leverage; // (15 / 2500) * 20 = 12.0% ROE > be_trigger_roe
+
+        // 1. Nhánh ABSORPTION (Ngưỡng kích hoạt: 1.2 ATR = 12.0 điểm):
+        let tag_absorption = "ABSORPTION";
+        let (be_trigger_mult_abs, _) = match tag_absorption {
+            "ABSORPTION" => (
+                if risk_cfg.be_atr_trigger_absorption > 0.0 { risk_cfg.be_atr_trigger_absorption } else { 1.2 },
+                if risk_cfg.be_buffer_atr_absorption > 0.0 { risk_cfg.be_buffer_atr_absorption } else { 0.8 },
+            ),
+            _ => (2.5, 1.5),
+        };
+        assert_eq!(be_trigger_mult_abs, 1.2, "Ngưỡng BE của Absorption phải nhận đúng 1.2 ATR");
+        let min_required_gain = entry_price * (be_trigger_roe / leverage);
+        let atr_required_gain_abs = current_atr * be_trigger_mult_abs; // 10.0 * 1.2 = 12.0 điểm
+        let req_gain_abs = min_required_gain.max(atr_required_gain_abs);
+        let is_be_triggered_abs = peak_dist >= req_gain_abs && peak_roe >= be_trigger_roe;
+        assert!(is_be_triggered_abs, "ABSORPTION phải kích hoạt Break-Even thành công tại 1.5 ATR (>= 1.2 ATR)!");
+
+        // 2. Nhánh TREND_PB (Ngưỡng kích hoạt: 2.0 ATR = 20.0 điểm):
+        let tag_trend = "TREND_PB";
+        let (be_trigger_mult_trend, _) = match tag_trend {
+            "TREND_PB" => (
+                if risk_cfg.be_atr_trigger_trend > 0.0 { risk_cfg.be_atr_trigger_trend } else { 2.5 },
+                if risk_cfg.be_buffer_atr_trend > 0.0 { risk_cfg.be_buffer_atr_trend } else { 1.5 },
+            ),
+            _ => (2.5, 1.5),
+        };
+        assert_eq!(be_trigger_mult_trend, 2.0, "Ngưỡng BE của TrendPB phải nhận đúng 2.0 ATR");
+        let atr_required_gain_trend = current_atr * be_trigger_mult_trend; // 10.0 * 2.0 = 20.0 điểm
+        let req_gain_trend = min_required_gain.max(atr_required_gain_trend);
+        let is_be_triggered_trend = peak_dist >= req_gain_trend && peak_roe >= be_trigger_roe;
+        assert!(!is_be_triggered_trend, "TREND_PB KHÔNG ĐƯỢC kích hoạt Break-Even sớm tại 1.5 ATR (< 2.0 ATR)!");
     }
 
     #[test]

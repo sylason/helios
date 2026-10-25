@@ -45,11 +45,12 @@ pub struct HeliosStrategyV3 {
 impl Strategy for HeliosStrategyV3 {
     fn new(_params: &HashMap<String, ParamValue>) -> Self {
         let mut arbiter = HeliosArbiter::new();
-        // 🎯 4 PLAYBOOK CHỦ LỰC V3.3: Khởi tạo sẵn 1 lần duy nhất (Zero-Allocation ở runtime)
+        // 🎯 5 PLAYBOOK CHỦ LỰC V3.3: Khởi tạo sẵn 1 lần duy nhất (Zero-Allocation ở runtime)
         arbiter.add_scanner(Box::new(scanners::trend_pb::TrendPBScanner));
         arbiter.add_scanner(Box::new(scanners::momentum_ignition::MomentumIgnitionScanner));
         arbiter.add_scanner(Box::new(scanners::reversal::ReversalScanner));
         arbiter.add_scanner(Box::new(scanners::absorption::AbsorptionScanner));
+        arbiter.add_scanner(Box::new(scanners::range_osc::RangeOscScanner));
 
         Self {
             config: HeliosConfigV3::default(),
@@ -101,17 +102,19 @@ impl Strategy for HeliosStrategyV3 {
             ind.vol_ma.period == 0 || ind.vwma.period == 0 ||
             ind.price_z_score.lookback == 0 || ind.vol_z_score.lookback == 0 ||
             ind.rsi_trend.period == 0 || ind.rsi_reversal.period == 0 || ind.rsi_momentum.period == 0 ||
-            ind.stoch_trend.period == 0 || ind.stoch_trend.k_period == 0 || ind.stoch_trend.d_period == 0;
+            ind.stoch_trend.period == 0 || ind.stoch_trend.k_period == 0 || ind.stoch_trend.d_period == 0 ||
+            ind.stoch_range.period == 0 || ind.stoch_range.k_period == 0 || ind.stoch_range.d_period == 0;
 
         if is_zero_period {
             tracing::error!(
                 "🚨 [HELIOS V3 FATAL] Critical indicator period/lookback is 0 in init()! \
                 NATR: {}, MicroNATR: {}, MFI: {}, KAMA: ({},{}), ADX: {}, BB: {}, ATR: {}, VolMA: {}, VWMA: {}, \
-                PriceZ: {}, VolZ: {}, RSI: (T:{},R:{},M:{}), StochTrend: ({},{},{})",
+                PriceZ: {}, VolZ: {}, RSI: (T:{},R:{},M:{}), StochTrend: ({},{},{}), StochRange: ({},{},{})",
                 ind.natr.period, ind.micro_natr.period, ind.mfi.period, ind.kama.short_period, ind.kama.long_period,
                 ind.adx.period, ind.bbands.period, ind.atr.period, ind.vol_ma.period, ind.vwma.period,
                 ind.price_z_score.lookback, ind.vol_z_score.lookback, ind.rsi_trend.period, ind.rsi_reversal.period,
-                ind.rsi_momentum.period, ind.stoch_trend.period, ind.stoch_trend.k_period, ind.stoch_trend.d_period
+                ind.rsi_momentum.period, ind.stoch_trend.period, ind.stoch_trend.k_period, ind.stoch_trend.d_period,
+                ind.stoch_range.period, ind.stoch_range.k_period, ind.stoch_range.d_period
             );
             panic!("🚨 [HELIOS V3 FATAL] Critical indicator period is 0 in init(). Aborting to prevent silent zero-trade failure!");
         }
@@ -185,16 +188,16 @@ impl Strategy for HeliosStrategyV3 {
         s.stoch_trend_k = st_t_k;
         s.stoch_trend_d = st_t_d;
 
-        // [V3.3 TINH GIẢN] Tắt chỉ báo STOCH_Range của Playbook RangeOsc đã de-overengineer (tránh bẫy period 0 trả về toàn NaN)
-        // let (st_r_k, st_r_d, _, _, _) = ctx.stoch(
-        //     ind.stoch_range.timeframe, "STOCH_Range", 
-        //     ind.stoch_range.period as u32, 
-        //     ind.stoch_range.k_period as u32, ind.stoch_range.k_ma_type.clone(),
-        //     ind.stoch_range.d_period as u32, ind.stoch_range.d_ma_type.clone(),
-        //     ind.stoch_range.zone
-        // );
-        // s.stoch_range_k = st_r_k;
-        // s.stoch_range_d = st_r_d;
+        // 🎯 [TODO-AUDIT-H-03] Kích hoạt cảm biến Stochastic cho RangeOscScanner
+        let (st_r_k, st_r_d, _, _, _) = ctx.stoch(
+            ind.stoch_range.timeframe, "STOCH_Range", 
+            ind.stoch_range.period as u32, 
+            ind.stoch_range.k_period as u32, ind.stoch_range.k_ma_type.clone(),
+            ind.stoch_range.d_period as u32, ind.stoch_range.d_ma_type.clone(),
+            ind.stoch_range.zone
+        );
+        s.stoch_range_k = st_r_k;
+        s.stoch_range_d = st_r_d;
 
         // ABSORPTION VWMA SENSOR
         s.vwma = ctx.vwma(ind.vwma.timeframe, "VWMA", ind.vwma.period);
@@ -2809,7 +2812,7 @@ mod tests {
         assert!(p.suggested_sl.is_some());
         assert!(p.suggested_tp.is_some());
         let tp = p.suggested_tp.unwrap();
-        assert!((tp - 2000.0).abs() < 1.0, "TP ({}) phải xấp xỉ Trục Giữa 2000.0", tp);
+        assert!((tp - 2015.0).abs() < 1.0, "TP ({}) phải hướng sang biên đối diện 2015.0 theo TODO-AUDIT-H-03", tp);
     }
 
     #[test]
@@ -4078,6 +4081,146 @@ mod tests {
         // Khi đang có vị thế mở, next() lập tức return sau RiskManager, không đi vào Arbiter mở lệnh Buy/Sell mới
         let has_entry_order = actions.iter().any(|a| matches!(a, ferro_trade::broker::actions::Action::Buy { .. } | ferro_trade::broker::actions::Action::Sell { .. }));
         assert!(!has_entry_order, "Strict Exclusive Order phải chặn không cho mở thêm lệnh Buy/Sell khi vị thế đang mở!");
+    }
+
+    #[test]
+    fn test_range_osc_revived_with_opposite_boundary_tp_rr() {
+        use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
+        use crate::strategy::core_v3::arbiter::{TacticalScanner, SignalType};
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1981.0; len]),
+            high: std::sync::Arc::new(vec![1986.0; len]),
+            low: std::sync::Arc::new(vec![1980.0; len]),
+            close: std::sync::Arc::new(vec![1982.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.range.max_bb_slope = 0.10;
+        config.tactical_sniper.range.max_adverse_slope = 0.15;
+        config.tactical_sniper.range.min_activation_score = 0.10;
+        config.tactical_sniper.range.min_width_pct = 0.005;
+        config.tactical_sniper.range.bb_proximity_pct = 0.015;
+        config.tactical_sniper.range.stoch_oversold = 25.0;
+        config.tactical_sniper.range.stoch_overbought = 75.0;
+        config.tactical_sniper.range.struct_sl_buffer_atr = 1.0;
+        config.tactical_sniper.range.tp_target_ratio = 0.50;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_range_k = std::sync::Arc::new(vec![15.0; len]);
+        sensors.stoch_range_d = std::sync::Arc::new(vec![12.0; len]); // Hook up
+        sensors.vol_z_score = std::sync::Arc::new(vec![0.5; len]);
+        sensors.bb_middle_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
+        matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
+        matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "RangeOscScanner phải phê duyệt điểm vào Long!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+
+        let tp = p.suggested_tp.expect("Phải có TP");
+        let sl = p.suggested_sl.expect("Phải có SL");
+        let entry = 1982.0;
+
+        // Take Profit phải hướng sang biên trên bb_upper (2020.0), vượt xa trục giữa bb_middle (2000.0)
+        assert!(tp > 2005.0, "Take profit ({}) phải hướng sang biên trên, vượt xa trục giữa 2000.0!", tp);
+
+        let risk = entry - sl;
+        let reward = tp - entry;
+        let rr_ratio = reward / risk;
+        assert!(rr_ratio >= 1.50, "Tỷ lệ R:R ({:.2}) phải >= 1.50 để bảo đảm EV > 0 sau phí!", rr_ratio);
+    }
+
+    #[test]
+    fn test_range_osc_spring_liquidity_sweep_approved() {
+        use crate::strategy::core_v3::scanners::range_osc::RangeOscScanner;
+        use crate::strategy::core_v3::arbiter::TacticalScanner;
+
+        let len = 50;
+        let i = len - 1;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1981.0; len]),
+            high: std::sync::Arc::new(vec![1985.0; len]),
+            low: std::sync::Arc::new(vec![1974.0; len]),
+            close: std::sync::Arc::new(vec![1983.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.range.max_bb_slope = 0.10;
+        config.tactical_sniper.range.max_adverse_slope = 0.15;
+        config.tactical_sniper.range.min_activation_score = 0.10;
+        config.tactical_sniper.range.min_width_pct = 0.005;
+        config.tactical_sniper.range.bb_proximity_pct = 0.015;
+        config.tactical_sniper.range.stoch_oversold = 25.0;
+        config.tactical_sniper.range.stoch_overbought = 75.0;
+        config.tactical_sniper.range.struct_sl_buffer_atr = 1.0;
+        config.tactical_sniper.range.tp_target_ratio = 0.50;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.stoch_range_k = std::sync::Arc::new(vec![15.0; len]);
+        sensors.stoch_range_d = std::sync::Arc::new(vec![12.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![0.5; len]);
+        sensors.bb_middle_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.bb_width_norm = std::sync::Arc::new(vec![0.02; len]);
+        matrix.trend_strength = std::sync::Arc::new(vec![0.15; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
+        matrix.bb_middle_slope_adj = sensors.bb_middle_slope_adj.clone();
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "RangeOscScanner phải phê duyệt cú rút chân Spring quét râu ngoài biên dưới!");
     }
 }
 

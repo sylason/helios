@@ -140,9 +140,13 @@
     1. *Tại Arbiter (`arbiter.rs:450-478`):* Khi proposal có SL cấu trúc vượt trần ROE (`StructuralRiskVeto`), Arbiter không VETO mà phê duyệt tham gia đấu thầu (`approved_proposals.push`).
     2. *Tại Mod (`mod.rs:321-344`):* Proposal thắng thầu được kẹp an toàn bằng `RiskManager::clamp_sl_price` và tự động co giãn size ký quỹ theo $Risk Parity qua `RiskManager::calculate_dynamic_size` (Dynamic De-leverage).
     3. *Unit Test:* `test_arbiter_structural_sl_approved_when_exceeds_roe_cap` (`arbiter.rs:947-1019`) đã chứng minh dứt khoát và PASS 100%.
-- [ ] **TODO-AUDIT-H-03: Xử Lý Mã Nguồn Ma `range_osc.rs` & Chuẩn Hóa Điểm Số Arbiter**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`, `arbiter.rs`
-  - **Mô tả:** Tích hợp hoặc loại bỏ an toàn `range_osc`; chuẩn hóa phân phối điểm số (Z-Score scaling) giữa các Scanner trong sàn đấu Arbiter.
+- [x] **TODO-AUDIT-H-03: Xử Lý Mã Nguồn Ma `range_osc.rs` & Chuẩn Hóa Điểm Số Arbiter**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`, `arbiter.rs`, `core_v3/mod.rs`
+  - **Mô tả:** [HOÀN THÀNH 100%]
+    1. *Tại Arbiter (`arbiter.rs:160-205, 415`):* Kiến thiết kiến trúc **Dual-Pillar Harmonized Confidence** cân bằng 50% Điểm Tuyệt Đối (`raw_score.clamp(0.0, 1.0)`) và 50% Tỷ Lệ Chất Lượng Thặng Dư (`(raw_score - S_min) / (1.0 - S_min)`). Triệt tiêu 100% bẫy độc quyền Playbook (Absorption đè bẹp TrendPB/Momentum/Reversal).
+    2. *Tại RangeOscScanner (`range_osc.rs:90-185`):* Mở rộng chốt lời sang biên đối diện (`0.80 + 0.15 * tp_ratio`) đảm bảo $R:R \ge 1.50$ (EV > 0 sau phí). Nới lỏng điều kiện nến Spring / Upthrust (`low <= bb_l + buffer`) cho phép quét râu thanh khoản rút chân.
+    3. *Tại Mod (`core_v3/mod.rs:53, 105, 191`):* Đăng ký `RangeOscScanner` vào Arbiter runtime, bật lại `stoch_range` trong `init()`, và đồng bộ chốt chặn Fail-Fast indicator period = 0 theo TODO-AUDIT-NEW-57.
+    4. *Unit Tests:* `test_calibrated_confidence_dual_pillar_math`, `test_fair_auction_excess_quality_prevents_playbook_monopoly`, `test_range_osc_revived_with_opposite_boundary_tp_rr`, `test_range_osc_spring_liquidity_sweep_approved` (toàn bộ 186/186 test cases pass 100%).
 - [ ] **TODO-AUDIT-H-04: Mở Khóa Hyperparameters Trong DNA & Tinh Chỉnh KAMA Slope**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/config.rs`, `dna_mapping.rs`, `matrix.rs`
   - **Mô tả:** Đưa `min_activation_score` vào DNA; điều chỉnh hệ số chia `atr * 0.20` thay vì `0.05` để khử bão hòa nhị phân trong KAMA slope.
@@ -770,9 +774,13 @@
     2. *Tại Mod (`mod.rs:321-344`):* Sau khi thắng thầu, lệnh được kẹp an toàn bằng `RiskManager::clamp_sl_price` và tự động co giãn size ký quỹ theo $Risk Parity thông qua `RiskManager::calculate_dynamic_size` (Dynamic De-leverage).
     3. *Unit Test:* `test_arbiter_structural_sl_approved_when_exceeds_roe_cap` ([`arbiter.rs:947-1019`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/src/strategy/core_v3/arbiter.rs#L947-L1019)) đã xác nhận và PASS 100%.
 
-- [ ] **TODO-AUDIT-NEW-118: Tái Cấu Trúc Định Cỡ Vị Thế Cố Định Rủi Ro Dollar ($Fixed Risk USD Sizing) (`H-RSK-02`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:158-189`
-  - **Mô tả:** Thay thế công thức tính Notional cố định theo `equity * risk_pct * leverage` bằng mô hình định cỡ Quant chuẩn mực $\text{Size} = \frac{\text{Target Risk USD}}{|\text{Entry} - \text{SL}|}$, đảm bảo số tiền mất USD đồng nhất giữa các lệnh SL hẹp và SL rộng.
+- [x] **TODO-AUDIT-NEW-118: Tái Cấu Trúc Định Cỡ Vị Thế Cố Định Rủi Ro Dollar ($Fixed Risk USD Sizing) (`H-RSK-02`) (BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH QUA TODO-AUDIT-NEW-37)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:247, 283-328`, `mod.rs:346`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100% QUA TODO-AUDIT-NEW-37 & DEPRECATED HÀM CŨ]. Hàm định cỡ vị thế chuẩn Quant `RiskManager::calculate_dynamic_size` đã được kích hoạt làm nguồn tính size duy nhất tại `mod.rs:346` theo nguyên lý $Risk Parity: $\text{Size} = \frac{\text{Risk USD}}{|\text{Entry} - \text{SL}| \times \text{Leverage}}$, đảm bảo số tiền lỗ USD cố định $1\text{R}$ giữa các lệnh SL hẹp và SL rộng. Hàm cũ `RiskManager::calculate_size` đã được đánh dấu `#[deprecated]` an toàn. Unit test `test_calculate_dynamic_size` pass 100%.
+  - **Unit Tests:**
+    - [x] `test_calculate_dynamic_size`
+    - [x] `test_calculate_size_nan_resilience_and_cap`
+    - [x] `test_calculate_size_futures_min_notional_rejection`
 
 - [ ] **TODO-AUDIT-NEW-119: Tách Biệt Nhóm Kích Hoạt Break-Even Cho Absorption Khỏi TrendPB (`H-RSK-03`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:407-411`

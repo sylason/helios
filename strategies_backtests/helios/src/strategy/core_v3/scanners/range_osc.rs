@@ -88,9 +88,9 @@ impl TacticalScanner for RangeOscScanner {
         let two_sigma_sq = 2.0 * bb_prox * bb_prox;
 
         // 2. Chấm điểm Mẫu Hình LONG:
-        // Giá bắt buộc phải nằm ở nửa dưới dải (close <= bb_m) và không bị đâm thủng dải dưới (close >= bb_l)
-        let f_price_long = if close <= bb_m && close >= bb_l {
-            let dist_l = close - bb_l;
+        // Cho phép quét râu ngoài biên dưới (low <= bb_l + buffer) nhưng đóng nến không sập sâu (close >= bb_l - buffer * 0.5) và ở nửa dưới dải (close <= bb_m)
+        let f_price_long = if close <= bb_m && low <= bb_l + buffer && close >= bb_l - buffer * 0.5 {
+            let dist_l = (close - bb_l).abs();
             (- (dist_l * dist_l) / two_sigma_sq).exp()
         } else {
             0.0 // Đâm thủng dải dưới (Breakdown) hoặc nằm ở nửa trên dải -> Triệt tiêu!
@@ -104,9 +104,9 @@ impl TacticalScanner for RangeOscScanner {
         };
 
         // 3. Chấm điểm Mẫu Hình SHORT:
-        // Giá bắt buộc phải nằm ở nửa trên dải (close >= bb_m) và không bị đâm thủng dải trên (close <= bb_u)
-        let f_price_short = if close >= bb_m && close <= bb_u {
-            let dist_u = bb_u - close;
+        // Cho phép quét râu ngoài biên trên (high >= bb_u - buffer) nhưng đóng nến không vượt sâu (close <= bb_u + buffer * 0.5) và ở nửa trên dải (close >= bb_m)
+        let f_price_short = if close >= bb_m && high >= bb_u - buffer && close <= bb_u + buffer * 0.5 {
+            let dist_u = (bb_u - close).abs();
             (- (dist_u * dist_u) / two_sigma_sq).exp()
         } else {
             0.0 // Đâm thủng dải trên (Breakout) hoặc nằm ở nửa dưới dải -> Triệt tiêu!
@@ -143,8 +143,8 @@ impl TacticalScanner for RangeOscScanner {
                 return None;
             }
 
-            // 🎯 KHỐI 3: Take Profit thực tế hướng về Trục Giữa bb_middle
-            let target_price = bb_l + (bb_u - bb_l) * tp_ratio;
+            // 🎯 KHỐI 3: Take Profit hướng về Dải Trên (Biên Đối Diện, R:R >= 1.50)
+            let target_price = bb_l + (bb_u - bb_l) * (0.80 + 0.15 * tp_ratio);
             let valid_tp = target_price.max(close + buffer.max(current_atr * 0.20));
 
             // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên dưới dải Bollinger Bands
@@ -176,8 +176,8 @@ impl TacticalScanner for RangeOscScanner {
                 return None;
             }
 
-            // 🎯 KHỐI 3: Take Profit thực tế hướng về Trục Giữa bb_middle
-            let target_price = bb_u - (bb_u - bb_l) * tp_ratio;
+            // 🎯 KHỐI 3: Take Profit hướng về Dải Dưới (Biên Đối Diện, R:R >= 1.50)
+            let target_price = bb_u - (bb_u - bb_l) * (0.80 + 0.15 * tp_ratio);
             let valid_tp = target_price.min(close - buffer.max(current_atr * 0.20));
 
             // 🛡️ FLAW-TSL.6: Structural SL neo ngoài biên trên dải Bollinger Bands

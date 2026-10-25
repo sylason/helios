@@ -158,6 +158,41 @@ impl HeliosArbiter {
         }
     }
 
+    /// 🎯 [TODO-AUDIT-H-03] Chuẩn Hóa Điểm Tự Tin Đấu Thầu (Dual-Pillar Harmonized Confidence)
+    /// Trụ 1: Điểm chất lượng tuyệt đối (Absolute Pattern Quality) = raw_score.clamp(0.0, 1.0)
+    /// Trụ 2: Điểm chất lượng thặng dư (Excess Quality Ratio) = (raw_score - S_min) / (1.0 - S_min)
+    /// C_final = 0.5 * raw_score + 0.5 * excess_ratio
+    /// - Miễn nhiễm hoàn toàn với NaN, chia cho 0, hoặc raw_score < min_activation.
+    #[inline]
+    pub fn compute_calibrated_confidence(raw_score: f64, min_activation: f64) -> f64 {
+        if raw_score.is_nan() || min_activation.is_nan() || raw_score <= 0.0 {
+            return 0.0;
+        }
+        let clamped_score = raw_score.clamp(0.0, 1.0);
+        let s_min = min_activation.clamp(0.0, 0.99);
+
+        let excess_ratio = if clamped_score <= s_min {
+            0.0
+        } else {
+            ((clamped_score - s_min) / (1.0 - s_min)).clamp(0.0, 1.0)
+        };
+
+        0.5 * clamped_score + 0.5 * excess_ratio
+    }
+
+    /// Đọc ngưỡng kích hoạt tối thiểu (S_min) của scanner từ cấu hình chiến lược
+    #[inline]
+    pub fn get_scanner_min_activation(id: ScannerId, config: &HeliosConfigV3) -> f64 {
+        match id {
+            ScannerId::TrendPullback => config.tactical_sniper.pullback.min_activation_score,
+            ScannerId::MomentumIgnition => config.tactical_sniper.momentum.min_activation_score,
+            ScannerId::RangeOscillator => config.tactical_sniper.range.min_activation_score,
+            ScannerId::ClimaxReversal => config.tactical_sniper.reversal.min_activation_score,
+            ScannerId::AnomalyFade => config.tactical_sniper.anomaly.min_activation_score,
+            ScannerId::AbsorptionScout => config.tactical_sniper.absorption.min_activation_score,
+        }
+    }
+
     /// 🧭 [PHÂN LUỒNG THẨM QUYỀN CHỌN LỌC PLAYBOOK THEO CHẾ ĐỘ THỊ TRƯỜNG]
     /// (TODO-AUDIT-NEW-115 / H-GATE-02)
     /// Trả về `(is_eligible, ineligibility_reason)`.
@@ -329,7 +364,7 @@ impl HeliosArbiter {
         let chaos_val = matrix.chaos_index.get(i).copied().unwrap_or(0.0);
         let min_threshold = config.arbiter.min_confidence_threshold;
         let conflict_margin = config.arbiter.conflict_confidence_margin;
-        let max_chaos_penalty = config.arbiter.max_chaos_penalty;
+        let _max_chaos_penalty = config.arbiter.max_chaos_penalty;
 
         // 🛡️ TẦNG 1: CẦU DAO ĐIỀU HƯỚNG CHẾ ĐỘ THỊ TRƯỜNG (REGIME GATEKEEPER)
         // Thoát sớm O(1) nếu thị trường rơi vào tử địa (Bão Whipsaw hoặc Sàn biến động chết Flatline).
@@ -376,7 +411,8 @@ impl HeliosArbiter {
             let id = scanner.id();
             let opt_prop = scanner.scan(tick, sensors, matrix, config);
             let (conf, passed, rej_status, rej_reason) = if let Some(ref proposal) = opt_prop {
-                let confidence = Self::compute_confidence(proposal.raw_score, chaos_val, max_chaos_penalty);
+                let min_act = Self::get_scanner_min_activation(id, config);
+                let confidence = Self::compute_calibrated_confidence(proposal.raw_score, min_act);
 
                 // 🛑 CHỐT CHẶN PHÂN LUỒNG CHẾ ĐỘ THỊ TRƯỜNG (SELECTIVE PLAYBOOK ROUTING)
                 let (is_eligible, ineligibility_reason) = Self::is_scanner_eligible_for_regime(id, gate_eval.regime);
@@ -799,6 +835,65 @@ mod tests {
         // Kẹp trần 1.0
         let conf_over = HeliosArbiter::compute_confidence(1.20, 0.20, 0.50);
         assert_eq!(conf_over, 1.0);
+    }
+
+    #[test]
+    fn test_calibrated_confidence_dual_pillar_math() {
+        // 1. Kiểm tra an toàn NaN và giá trị <= 0.0
+        assert_eq!(HeliosArbiter::compute_calibrated_confidence(0.0, 0.40), 0.0);
+        assert_eq!(HeliosArbiter::compute_calibrated_confidence(-0.5, 0.40), 0.0);
+        assert_eq!(HeliosArbiter::compute_calibrated_confidence(f64::NAN, 0.40), 0.0);
+        assert_eq!(HeliosArbiter::compute_calibrated_confidence(0.80, f64::NAN), 0.0);
+
+        // 2. Điểm raw_score nằm dưới hoặc bằng ngưỡng sàn min_activation
+        let conf_at_floor = HeliosArbiter::compute_calibrated_confidence(0.50, 0.50);
+        assert!((conf_at_floor - 0.25).abs() < 1e-6);
+
+        let conf_sub_floor = HeliosArbiter::compute_calibrated_confidence(0.60, 0.70);
+        assert!((conf_sub_floor - 0.30).abs() < 1e-6);
+
+        // 3. Absorption (S_min = 0.70) đạt raw = 0.85
+        let conf_abs = HeliosArbiter::compute_calibrated_confidence(0.85, 0.70);
+        assert!((conf_abs - 0.675).abs() < 1e-6);
+
+        // 4. TrendPB (S_min = 0.40) đạt raw = 0.90 (Setup đỉnh cao)
+        let conf_tpb = HeliosArbiter::compute_calibrated_confidence(0.90, 0.40);
+        assert!((conf_tpb - 0.866667).abs() < 1e-4);
+        assert!(conf_tpb > conf_abs, "TrendPB setup đỉnh cao phải thắng thầu Absorption trung bình!");
+    }
+
+    #[test]
+    fn test_fair_auction_excess_quality_prevents_playbook_monopoly() {
+        let margin = 0.05;
+        // Đề xuất 1: Absorption đạt raw = 0.75 (ngưỡng sàn 0.70 -> chớm sàn)
+        let p_abs = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.75,
+            scanner_id: ScannerId::AbsorptionScout,
+            suggested_sl: Some(100.0),
+            suggested_tp: None,
+        };
+        let c_abs = HeliosArbiter::compute_calibrated_confidence(p_abs.raw_score, 0.70);
+
+        // Đề xuất 2: TrendPullback đạt raw = 0.75 (ngưỡng sàn 0.40 -> vượt xa sàn)
+        let p_tpb = Proposal {
+            signal_type: SignalType::Long,
+            raw_score: 0.75,
+            scanner_id: ScannerId::TrendPullback,
+            suggested_sl: Some(98.0),
+            suggested_tp: None,
+        };
+        let c_tpb = HeliosArbiter::compute_calibrated_confidence(p_tpb.raw_score, 0.40);
+
+        // Dưới Dual-Pillar Harmonized Confidence, TrendPB vượt trội (0.6667 so với 0.4583)
+        assert!(c_tpb > c_abs + margin, "TrendPB chất lượng thặng dư cao phải chiến thắng Absorption vừa chớm sàn!");
+
+        let proposals = vec![(p_abs, c_abs), (p_tpb.clone(), c_tpb)];
+        let winner = HeliosArbiter::resolve_conflicts(proposals, margin);
+        assert!(winner.is_some());
+        let (winning_prop, winning_conf) = winner.unwrap();
+        assert_eq!(winning_prop.scanner_id, ScannerId::TrendPullback);
+        assert!((winning_conf - c_tpb).abs() < 1e-6);
     }
 
     #[test]
@@ -1386,7 +1481,8 @@ mod tests {
         assert!(decision.is_approved);
         // 2. Winner PHẢI là MomentumIgnition vì có điểm tự tin Pattern Quality cao hơn (0.88 > 0.75)
         assert_eq!(decision.winning_scanner, Some(ScannerId::MomentumIgnition));
-        assert_eq!(decision.final_confidence, 0.88);
+        let expected_conf = HeliosArbiter::compute_calibrated_confidence(0.88, config.tactical_sniper.momentum.min_activation_score);
+        assert!((decision.final_confidence - expected_conf).abs() < 1e-6);
         assert_eq!(decision.final_sl, Some(1992.0));
         // 3. Sổ cái đấu thầu (Auction Ledger) phải ghi nhận đầy đủ 2 proposals
         assert_eq!(decision.auction_ledger.len(), 2);
@@ -1397,7 +1493,6 @@ mod tests {
         let trend_candidate = decision.auction_ledger.iter().find(|c| c.scanner_id == ScannerId::TrendPullback).unwrap();
         assert_eq!(trend_candidate.status, AuctionStatus::RunnerUp);
         assert!(trend_candidate.reason.contains("Subordinate to winner on same side"));
-        assert!(trend_candidate.reason.contains("0.750 < 0.880"));
     }
 
     #[test]
