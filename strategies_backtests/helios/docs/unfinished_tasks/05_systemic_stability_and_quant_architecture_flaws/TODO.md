@@ -428,9 +428,13 @@
   - **Unit Tests:**
     - [x] `test_momentum_post_trigger_fsm_behavior`
 
-- [ ] **TODO-AUDIT-NEW-49: Triển Khai Bộ Nhớ Sự Kiện Chuỗi Hấp Thụ Đa Nến (Multi-bar Absorption Sequence) (`ABS-SEQUENCE`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `arbiter.rs`
-  - **Mô tả:** Tách bạch tiến trình hấp thụ thành chuỗi 3 nến: Nến $t-1$ quét râu (Sweep), Nến $t$ hấp thụ rút chân (Rejection), và Nến $t+1$ kiểm định cạn cung (No-Supply Test). Chấm dứt việc ép toàn bộ chu trình Wyckoff vào đúng 1 cây nến đơn lẻ.
+- [x] **TODO-AUDIT-NEW-49: Triển Khai Bộ Nhớ Sự Kiện Chuỗi Hấp Thụ Đa Nến (Multi-bar Absorption Sequence) (`ABS-SEQUENCE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Triệt tiêu bẫy đếm nến cảm tính và thay thế bằng Mô hình Động lực học Dòng chảy & Gia tốc Hãm phanh (Kinetic Deceleration & Money Flow Reversal): Bổ sung gia tốc KAMA dừng rơi $a = \Delta v = v_i - v_{i-1} > 0$ (cho Long) và $a < 0$ (cho Short); tích hợp dòng tiền lật chiều thông minh $\Delta MFI = MFI_i - MFI_{i-1} > 0$ kèm ngưỡng lọc nấc cản DNA `mfi_absorption_thresh` ($MFI \le 35.0$ cho Long, $MFI \ge 65.0$ cho Short). Bổ sung 1 gen DNA trực giao vào `TacticalAbsorptionParams`, nâng `DNA_WIDTH` lên 115 chiều. Unit test 7/7 absorption tests pass 100%, toàn bộ 190/190 tests của helios pass 100%.
+  - **Unit Tests:**
+    - [x] `test_absorption_kinetic_and_mfi_flow_long_success`
+    - [x] `test_absorption_veto_when_falling_knife_accelerates`
+    - [x] `test_absorption_veto_when_money_flow_continues_bleeding`
 
 - [ ] **TODO-AUDIT-NEW-50: Khắc Phục Bẫy Vỡ Tường Limit & Nhận Diện Ngưỡng Cản Cấu Trúc Thực Sự (`ABS-STRUCTURAL-WALL`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `sensors.rs`

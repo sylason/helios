@@ -42,6 +42,9 @@ impl TacticalScanner for AbsorptionScanner {
 
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
+        if i < 1 {
+            return None;
+        }
         let abs_cfg = &config.tactical_sniper.absorption;
         
         let raw_vol_z = sensors.vol_z_score.get(i).copied().unwrap_or(0.0);
@@ -106,21 +109,39 @@ impl TacticalScanner for AbsorptionScanner {
             let min_clv = abs_cfg.min_clv.max(0.0);
             let max_bound = if abs_cfg.max_boundary_pct_b <= 0.0 { 0.40 } else { abs_cfg.max_boundary_pct_b.clamp(0.05, 0.50) };
 
+            // 🛡️ TODO-AUDIT-NEW-49 (ABS-SEQUENCE -> QUANT KINETIC & FLOW DYNAMICS):
+            // 1. Gia tốc hãm phanh (Kinetic Deceleration): Vận tốc xu hướng KAMA phải giảm tốc (a > 0 khi Long, a < 0 khi Short)
+            let curr_kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
+            let prev_kama_slope = matrix.kama_slope_atr.get(i - 1).copied().unwrap_or(0.0);
+            let kama_deceleration = curr_kama_slope - prev_kama_slope;
+
+            // 2. Dòng tiền đảo chiều (Money Flow Vector Flip): MFI phải ở vùng kiệt sức và bắt đầu quay đầu
+            let curr_mfi = sensors.mfi.get(i).copied().unwrap_or(50.0);
+            let prev_mfi = sensors.mfi.get(i - 1).copied().unwrap_or(curr_mfi);
+            let mfi_thresh = if abs_cfg.mfi_absorption_thresh <= 0.0 { 35.0 } else { abs_cfg.mfi_absorption_thresh.clamp(10.0, 50.0) };
+
             // - Long (Accumulation Spring / Liquidity Sweep):
             //   + Quét râu: Râu nến (low) nhúng sâu vào vùng đáy tích lũy: pct_b_low <= max_bound
             //   + Lực nến: CLV >= min_clv (rút chân tăng chứng minh cá mập gom hấp thụ)
             //   + Chặn sàn phá vỡ thật: pct_b_close >= -spring_tol (đóng cửa phải giữ vững hoặc sát biên dung sai)
             //   + Chặn trần mua đu đỉnh: pct_b_close <= (max_bound + spring_tol) && close <= bb_middle
+            //   + Động lực học: Dòng tiền MFI kiệt sức và bắt đầu tăng (curr_mfi <= mfi_thresh && curr_mfi > prev_mfi)
+            //   + Cơ học hãm phanh: Gia tốc KAMA dương (kama_deceleration > 0.0)
             // - Short (Distribution Upthrust / Liquidity Sweep):
             //   + Quét râu: Râu nến (high) nhô cao vào vùng đỉnh phân phối: pct_b_high >= (1.0 - max_bound)
             //   + Lực nến: CLV <= -min_clv (đè đầu giảm chứng minh cá mập xả hàng)
             //   + Chặn trần phá vỡ thật: pct_b_close <= (1.0 + spring_tol) (đóng cửa phải giữ vững hoặc sát biên dung sai)
             //   + Chặn sàn bán đu đáy: pct_b_close >= (1.0 - max_bound - spring_tol) && close >= bb_middle
+            //   + Động lực học: Dòng tiền MFI quá tải và bắt đầu giảm (curr_mfi >= 100 - mfi_thresh && curr_mfi < prev_mfi)
+            //   + Cơ học hãm phanh: Gia tốc KAMA âm (kama_deceleration < 0.0)
             let signal_type = if pct_b_low <= max_bound 
                 && clv >= min_clv 
                 && pct_b_close >= -spring_tol 
                 && pct_b_close <= (max_bound + spring_tol) 
                 && close <= bb_middle 
+                && curr_mfi <= mfi_thresh 
+                && curr_mfi > prev_mfi 
+                && kama_deceleration > 0.0
             {
                 SignalType::Long
             } else if pct_b_high >= (1.0 - max_bound) 
@@ -128,6 +149,9 @@ impl TacticalScanner for AbsorptionScanner {
                 && pct_b_close <= (1.0 + spring_tol) 
                 && pct_b_close >= (1.0 - max_bound - spring_tol) 
                 && close >= bb_middle 
+                && curr_mfi >= (100.0 - mfi_thresh) 
+                && curr_mfi < prev_mfi 
+                && kama_deceleration < 0.0
             {
                 SignalType::Short
             } else {
@@ -323,7 +347,12 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]); // ATR = 10, candle_range = 8 -> norm_spread = 0.8
         matrix.squeeze_intensity = std::sync::Arc::new(vec![0.60; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
+        let mut slope = vec![-0.05; len];
+        slope[i] = -0.02; // kama_deceleration = -0.02 - (-0.05) = +0.03 > 0.0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope);
+        let mut mfi = vec![28.0; len];
+        mfi[i] = 30.0; // curr_mfi <= 35.0 && curr_mfi > prev_mfi
+        sensors.mfi = std::sync::Arc::new(mfi);
 
         let scanner = AbsorptionScanner;
         let proposal = scanner.scan(&tick, &sensors, &matrix, &config);
@@ -391,7 +420,12 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2001.5; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![1.0; len]);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![0.80; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
+        let mut slope_frict = vec![-0.05; len];
+        slope_frict[i] = -0.02; // kama_deceleration = +0.03 > 0.0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_frict);
+        let mut mfi_frict = vec![28.0; len];
+        mfi_frict[i] = 30.0; // curr_mfi <= 35.0 && curr_mfi > prev_mfi
+        sensors.mfi = std::sync::Arc::new(mfi_frict);
 
         let scanner = AbsorptionScanner;
 
@@ -464,5 +498,216 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![0.0000001; len]);
         let proposal_meme = scanner.scan(&tick_meme, &sensors, &matrix, &config);
         assert!(proposal_meme.is_none(), "Khi dải BB phẳng lì width = 0.0 trên coin mệnh giá siêu nhỏ, scanner phải từ chối an toàn!");
+    }
+
+    #[test]
+    fn test_absorption_kinetic_and_mfi_flow_long_success() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 20;
+        let i = len - 1;
+        let mut lows = vec![1999.0; len];
+        let mut closes = vec![1999.0; len];
+        let mut highs = vec![1999.5; len];
+        // Nến Spring rút chân: low 1992 (%B_low = 2/20 = 0.10 <= 0.40), close 1995, high 1996 (CLV = +0.50 >= 0.20)
+        lows[i] = 1992.0;
+        closes[i] = 1995.0;
+        highs[i] = 1996.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1993.0; len]),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.absorption.mfi_absorption_thresh = 35.0;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+
+        // MFI kiệt sức ở 30 và quay đầu tăng lên 32
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i - 1] = 30.0;
+        mfi_vec[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        // KAMA dốc xuống nhưng giảm tốc (phanh hãm dương): -0.08 -> -0.04 (a = +0.04 > 0)
+        let mut slope_vec = vec![-0.08; len];
+        slope_vec[i - 1] = -0.08;
+        slope_vec[i] = -0.04;
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
+
+        let scanner = AbsorptionScanner;
+        let proposal = scanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(proposal.is_some(), "Khi có hãm phanh dương (Delta v > 0) và MFI đảo chiều tăng từ vùng quá bán, scanner PHẢI phê duyệt Long!");
+        let p = proposal.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+        assert!(p.suggested_sl.is_some());
+    }
+
+    #[test]
+    fn test_absorption_veto_when_falling_knife_accelerates() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 20;
+        let i = len - 1;
+        let mut lows = vec![1999.0; len];
+        let mut closes = vec![1999.0; len];
+        let mut highs = vec![1999.5; len];
+        lows[i] = 1992.0;
+        closes[i] = 1995.0;
+        highs[i] = 1996.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1993.0; len]),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i - 1] = 30.0;
+        mfi_vec[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        // KAMA đang rơi tự do tăng tốc (dao rơi gia tốc âm): -0.04 -> -0.12 (a = -0.08 <= 0)
+        let mut slope_vec = vec![-0.04; len];
+        slope_vec[i - 1] = -0.04;
+        slope_vec[i] = -0.12;
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
+
+        let scanner = AbsorptionScanner;
+        let proposal = scanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(proposal.is_none(), "Khi gia tốc rơi tiếp tục âm (dao rơi tăng tốc), scanner PHẢI VETO từ chối Long!");
+    }
+
+    #[test]
+    fn test_absorption_veto_when_money_flow_continues_bleeding() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 20;
+        let i = len - 1;
+        let mut lows = vec![1999.0; len];
+        let mut closes = vec![1999.0; len];
+        let mut highs = vec![1999.5; len];
+        lows[i] = 1992.0;
+        closes[i] = 1995.0;
+        highs[i] = 1996.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1993.0; len]),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
+        sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.bb_upper = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+
+        // MFI vẫn đang tiếp tục sụt giảm (dòng tiền tiếp tục chảy máu): 30 -> 26 (Delta MFI <= 0)
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i - 1] = 30.0;
+        mfi_vec[i] = 26.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        let mut slope_vec = vec![-0.08; len];
+        slope_vec[i - 1] = -0.08;
+        slope_vec[i] = -0.04;
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
+
+        let scanner = AbsorptionScanner;
+        let proposal = scanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(proposal.is_none(), "Khi MFI tiếp tục sụt giảm (dòng tiền chưa lật chiều), scanner PHẢI VETO từ chối Long!");
     }
 }

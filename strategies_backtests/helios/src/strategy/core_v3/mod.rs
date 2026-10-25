@@ -1757,7 +1757,19 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 114, "DNA_WIDTH phải là 114 chiều sau khi thêm 2 gen tiêu tán động năng của Circuit Breaker (TODO-AUDIT-NEW-164)!");
+        assert_eq!(width, 115, "DNA_WIDTH phải là 115 chiều sau khi thêm gen mfi_absorption_thresh cho Absorption (TODO-AUDIT-NEW-49)!");
+
+        let abs_mfi_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.absorption.mfi_absorption_thresh"));
+        assert!(abs_mfi_def.is_some(), "defs phải chứa tactical_sniper.absorption.mfi_absorption_thresh!");
+        let (_, abs_mfi_attr) = abs_mfi_def.unwrap();
+        match abs_mfi_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert!((min - 10.0).abs() < 1e-12, "mfi_absorption_thresh min phải là 10.0");
+                assert!((max - 50.0).abs() < 1e-12, "mfi_absorption_thresh max phải là 50.0");
+                assert_eq!(*step, Some(5.0), "mfi_absorption_thresh step phải là Some(5.0)");
+            }
+            _ => panic!("mfi_absorption_thresh phải là ParamDefinition::Range"),
+        }
 
         let diss_span_def = defs.iter().find(|(name, _)| name.contains("circuit_breaker.dissipation_span_threshold"));
         assert!(diss_span_def.is_some(), "defs phải chứa circuit_breaker.dissipation_span_threshold!");
@@ -2058,6 +2070,9 @@ mod tests {
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]); // Z-score volume bùng nổ dương
+        let mut mfi_abs = vec![30.0; len];
+        mfi_abs[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_abs);
         
         let raw_cache_abs = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
@@ -2082,7 +2097,9 @@ mod tests {
         };
         let mut matrix_abs = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix_abs.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix_abs.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+        let mut slope_abs = vec![-0.05; len];
+        slope_abs[i] = 0.02; // a = +0.07 > 0
+        matrix_abs.kama_slope_atr = std::sync::Arc::new(slope_abs);
         let abs_prop = AbsorptionScanner.scan(&tick_abs, &sensors, &matrix_abs, &config);
         assert!(abs_prop.is_some(), "AbsorptionScanner phải sinh Proposal Long khi tích lũy rút chân ở nửa dưới BB!");
         let abs_p = abs_prop.unwrap();
@@ -2263,10 +2280,15 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+        let mut slope_vec = vec![-0.05; len];
+        slope_vec[i] = 0.02; // a = +0.07 > 0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "AbsorptionScanner PHẢI sinh Proposal Long khi thị trường tích lũy chuẩn trong vùng phẳng!");
@@ -2335,10 +2357,15 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+        let mut slope_vec = vec![-0.05; len];
+        slope_vec[i] = 0.02; // a = +0.07 > 0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "AbsorptionScanner PHẢI phê duyệt nến Spring khi râu quét sâu và rút chân mạnh, bất chấp VWMA!");
@@ -2396,10 +2423,15 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+        let mut slope_vec = vec![-0.05; len];
+        slope_vec[i] = 0.02; // a = +0.07 > 0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG khi giá đóng cửa vượt quá BB Middle (chống mua đu đỉnh)!");
@@ -2455,10 +2487,15 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+        let mut slope_vec = vec![-0.05; len];
+        slope_vec[i] = 0.02; // a = +0.07 > 0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG nến đỏ Marubozu xả đặc ruột (chống bắt dao rơi)!");
@@ -2522,10 +2559,15 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        let mut mfi_vec = vec![70.0; len];
+        mfi_vec[i] = 68.0; // curr_mfi >= 65.0 && curr_mfi < prev_mfi (70 -> 68)
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.02; len]);
+        let mut slope_vec = vec![0.05; len];
+        slope_vec[i] = -0.02; // kama_deceleration = -0.02 - 0.05 = -0.07 < 0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "AbsorptionScanner PHẢI phê duyệt Short Upthrust đối xứng!");
@@ -2592,10 +2634,15 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        let mut mfi_vec = vec![30.0; len];
+        mfi_vec[i] = 32.0;
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.02; len]);
+        let mut slope_vec = vec![-0.05; len];
+        slope_vec[i] = 0.02; // a = +0.07 > 0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG khi nến đóng sâu dưới sàn hỗ trợ (True Breakdown pct_b_close < -spring_tol)!");
@@ -2659,10 +2706,15 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
+        let mut mfi_vec = vec![70.0; len];
+        mfi_vec[i] = 68.0; // curr_mfi >= 65.0 && curr_mfi < prev_mfi (70 -> 68)
+        sensors.mfi = std::sync::Arc::new(mfi_vec);
 
         let mut matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         matrix.squeeze_intensity = std::sync::Arc::new(vec![1.2; len]);
-        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.02; len]);
+        let mut slope_vec = vec![0.05; len];
+        slope_vec[i] = -0.02; // kama_deceleration = -0.02 - 0.05 = -0.07 < 0
+        matrix.kama_slope_atr = std::sync::Arc::new(slope_vec);
 
         let prop = AbsorptionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "AbsorptionScanner PHẢI CHẶN ĐỨNG khi nến bứt phá đóng vượt trần kháng cự (Runaway Breakout pct_b_close > 1.0 + spring_tol)!");

@@ -1073,6 +1073,11 @@ pub struct TacticalAbsorptionParams {
     #[dna(min = 0.20, max = 0.80, step = 0.10)]
     #[serde(default = "default_absorption_squeeze_weight")]
     pub squeeze_weight: f64,
+
+    /// 🌊 Ngưỡng dòng tiền kiệt sức MFI (10.0 -> 50.0, Step 5.0 -> 9 nấc)
+    #[dna(min = 10.0, max = 50.0, step = 5.0)]
+    #[serde(default = "default_absorption_mfi_thresh")]
+    pub mfi_absorption_thresh: f64,
 }
 
 impl Default for TacticalAbsorptionParams {
@@ -1088,6 +1093,7 @@ impl Default for TacticalAbsorptionParams {
             min_clv: default_absorption_min_clv(),
             max_boundary_pct_b: default_absorption_max_boundary_pct_b(),
             squeeze_weight: default_absorption_squeeze_weight(),
+            mfi_absorption_thresh: default_absorption_mfi_thresh(),
         }
     }
 }
@@ -1494,6 +1500,10 @@ fn default_absorption_max_boundary_pct_b() -> f64 {
 
 fn default_absorption_squeeze_weight() -> f64 {
     0.50
+}
+
+fn default_absorption_mfi_thresh() -> f64 {
+    35.0
 }
 
 fn default_range_max_bb_slope() -> f64 {
