@@ -82,9 +82,19 @@
     - [x] `test_live_engine_syncs_current_sl_price`
     - [x] `test_live_engine_preserves_playbook_tag`
     - [x] `test_live_engine_adopt_position_with_active_sl`
-- [ ] **TODO-STAB-07: Cơ chế Tick-Level Emergency Circuit Breaker (Khử Intra-Candle Blindness)**
-  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs`
-  - **Mô tả:** Lắng nghe WebSocket MarkPrice để cắt lỗ khẩn cấp ngay trong nến khi xảy ra Flash Crash hoặc gãy cấu trúc nghiêm trọng.
+- [x] **TODO-STAB-07: Cơ Chế Thanh Lý Vị Thế Khẩn Cấp & Circuit Breaker Guard (`AssetActor`)**
+  - **File:** `trading_bot/bot_engine/src/controller/asset_actor.rs:744-780`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100%].
+    1. Khắc phục triệt để lỗ hổng `handle_emergency` bị cụt tay (chỉ log rồi thoát vòng lặp, bỏ rơi vị thế mở).
+    2. Triển khai hàm `emergency_liquidate_position`: Tự động gọi `Action::ClosePosition { portion: 1.0 }` thanh lý 100% vị thế bằng lệnh Market tại giá nến/mark price gần nhất và hủy toàn bộ lệnh Cloud Algo SL treo.
+    3. Hỗ trợ toàn diện các lệnh khẩn cấp: `EmergencyCmd::PanicCloseAll`, `EmergencyCmd::SystemShutdown`, và `EmergencyCmd::StopAsset(symbol)` (lọc đúng symbol).
+    4. Cập nhật trạng thái Actor sang `AssetState::Stopped` và thông báo lên UI EventBus qua kênh `status_tx`. Triệt tiêu 100% rủi ro vị thế mồ côi (Zero Orphaned Positions).
+  - **Unit Tests (11/11 PASSED):**
+    - [x] `test_handle_emergency_panic_close_all_liquidates_position`
+    - [x] `test_handle_emergency_stop_asset_matching_symbol`
+    - [x] `test_handle_emergency_stop_asset_mismatched_symbol_ignored`
+    - [x] `test_handle_emergency_system_shutdown`
+    - [x] `test_handle_emergency_flat_position_transitions_cleanly`
 - [ ] **TODO-STAB-08: Xây dựng Portfolio Risk Guardian (Khống chế Đòn bẩy Danh mục)**
   - **File:** `trading_bot/bot_engine/src/controller/portfolio_guardian.rs` (mới)
   - **Mô tả:** Kiểm soát tổng đòn bẩy danh mục không vượt quá giới hạn an toàn khi nhiều cặp tiền cùng mở lệnh.

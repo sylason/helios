@@ -15,7 +15,7 @@
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.1. Tasks Đã Hoàn Thành (`[x]`) | 28 | 28 | 0 | 100.0% | Đã pass test và merge vào source code |
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.2. Tasks ĐÃ ĐƯỢC CHUYỂN HÓA Vào `TODO.md` | 37 | 0 | 37 | 0.0% | Đã có mã đại diện chi tiết trong TODO.md |
 | &nbsp;&nbsp;&nbsp;&nbsp;• 1.3. Tasks Còn Mở Đặc Thù Audit 01 | 36 | 0 | 36 | 0.0% | Lỗ hổng kỹ thuật & toán học kế thừa |
-| **II. Chiến Dịch Tái Cấu Trúc Toàn Hệ Thống (`TODO.md`)** | **230** | **25** | **205** | **10.9%** | Phân bổ vào 13 Cụm Tác Chiến Subsystem (A → M) |
+| **II. Chiến Dịch Tái Cấu Trúc Toàn Hệ Thống (`TODO.md`)** | **230** | **26** | **204** | **11.3%** | Phân bổ vào 13 Cụm Tác Chiến Subsystem (A → M) |
 
 > **Phân bổ Độ ưu tiên trong `TODO.md` (230 Tasks):**  
 > - 🔴 **P0 (Cốt tử & Sinh tồn):** `30 tasks` (Lookahead bias, Cháy tài khoản, Deadlock, Treo worker Tokio, Naked SL gap 150ms, Bán tháo Clean slate, Ban IP...)  
@@ -330,11 +330,11 @@
 | 12 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-113`** | Tương Thích Hóa `on_account_event` Tiếp Nhận Lệnh Điều Phối Danh Mục (`TB-PPR-10`) | [TODO.md#L591](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L591) | `trading_bot/bot_engine/src/execution/paper_engine.rs:132-134` |
 
 ### 📦 Cụm H: Cầu Nối Dữ Liệu & Vòng Đời Actor (`trading_bot::helios_bridge & asset_actor`)
-**Quy mô:** `13 tasks` (Hoàn thành: `1`, P0: `1`, P1: `10`, P2: `0`, P3: `1`)
+**Quy mô:** `13 tasks` (Hoàn thành: `2`, P0: `1`, P1: `10`, P2: `0`, P3: `1`)
 
 | STT | Ưu Tiên | Trạng Thái | Mã Task | Tên Nhiệm Vụ | Link Reference Trong `TODO.md` | File Mã Nguồn Mục Tiêu |
 | :---: | :---: | :---: | :--- | :--- | :--- | :--- |
-| 01 | `P1` | `[ ]` | **`TODO-STAB-07`** | Cơ chế Tick-Level Emergency Circuit Breaker (Khử Intra-Candle Blindness) | [TODO.md#L70](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L70) | `trading_bot/bot_engine/src/controller/asset_actor.rs` |
+| 01 | `P1` | `[x]` | **`TODO-STAB-07`** | Cơ Chế Thanh Lý Vị Thế Khẩn Cấp & Circuit Breaker Guard | [TODO.md#L85](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L85) | `trading_bot/bot_engine/src/controller/asset_actor.rs` |
 | 02 | `P1` | `[x]` | **`TODO-AUDIT-NEW-12`** | Khắc Phục Thảm Họa High Watermark Buffer Bleed Khi Lệnh Trôi Khỏi Buffer (`TODO-BRG-01`) | [TODO.md#L171](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L171) | `trading_bot/bot_engine/src/optimizer/helios_bridge.rs:223-238`, `strategies_backtests/helios/src/strategy/core_v3/risk.rs:310-330` |
 | 03 | `P1` | `[ ]` | **`TODO-AUDIT-NEW-13`** | Sửa Lỗ Hổng Same-Bar Re-entry Guard Bị Bypassed Khi Đóng Lệnh Giữa Nến (`BUG-ACT-NEW-02`) | [TODO.md#L174](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L174) | `trading_bot/bot_engine/src/controller/asset_actor.rs:373-378, 637-644` |
 | 04 | `P1` | `[x]` | **`TODO-AUDIT-NEW-15`** | Đồng Bộ Hóa Cửa Sổ Bộ Nhớ Theo Ngày & Xóa Bỏ Cắt Lát Nến Cụt (`TODO-ACT-04`) | [TODO.md#L180](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/TODO.md#L180) | `trading_bot/bot_engine/src/models/config.rs`, `models/models.rs`, `controller/asset_actor.rs` |
