@@ -788,6 +788,14 @@ pub struct TacticalMomentumParams {
     #[dna(min = 0.20, max = 0.60, step = 0.05)]
     #[serde(default = "default_momentum_w_volume")]
     pub w_volume: f64,
+
+    /// ⏳ [TODO-AUDIT-NEW-47] Thời gian sống tối đa của xung lực Momentum Ignition trước khi kích hoạt Stagnation Exit (Mặc định: 4 nến)
+    #[serde(default = "default_momentum_stagnation_bars", deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub stagnation_exit_bars: usize,
+
+    /// 🎯 [TODO-AUDIT-NEW-47] Ngưỡng ROE tối đa để kích hoạt Stagnation Exit khi bứt phá xịt (Mặc định: +2.0% ROE)
+    #[serde(default = "default_momentum_stagnation_max_roe")]
+    pub stagnation_max_roe: f64,
 }
 
 impl Default for TacticalMomentumParams {
@@ -802,6 +810,8 @@ impl Default for TacticalMomentumParams {
             max_adverse_slope: default_momentum_max_adverse_slope(),
             w_breakout: default_momentum_w_breakout(),
             w_volume: default_momentum_w_volume(),
+            stagnation_exit_bars: default_momentum_stagnation_bars(),
+            stagnation_max_roe: default_momentum_stagnation_max_roe(),
         }
     }
 }
@@ -1448,6 +1458,14 @@ fn default_momentum_w_breakout() -> f64 {
 
 fn default_momentum_w_volume() -> f64 {
     0.30
+}
+
+fn default_momentum_stagnation_bars() -> usize {
+    4
+}
+
+fn default_momentum_stagnation_max_roe() -> f64 {
+    0.02
 }
 
 fn default_range_sl_buffer_atr() -> f64 {

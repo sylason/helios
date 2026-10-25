@@ -403,9 +403,13 @@
   - **Trạng thái:** `[-] (OBSOLETE / REDUNDANT)`
   - **Mô tả:** [ĐÃ ĐÓNG / BỎ QUA - TRÁNH BẪY OVER-ENGINEERING]: Sau khi kiểm định toàn diện 11 tài liệu Bản thể học Hành vi Thị trường (Notes 31-46), xác nhận hệ thống không cần thêm 3 mảng đạo hàm toàn cục vào `MarketMatrixV3`. Mọi hành vi động lực học đã được giải quyết trọn vẹn: Vĩ mô đã có `matrix.kama_slope_atr`, `matrix.bb_middle_slope_adj` (với bước nhảy `k_bars` chống forward-fill) và `matrix.squeeze_intensity`; Vi mô đã được giải quyết trực diện $O(1)$ tại từng Scanner (nến giao cắt đầu tiên `close[i] > bb_u[i] && close[i-1] <= bb_u[i-1]` trong `NEW-44`, `delta_kama` trong `NEW-38`, và `CLV` trong `NEW-34, 51`). Bảo toàn nguyên vẹn kiến trúc 6 trục trực giao tinh gọn của `MarketMatrixV3`.
 
-- [ ] **TODO-AUDIT-NEW-47: Triển Khai Cơ Chế Thoát Lệnh Khi Bứt Phá Xịt (Impulse Stagnation Exit & Decaying TTL) Trong Risk Manager (`MOM-STAGNATION-EXIT`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `mod.rs`
-  - **Mô tả:** Nếu sau $N \le 4$ nến kể từ khi kích hoạt Momentum Ignition mà giá không tiếp tục tạo đỉnh cao hơn (Higher High), tự động kích hoạt Stagnation Exit để cắt lỗ vi mô ($1\% \sim 2\%$ ROE) thay vì thả trôi cho dính full Stop Loss cấu trúc.
+- [x] **TODO-AUDIT-NEW-47: Triển Khai Cơ Chế Thoát Lệnh Khi Bứt Phá Xịt (Impulse Stagnation Exit & Decaying TTL) Trong Risk Manager (`MOM-STAGNATION-EXIT`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `config.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Triển khai cơ chế Impulse Stagnation Exit trong `RiskManager::manage_trailing_stop`: Sau `bars_held >= stagnation_exit_bars` (mặc định 4 nến) kể từ khi kích hoạt Momentum Ignition, nếu giá dậm chân tại chỗ không tạo thêm đỉnh mới (`effective_stagnant_bars >= stagnation_exit_bars`) và vị thế chưa đạt ngưỡng lãi an toàn (`current_roe < stagnation_max_roe`, mặc định +2.0% ROE), tự động kích hoạt `tick.close(None)` để cắt lỗ vi mô (~1% ROE) thay vì thả trôi dính full Stop Loss cấu trúc.
+  - **Ghi chú kiến trúc:** 2 tham số `stagnation_exit_bars` và `stagnation_max_roe` được cấu hình bằng `#[serde(default)]` trong `TacticalMomentumParams` thay vì DNA để bảo toàn 100% `DNA_WIDTH = 112`. Trong tương lai có thể quay lại đưa vào DNA nếu kết quả kiểm tra OOS thực nghiệm yêu cầu tối ưu hóa động.
+  - **Unit Tests:**
+    - [x] `test_momentum_impulse_stagnation_exit_behavior` (Kiểm chứng 3 kịch bản: bứt phá xịt bị cắt lỗ vi mô sau 4 nến, bùng nổ có lãi tiếp diễn được giữ lệnh, các playbook khác không bị đóng sớm).
+    - [x] Toàn bộ 175/175 tests của `helios` pass 100%, bảo toàn nguyên vẹn `DNA_WIDTH = 112`.
 
 - [x] **TODO-AUDIT-NEW-48: Thiết Lập Máy Trạng Thái Giám Sát Sau Kích Hỏa (Post-Trigger State Machine) (`POST-TRIGGER-FSM`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs`, `mod.rs`, `risk.rs`

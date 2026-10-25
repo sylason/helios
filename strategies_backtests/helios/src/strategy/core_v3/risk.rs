@@ -561,6 +561,31 @@ impl RiskManager {
             // Giúp thả diều tối đa lợi nhuận siêu sóng và chỉ chốt lời khi giá tạo đỉnh quay đầu (Callback).
             let tag_str = trade.tag.as_deref().unwrap_or("");
 
+            // =========================================================================
+            // ⚡ [TODO-AUDIT-NEW-47: IMPULSE STAGNATION EXIT FOR MOMENTUM IGNITION]
+            // =========================================================================
+            // Năng lượng xung lực Momentum Ignition suy hao cực nhanh theo hàm số mũ.
+            // Nếu sau N nến (mặc định 4 nến) mà giá dậm chân tại chỗ không tạo thêm đỉnh mới
+            // (effective_stagnant_bars >= stag_bars) và vị thế chưa đạt ngưỡng lãi vững chắc
+            // (current_roe < stag_max_roe, mặc định +2.0% ROE), cú bứt phá coi như đã xịt (Fakeout Trap).
+            // Lập tức cắt lỗ vi mô để bảo toàn 99% vốn, không thả trôi về dính full Stop Loss!
+            if tag_str == "MOMENTUM_IGN" {
+                let mom_cfg = &config.tactical_sniper.momentum;
+                let stag_bars = if mom_cfg.stagnation_exit_bars > 0 { mom_cfg.stagnation_exit_bars } else { 4 };
+                let stag_max_roe = if mom_cfg.stagnation_max_roe > 0.0 { mom_cfg.stagnation_max_roe } else { 0.02 };
+
+                if bars_held >= stag_bars && effective_stagnant_bars >= stag_bars && current_roe < stag_max_roe {
+                    if _debug_mode {
+                        tracing::info!(
+                            "⚡ [IMPULSE STAGNATION EXIT] Bar: {} | Trade #{:?} ({}) | Held: {} >= {} bars | Stagnant: {} bars | ROE: {:+.2}% < {:+.2}% -> Closed failed momentum breakout",
+                            i, trade.id, tag_str, bars_held, stag_bars, effective_stagnant_bars, current_roe * 100.0, stag_max_roe * 100.0
+                        );
+                    }
+                    tick.close(None);
+                    continue;
+                }
+            }
+
             // [ENHANCEMENT 1: REGIME-AWARE DYNAMIC BREAK-EVEN PARAMETERS & DUAL-CRITERION TRIGGER]
             // 1. Phân tầng ngưỡng kích hoạt và khoảng đệm bảo vệ vốn theo 3 nhóm Regime Simplex (Trend, Absorption, Range, Volatile)
             let (be_trigger_mult, _be_buffer_mult) = match tag_str {
@@ -2217,5 +2242,138 @@ mod tests {
         RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_3, &sensors, false);
         let has_close_action = actions_3.iter().any(|a| matches!(a, Action::ClosePosition { .. } | Action::CloseLongs { .. }));
         assert!(!has_close_action, "Kịch bản 3: TREND_PB TUYỆT ĐỐI KHÔNG bị Fade Exit đóng lệnh ở nến t+1!");
+    }
+
+    #[test]
+    fn test_momentum_impulse_stagnation_exit_behavior() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use ferro_trade::broker::trade::Trade;
+        use ferro_trade::broker::actions::Action;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 30;
+        let entry_bar = 10;
+        let i = entry_bar + 4; // bars_held = 4
+
+        let opens = vec![2000.0; len];
+        let mut highs = vec![2020.0; len];
+        let mut lows = vec![1990.0; len];
+        let mut closes = vec![2015.0; len]; // entry_price = 2018.0
+
+        // KỊCH BẢN 1: Bứt phá xịt đi ngang 4 nến (bars_held = 4, effective_stagnant_bars = 4, ROE < +2.0%)
+        // Kể từ nến entry (10), các nến 11, 12, 13, 14 đi ngang, giá đóng cửa 2017.0 (lỗ nhẹ), đỉnh không vượt 2020.0
+        for bar in entry_bar..=i {
+            highs[bar] = 2020.0;
+            lows[bar] = 2010.0;
+            closes[bar] = 2017.0;
+        }
+
+        let raw_cache_1 = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens.clone()),
+            high: std::sync::Arc::new(highs.clone()),
+            low: std::sync::Arc::new(lows.clone()),
+            close: std::sync::Arc::new(closes.clone()),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_1 = DataView::new(raw_cache_1);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions_1 = SmallVec::new();
+        let mut trade_1 = Trade::new(1, 1.0, 2018.0, entry_bar, None, Some("MOMENTUM_IGN".to_string()));
+        trade_1.sl_price = Some(1980.0);
+        trade_1.highest_favorable_price = 2020.0; // Đỉnh tại nến entry
+        trade_1.peak_bar = entry_bar;
+        let trades_1 = vec![trade_1];
+
+        let mut tick_1 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_1,
+            indicator_manager: &indicator_manager,
+            trades: &trades_1,
+            last_closed_trade: None,
+            actions: &mut actions_1,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.risk_management.risk_base.leverage = 20.0;
+        config.tactical_sniper.momentum.stagnation_exit_bars = 4;
+        config.tactical_sniper.momentum.stagnation_max_roe = 0.02;
+
+        let matrix = MarketMatrixV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_1, &sensors, false);
+        assert!(!actions_1.is_empty(), "Kịch bản 1: Bứt phá xịt sau 4 nến PHẢI kích hoạt Stagnation Exit đóng lệnh!");
+        match &actions_1[0] {
+            Action::ClosePosition { .. } | Action::CloseLongs { .. } => {},
+            other => panic!("Kỳ vọng Action::ClosePosition hoặc CloseLongs, thực tế: {:?}", other),
+        }
+
+        // KỊCH BẢN 2: Bùng nổ tiếp diễn có lãi (current_roe >= +2.0%)
+        // Giá đóng cửa 2025.0 tại đòn bẩy 20x -> ROE = (2025 - 2018)/2018 * 20 = +6.9% >= +2.0% -> KHÔNG ĐƯỢC ĐÓNG LỆNH!
+        closes[i] = 2025.0;
+        highs[i] = 2028.0;
+        let raw_cache_2 = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens.clone()),
+            high: std::sync::Arc::new(highs.clone()),
+            low: std::sync::Arc::new(lows.clone()),
+            close: std::sync::Arc::new(closes.clone()),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_2 = DataView::new(raw_cache_2);
+        let mut actions_2 = SmallVec::new();
+        let mut trade_2 = Trade::new(2, 1.0, 2018.0, entry_bar, None, Some("MOMENTUM_IGN".to_string()));
+        trade_2.sl_price = Some(1980.0);
+        trade_2.highest_favorable_price = 2028.0;
+        trade_2.peak_bar = i;
+        let trades_2 = vec![trade_2];
+
+        let mut tick_2 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_2,
+            indicator_manager: &indicator_manager,
+            trades: &trades_2,
+            last_closed_trade: None,
+            actions: &mut actions_2,
+            position: Position::default(),
+        };
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_2, &sensors, false);
+        let has_close_2 = actions_2.iter().any(|a| matches!(a, Action::ClosePosition { .. } | Action::CloseLongs { .. }));
+        assert!(!has_close_2, "Kịch bản 2: Bùng nổ có lãi vững chắc TUYỆT ĐỐI KHÔNG ĐƯỢC cắt lỗ Stagnation!");
+
+        // KỊCH BẢN 3: Lệnh của Playbook khác (TREND_PB) ở nến thứ 4 dậm chân tại chỗ
+        // Phải được hưởng không gian thở 180 nến, TUYỆT ĐỐI KHÔNG BỊ ĐÓNG SỚM!
+        let mut actions_3 = SmallVec::new();
+        let mut trade_3 = Trade::new(3, 1.0, 2018.0, entry_bar, None, Some("TREND_PB".to_string()));
+        trade_3.sl_price = Some(1980.0);
+        trade_3.highest_favorable_price = 2020.0;
+        trade_3.peak_bar = entry_bar;
+        let trades_3 = vec![trade_3];
+
+        let mut tick_3 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view_1, // Dùng lại data nến đi ngang của Kịch bản 1
+            indicator_manager: &indicator_manager,
+            trades: &trades_3,
+            last_closed_trade: None,
+            actions: &mut actions_3,
+            position: Position::default(),
+        };
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_3, &sensors, false);
+        let has_close_3 = actions_3.iter().any(|a| matches!(a, Action::ClosePosition { .. } | Action::CloseLongs { .. }));
+        assert!(!has_close_3, "Kịch bản 3: TREND_PB TUYỆT ĐỐI KHÔNG bị Stagnation Exit đóng lệnh ở nến thứ 4!");
     }
 }
