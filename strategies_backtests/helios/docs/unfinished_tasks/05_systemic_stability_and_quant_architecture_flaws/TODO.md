@@ -466,9 +466,15 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:181-200`
   - **Mô tả:** Chuyển phép tính `bb_middle_slope_adj` sang sử dụng ATR cùng khung thời gian MTF của dải Bollinger (15m/1h) thay vì dùng 1m ATR tạo bậc thang giả.
 
-- [ ] **TODO-AUDIT-NEW-57: Dọn Dẹp Biến Ma & Khử Lỗi Silent Abort Trong `mod.rs` (`H-MOD-06`, `H-MOD-07`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:59, 87-94, 226, 232`
-  - **Mô tả:** Xóa biến `prev_open_trade` ghi không đọc; chuyển `println!` silent abort khi period = 0 thành `panic!` hoặc gán fallback an toàn tránh bot chạy 0 lệnh trong im lặng.
+- [x] **TODO-AUDIT-NEW-57: Dọn Dẹp Biến Ma & Khử Lỗi Silent Abort Trong `mod.rs` (`H-MOD-06`, `H-MOD-07`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:37, 61, 99-115, 245-255`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100%].
+    1. **Khử biến ma (`FLAW-MOD-06`):** Xóa bỏ hoàn toàn trường `pub prev_open_trade: Option<Trade>` khỏi `HeliosStrategyV3`, xóa bỏ thao tác `trade.clone()` vô ích trên từng nến tick khi giữ vị thế mở, và tinh giản khối lệnh độc quyền `Strict Exclusive Order` thành `if is_pos_open { return; }`. Củng cố chuẩn xác nguyên tắc `ARCH-COOLDOWN-SEPARATION` (Cooldown thuộc quyền sở hữu độc quyền của `AssetActor`).
+    2. **Khử Silent Abort & Mở rộng Fail-Fast (`FLAW-MOD-07`):** Thay thế `println!` + `return;` âm thầm trong `init()` bằng Fail-Fast `tracing::error!` + `panic!` ngay lập tức khi phát hiện bất kỳ chu kỳ chỉ báo cốt tử nào $= 0$. Mở rộng kiểm tra ra toàn bộ 17 trường chu kỳ/lookback thực tế được đăng ký với `InitContext` (`natr`, `micro_natr`, `mfi`, `kama` short/long, `adx`, `bbands`, `atr`, `vol_ma`, `vwma`, `price_z_score`, `vol_z_score`, `rsi_trend`, `rsi_reversal`, `rsi_momentum`, `stoch_trend` period/k/d), triệt tiêu hoàn toàn "Hội chứng 0 Trades Phantom".
+  - **Unit Tests:**
+    - [x] `test_mod_init_panics_on_zero_indicator_period` (`#[should_panic]` xác minh hệ thống ngắt ngay lập tức với thông điệp lỗi rõ ràng khi chu kỳ chỉ báo $= 0$).
+    - [x] `test_mod_clean_exclusive_order_without_prev_open_trade` (xác minh `next()` trả về ngay khi có vị thế mở, không phát sinh lệnh Buy/Sell mới mà không cần biến ma lưu trữ).
+    - [x] Toàn bộ 182/182 tests của `helios` pass 100%, bảo toàn nguyên vẹn `DNA_WIDTH = 112`.
 
 - [ ] **TODO-AUDIT-NEW-58: Sửa Lỗi Toán Học Discrete Binning Lệch Xác Suất Trong `derive_dna_mappable` (`H-CFG-03`)**
   - **File:** `ferro_trade/ferro_trade_derive/src/lib.rs:172, 181, 187`
@@ -729,9 +735,9 @@
 ## 🏛️ PHẦN 19: KIỂM TOÁN HẠ TẦNG CỔNG VÀO GATEKEEPER & QUẢN TRỊ RỦI RO CHIẾN THUẬT (`gatekeeper.rs` & `risk.rs`)
 > *Nguồn tài liệu:* [`54_risk_and_gatekeeper_architectural_flaws.md`](notes/54_risk_and_gatekeeper_architectural_flaws.md)
 
-- [ ] **TODO-AUDIT-NEW-114: Nâng Cấp Phân Luồng Gatekeeper Cho Phép RangeOsc/Absorption Hoạt Động Khi Nén Biến Động (`H-GATE-01`)**
+- [x] **TODO-AUDIT-NEW-114: Nâng Cấp Phân Luồng Gatekeeper Cho Phép RangeOsc/Absorption Hoạt Động Khi Nén Biến Động (`H-GATE-01`) (BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH QUA TODO-AUDIT-NEW-115)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:140-152`
-  - **Mô tả:** Thay thế cơ chế VETO cào bằng toàn bộ Playbook khi `VolatilityFlatline` bằng cơ chế phân luồng chọn lọc: Chỉ tạm khóa các Playbook theo đà (`Trend_PB`, `Momentum_Ign`), đồng thời giải phóng quyền giao dịch cho `Range_Osc` và `Absorption` trong vùng tích lũy.
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / ĐÃ HOÀN THÀNH QUA TODO-AUDIT-NEW-115] Hạ tầng Gatekeeper và Arbiter đã giải phóng hoàn toàn `Absorption` và `RangeOsc` trong `MarketRegime::RangeBound`, tạm khóa các Playbook theo đà (`Trend_PB`, `Momentum_Ign`) qua hàm `is_scanner_eligible_for_regime` của task `TODO-AUDIT-NEW-115`. Cấm toàn bộ trong `VolatilityFlatline` vì biến động nhỏ hơn phí sàn 2 chiều ($EV < 0$). Việc kiểm toán và đăng ký lại `RangeOscScanner` vào runtime thuộc về task `TODO-AUDIT-H-03`.
 
 - [x] **TODO-AUDIT-NEW-115: Kiến Thiết Bộ Phân Loại Chế Độ Thị Trường Vĩ Mô Macro Regime Classifier (`H-GATE-02`)**
   - **Tài liệu thiết kế:** [`03_technical_spec_macro_regime_classifier.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/03_gatekeeper_and_multi_regime_harmonization/03_technical_spec_macro_regime_classifier.md)

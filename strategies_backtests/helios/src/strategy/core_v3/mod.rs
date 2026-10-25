@@ -16,7 +16,6 @@ use ferro_trade::strategy::{InitContext, Strategy, TickContext};
 use ferro_trade::indicators::factory::BulkIndicatorFactory;
 use ferro_trade::broker::policies::RiskPolicy;
 
-use ferro_trade::broker::Trade;
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
@@ -34,7 +33,6 @@ pub struct HeliosStrategyV3 {
     pub sensors: HeliosSensors,
     pub matrix: MarketMatrixV3,
     pub debug_mode: bool,
-    pub prev_open_trade: Option<Trade>,
     pub arbiter: HeliosArbiter,
     pub telemetry_enabled: bool,
     pub last_decision_telemetry: Option<String>,
@@ -58,7 +56,6 @@ impl Strategy for HeliosStrategyV3 {
             sensors: HeliosSensors::default(),
             matrix: MarketMatrixV3::default(),
             debug_mode: std::env::var("HELIOS_DEBUG").is_ok(),
-            prev_open_trade: None,
             arbiter,
             telemetry_enabled: false,
             last_decision_telemetry: None,
@@ -96,12 +93,27 @@ impl Strategy for HeliosStrategyV3 {
 
         let ind = &self.config.indicators;
 
-        if ind.natr.period == 0 || ind.mfi.period == 0 || 
-           ind.kama.short_period == 0 || ind.kama.long_period == 0 ||
-           ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 ||
-           ind.vol_ma.period == 0 {
-            println!("!!! [SAFETY V3.3] CRITICAL PERIOD IS ZERO, ABORTING INIT !!!");
-            return;
+        // 🛡️ [TODO-AUDIT-NEW-57 / H-MOD-07]: Khử bỏ Silent Abort, áp dụng Fail-Fast dứt khoát
+        // Kiểm tra toàn bộ chu kỳ chỉ báo cốt tử thực tế được đăng ký với ctx để ngăn ngừa chia cho 0 và mảng rỗng
+        let is_zero_period = ind.natr.period == 0 || ind.micro_natr.period == 0 ||
+            ind.mfi.period == 0 || ind.kama.short_period == 0 || ind.kama.long_period == 0 ||
+            ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 ||
+            ind.vol_ma.period == 0 || ind.vwma.period == 0 ||
+            ind.price_z_score.lookback == 0 || ind.vol_z_score.lookback == 0 ||
+            ind.rsi_trend.period == 0 || ind.rsi_reversal.period == 0 || ind.rsi_momentum.period == 0 ||
+            ind.stoch_trend.period == 0 || ind.stoch_trend.k_period == 0 || ind.stoch_trend.d_period == 0;
+
+        if is_zero_period {
+            tracing::error!(
+                "🚨 [HELIOS V3 FATAL] Critical indicator period/lookback is 0 in init()! \
+                NATR: {}, MicroNATR: {}, MFI: {}, KAMA: ({},{}), ADX: {}, BB: {}, ATR: {}, VolMA: {}, VWMA: {}, \
+                PriceZ: {}, VolZ: {}, RSI: (T:{},R:{},M:{}), StochTrend: ({},{},{})",
+                ind.natr.period, ind.micro_natr.period, ind.mfi.period, ind.kama.short_period, ind.kama.long_period,
+                ind.adx.period, ind.bbands.period, ind.atr.period, ind.vol_ma.period, ind.vwma.period,
+                ind.price_z_score.lookback, ind.vol_z_score.lookback, ind.rsi_trend.period, ind.rsi_reversal.period,
+                ind.rsi_momentum.period, ind.stoch_trend.period, ind.stoch_trend.k_period, ind.stoch_trend.d_period
+            );
+            panic!("🚨 [HELIOS V3 FATAL] Critical indicator period is 0 in init(). Aborting to prevent silent zero-trade failure!");
         }
 
         let mut s = HeliosSensors::default();
@@ -236,16 +248,8 @@ impl Strategy for HeliosStrategyV3 {
             self.debug_mode
         );
 
-        // 2. Theo dõi trạng thái đóng lệnh để giải phóng vị thế trước đó
-        if !is_pos_open {
-            self.prev_open_trade = None;
-        }
-
-        // 3. Strict Exclusive Order: Nếu đang có vị thế mở thì không mở lệnh mới
+        // 2. Strict Exclusive Order: Nếu đang có vị thế mở thì không mở lệnh mới
         if is_pos_open {
-            if let Some(trade) = tick.trades.first() {
-                self.prev_open_trade = Some(trade.clone());
-            }
             return; 
         }
 
@@ -4005,6 +4009,75 @@ mod tests {
 
         let result2 = scanner.scan(&tick, &partial_sensors, &partial_matrix, &config);
         assert!(result2.is_none(), "RangeOscScanner phải trả về None mà không panic khi stoch_range_k/d rỗng!");
+    }
+
+    #[test]
+    #[should_panic(expected = "Critical indicator period is 0 in init()")]
+    fn test_mod_init_panics_on_zero_indicator_period() {
+        let len = 50;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![100.0; len]),
+            high: std::sync::Arc::new(vec![105.0; len]),
+            low: std::sync::Arc::new(vec![95.0; len]),
+            close: std::sync::Arc::new(vec![100.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache.clone());
+        let mut indicator_manager = IndicatorManager::new();
+        let cache = ferro_trade::data::global_cache::GlobalCache::new(Default::default());
+        let mut init_ctx = InitContext {
+            raw_data: &raw_cache,
+            data_view: &data_view,
+            cache: &cache,
+            indicator_manager: &mut indicator_manager,
+        };
+
+        let mut strategy = HeliosStrategyV3::new(&HashMap::new());
+        strategy.config.indicators.natr.period = 0; // Kích hoạt lỗi period = 0
+        strategy.init(&mut init_ctx);
+    }
+
+    #[test]
+    fn test_mod_clean_exclusive_order_without_prev_open_trade() {
+        let len = 20;
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![100.0; len]),
+            high: std::sync::Arc::new(vec![105.0; len]),
+            low: std::sync::Arc::new(vec![95.0; len]),
+            close: std::sync::Arc::new(vec![100.0; len]),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        use ferro_trade::broker::Trade;
+        let trade = Trade::new(1, 1.0, 100.0, 0, None, Some("TREND_PB".to_string()));
+        let trades = vec![trade];
+        let mut pos = Position::default();
+        pos.size = 1.0; // Vị thế đang mở
+        let mut tick = ferro_trade::strategy::TickContext {
+            i: 5,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: pos,
+        };
+
+        let mut strategy = HeliosStrategyV3::new(&HashMap::new());
+        strategy.sensors.atr_sl = std::sync::Arc::new(vec![1.0; len]);
+        strategy.matrix.chaos_index = std::sync::Arc::new(vec![0.5; len]);
+
+        strategy.next(&mut tick);
+        // Khi đang có vị thế mở, next() lập tức return sau RiskManager, không đi vào Arbiter mở lệnh Buy/Sell mới
+        let has_entry_order = actions.iter().any(|a| matches!(a, ferro_trade::broker::actions::Action::Buy { .. } | ferro_trade::broker::actions::Action::Sell { .. }));
+        assert!(!has_entry_order, "Strict Exclusive Order phải chặn không cho mở thêm lệnh Buy/Sell khi vị thế đang mở!");
     }
 }
 
