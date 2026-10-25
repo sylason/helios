@@ -61,12 +61,6 @@ impl TacticalScanner for TrendPBScanner {
             return None;
         }
 
-        // 🧱 PHÒNG THỦ CHOP ZONE: Chặn đứng khi thị trường đang co thắt nén chặt BB/KC
-        // Chop Zone là đất diễn của range_osc; TrendPB chỉ săn sóng khi thị trường đã bung nén.
-        if squeeze > pb_cfg.max_squeeze_intensity {
-            return None;
-        }
-
         let slope_thresh = pb_cfg.kama_slope_threshold.max(1e-4);
         if kama_slope.abs() < slope_thresh {
             return None; // Độ dốc KAMA chưa đủ mạnh để hình thành xu hướng
@@ -75,6 +69,16 @@ impl TacticalScanner for TrendPBScanner {
         let close = tick.closes()[i];
         let low = tick.lows()[i];
         let high = tick.highs()[i];
+
+        // 🧱 PHÒNG THỦ CHOP ZONE & NGOẠI LỆ CỜ TIẾP DIỄN (HIGH TIGHT / CONTINUATION FLAG):
+        // Chop Zone là đất diễn của range_osc; TrendPB chỉ vượt trần Squeeze khi xung lực dốc KAMA
+        // vượt trội (>= 2x threshold) và giá nến giữ vững phía trên trục KAMA_mid (Long) hoặc dưới KAMA_mid (Short).
+        let is_continuation_flag = kama_slope.abs() >= 2.0 * slope_thresh
+            && ((kama_slope > 0.0 && close >= kama_mid) || (kama_slope < 0.0 && close <= kama_mid));
+
+        if squeeze > pb_cfg.max_squeeze_intensity && !is_continuation_flag {
+            return None;
+        }
 
         let current_atr = sensors.atr_sl.get(i).copied().unwrap_or(1.0).max(1e-5);
         let buffer_mult = pb_cfg.struct_sl_buffer_atr.clamp(0.10, 1.20);
@@ -1006,5 +1010,105 @@ mod tests {
         sensors_climax.z_score = std::sync::Arc::new(vec![-1.80; len]);
         let prop_climax = TrendPBScanner.scan(&tick, &sensors_climax, &matrix, &config);
         assert!(prop_climax.is_none(), "Boundary Guard PHẢI chặn đứng bán đuổi đáy Climax khi Z = -1.80 < -1.60!");
+    }
+
+    #[test]
+    fn test_trend_pb_allows_entry_in_squeeze_continuation_flag() {
+        let len = 50;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2010.0; len];
+        let mut lows = vec![1998.0; len];
+        let mut closes = vec![2005.0; len];
+        // Nến nảy hồi thuận xu hướng: High = 2010, Low = 2000, Close = 2006 >= kama_mid (2000.0)
+        // CLV = (2 * 2006 - 2010 - 2000) / (2010 - 2000) = (4012 - 4010) / 10 = +0.20 >= min_clv (0.20)
+        opens[i] = 2002.0;
+        highs[i] = 2010.0;
+        lows[i] = 2000.0;
+        closes[i] = 2006.0;
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default(); // default max_squeeze_intensity = 0.75, slope_thresh = 0.05
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        let mut stoch_k = vec![30.0; len];
+        stoch_k[i - 1] = 20.0;
+        stoch_k[i] = 25.0;
+        sensors.stoch_trend_k = std::sync::Arc::new(stoch_k);
+        sensors.stoch_trend_d = std::sync::Arc::new(vec![22.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![52.0; len]);
+        sensors.z_score = std::sync::Arc::new(vec![1.0; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        // Squeeze nén cực chặt 0.85 > max_squeeze_intensity (0.75)
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.85; len]);
+        // Độ dốc KAMA slope_atr = 0.15 >= 2 * 0.05 (thoả mãn ngoại lệ Cờ Tiếp Diễn)
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.15; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "TrendPB PHẢI cấp Proposal Long cho mô hình Cờ Tiếp Diễn dù Squeeze = 0.85 > 0.75!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+    }
+
+    #[test]
+    fn test_trend_pb_blocks_entry_in_squeeze_without_strong_slope() {
+        let len = 50;
+        let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2010.0; len];
+        let mut lows = vec![1998.0; len];
+        let mut closes = vec![2005.0; len];
+        opens[i] = 2002.0;
+        highs[i] = 2010.0;
+        lows[i] = 2000.0;
+        closes[i] = 2006.0;
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default();
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        let mut stoch_k = vec![30.0; len];
+        stoch_k[i - 1] = 20.0;
+        stoch_k[i] = 25.0;
+        sensors.stoch_trend_k = std::sync::Arc::new(stoch_k);
+        sensors.stoch_trend_d = std::sync::Arc::new(vec![22.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![52.0; len]);
+        sensors.z_score = std::sync::Arc::new(vec![1.0; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        // Squeeze nén cực chặt 0.85 > 0.75
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.85; len]);
+        // Độ dốc KAMA slope_atr = 0.07 < 2 * 0.05 (chưa đủ gấp đôi để xem là cờ tiếp diễn)
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.07; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "TrendPB PHẢI chặn đứng vị thế khi Squeeze = 0.85 > 0.75 mà độ dốc KAMA chưa đủ mạnh (Chop Zone)!");
     }
 }

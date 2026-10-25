@@ -423,8 +423,15 @@ impl RegimeGatekeeper {
         let squeeze = opt_sq.unwrap_or(0.5);
 
         let cfg = &config.macro_regime;
-        let is_mature_trend = (er >= cfg.min_trending_er || adx >= cfg.min_trending_adx)
-            && squeeze < cfg.range_squeeze_threshold;
+        // 🧭 ĐỒNG THUẬN KÉP XU HƯỚNG & NÉN CHẶT BIÊN ĐỘ (TODO-AUDIT-NEW-07):
+        // Khi thị trường chưa bị nén (squeeze < threshold): Chỉ cần 1 trong 2 chỉ số ER hoặc ADX đạt chuẩn.
+        // Khi thị trường nén chặt (squeeze >= threshold): Đòi hỏi ĐỒNG THUẬN KÉP cả ER và ADX để phân biệt
+        // mô hình Cờ Tiếp Diễn dốc mạnh (Continuation Flag) với Cối xay thịt vô hướng (Chop Zone).
+        let is_mature_trend = if squeeze < cfg.range_squeeze_threshold {
+            er >= cfg.min_trending_er || adx >= cfg.min_trending_adx
+        } else {
+            er >= cfg.min_trending_er && adx >= cfg.min_trending_adx
+        };
 
         if is_mature_trend {
             MarketRegime::Trending
@@ -840,6 +847,40 @@ mod tests {
         sensors.adx = Arc::new(vec![12.0; 10]);
         let regime2 = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
         assert_eq!(regime2, MarketRegime::RangeBound);
+    }
+
+    #[test]
+    fn test_regime_classification_trending_in_high_squeeze_dual_consensus() {
+        let config = HeliosConfigV3::default();
+        let mut env = MockTickEnv::new(10);
+        let tick = env.tick(5);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+
+        // Mô hình Cờ Tăng Tiếp Diễn (High Tight Flag): Squeeze cao >= 0.65 nhưng cả ER và ADX đều đạt chuẩn xu hướng
+        sensors.efficiency_ratio = Arc::new(vec![0.40; 10]); // ER 0.40 >= 0.35
+        sensors.adx = Arc::new(vec![26.0; 10]);              // ADX 26 >= 25
+        matrix.squeeze_intensity = Arc::new(vec![0.70; 10]); // Squeeze 0.70 >= 0.65
+
+        let regime = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
+        assert_eq!(regime, MarketRegime::Trending, "Đồng thuận kép ER & ADX trong vùng Squeeze cao phải phân loại là Trending");
+    }
+
+    #[test]
+    fn test_regime_classification_range_bound_in_high_squeeze_single_indicator() {
+        let config = HeliosConfigV3::default();
+        let mut env = MockTickEnv::new(10);
+        let tick = env.tick(5);
+        let mut sensors = HeliosSensors::default();
+        let mut matrix = MarketMatrixV3::default();
+
+        // Chop Zone vô hướng bẫy ADX trễ: Squeeze cao >= 0.65, ADX vẫn neo cao >= 25 nhưng ER gãy sụp < 0.35
+        sensors.efficiency_ratio = Arc::new(vec![0.20; 10]); // ER 0.20 < 0.35
+        sensors.adx = Arc::new(vec![28.0; 10]);              // ADX trễ 28 >= 25
+        matrix.squeeze_intensity = Arc::new(vec![0.70; 10]); // Squeeze 0.70 >= 0.65
+
+        let regime = RegimeGatekeeper::classify_regime(&tick, &sensors, &matrix, &config, None);
+        assert_eq!(regime, MarketRegime::RangeBound, "Thiếu đồng thuận kép trong vùng Squeeze cao phải phân loại là RangeBound để bảo vệ vốn");
     }
 
     #[test]

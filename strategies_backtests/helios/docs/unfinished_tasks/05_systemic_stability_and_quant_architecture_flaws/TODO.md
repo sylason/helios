@@ -192,9 +192,16 @@
 - [x] **TODO-AUDIT-NEW-06: Khử Lỗi Mù SL Của Strategy (Phantom SL Desync)**
   - **File:** `trading_bot/bot_engine/src/execution/live_engine.rs:117-160`
   - **Mô tả:** Cập nhật ngay `live_position.current_sl_price = Some(new_sl)` khi dời SL để Strategy không bị mù trạng thái sàn và ngừng spam lệnh dời SL mỗi nến. (Đã hoàn thành và kiểm thử trong `test_live_engine_syncs_current_sl_price`).
-- [ ] **TODO-AUDIT-NEW-07: Khai Thông `Trend_PB` & Sửa Hàm Volume Bán Tháo `Reversal`**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:64, 98`, `reversal.rs:105-107`
-  - **Mô tả:** Gỡ bỏ Squeeze ngáng chân trong TrendPB (vì RangeOsc đã tắt); sửa hàm volume Reversal chấp nhận cả bão khối lượng bán tháo ($vol\_ratio > 1.5$) là tín hiệu đảo chiều.
+- [x] **TODO-AUDIT-NEW-07: Khai Thông `Trend_PB` & Sửa Hàm Volume Bán Tháo `Reversal`**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/gatekeeper.rs:426-435`, `scanners/trend_pb.rs:60-75`, `scanners/reversal.rs:105-107`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100%]
+    - Vế 1: Khai thông xung đột liên tầng `Trend_PB` vs `Squeeze` thông qua cơ chế **Đồng Thuận Kép** ($ER \ge 0.35 \land ADX \ge 25.0$) tại Gatekeeper khi $Squeeze \ge 0.65$ và ngoại lệ **Cờ Tiếp Diễn (`is_continuation_flag`)** tại `TrendPullbackScanner` khi độ dốc KAMA $\ge 2.0 \times \text{thresh}$ kèm điều kiện nến giữ vững trục $KAMA_{\text{mid}}$.
+    - Vế 2: Sửa hàm Volume Reversal chấp nhận cả bão khối lượng bán tháo (đã hoàn thành tại `TODO-AUDIT-H-01`).
+  - **Unit Tests:**
+    - [x] `test_regime_classification_trending_in_high_squeeze_dual_consensus`
+    - [x] `test_regime_classification_range_bound_in_high_squeeze_single_indicator`
+    - [x] `test_trend_pb_allows_entry_in_squeeze_continuation_flag`
+    - [x] `test_trend_pb_blocks_entry_in_squeeze_without_strong_slope`
 - [ ] **TODO-AUDIT-NEW-08: Triển Khai Staleness Watchdog Chống Zombie DNA Lock-in**
   - **File:** `trading_bot/bot_engine/src/optimizer/prospector_runner.rs:423-440`
   - **Mô tả:** Đếm số lần Reject liên tiếp: sau 3 lần giảm $50\%$ size/leverage; sau 6 lần kích hoạt Defensive Hold (đứng ngoài thị trường bảo toàn vốn).
