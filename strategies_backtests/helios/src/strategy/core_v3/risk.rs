@@ -810,11 +810,11 @@ impl RiskManager {
             // =========================================================================
             // 🎯 [FLAW-TSL.1: HYBRID TTP - NHÁNH A: DYNAMIC STRUCTURAL TAKE PROFIT]
             // =========================================================================
-            // Cho Playbook RANGE_OSC (Bollinger Bands).
-            // 🛡️ TODO-AUDIT-NEW-188: REVERSAL đã được tách sang Static Limit Anchor TP0 kết hợp Unified TTP trong RAM,
-            // không còn bị KAMA dốc xuống đè bẹp TP. RANGE_OSC tiếp tục bám dải BB (sẽ tối ưu hóa tại TODO-AUDIT-NEW-196).
+            // 🛡️ TODO-AUDIT-NEW-188: REVERSAL đã được tách sang Static Limit Anchor TP0 kết hợp Unified TTP trong RAM.
+            // 🛡️ TODO-AUDIT-NEW-194: RANGE_OSC đã được nâng cấp sang Hộp Cấu Trúc Cố Định (VAH/VAL/POC),
+            // sử dụng TP biên đối diện cố định (Static Anchor Limit TP), không còn bám theo dải BB động gây co thắt R:R.
             let mut new_tp_to_update = trade.tp_price;
-            if tag_str == "RANGE_OSC" {
+            if false && tag_str == "RANGE_OSC" {
                 let tp_ratio = config.tactical_sniper.range.tp_target_ratio.clamp(0.10, 0.90);
                 let bb_width = (sensors.bb_upper[i] - sensors.bb_lower[i]).max(0.0);
                 let raw_tp = if trade.is_long() {

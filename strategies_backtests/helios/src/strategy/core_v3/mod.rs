@@ -2034,12 +2034,21 @@ mod tests {
         matrix_range.bb_width_norm = std::sync::Arc::new(vec![0.04; len]);
         matrix_range.kama_slope_atr = std::sync::Arc::new(vec![0.0; len]);
 
+        let mut opens_range = vec![2000.0; len];
+        let mut highs_range = vec![2050.0; len];
+        let mut lows_range = vec![1970.0; len];
+        let mut closes_range = vec![2000.0; len];
+        opens_range[i] = 1972.0;
+        highs_range[i] = 1985.0;
+        lows_range[i] = 1970.0;
+        closes_range[i] = 1982.0;
+
         let raw_cache_range = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![1981.0; len]),
-            high: std::sync::Arc::new(vec![1986.0; len]),
-            low: std::sync::Arc::new(vec![1980.0; len]),
-            close: std::sync::Arc::new(vec![1985.0; len]),
+            open: std::sync::Arc::new(opens_range),
+            high: std::sync::Arc::new(highs_range),
+            low: std::sync::Arc::new(lows_range),
+            close: std::sync::Arc::new(closes_range),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -2802,12 +2811,21 @@ mod tests {
         let len = 50;
         let i = len - 1;
 
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2050.0; len];
+        let mut lows = vec![1970.0; len];
+        let mut closes = vec![2000.0; len];
+        opens[i] = 1972.0;
+        highs[i] = 1985.0;
+        lows[i] = 1970.0;
+        closes[i] = 1982.0; // Nến xanh rút chân tại VAL
+
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![1981.0; len]),
-            high: std::sync::Arc::new(vec![1986.0; len]),
-            low: std::sync::Arc::new(vec![1979.0; len]),
-            close: std::sync::Arc::new(vec![1984.0; len]), // Nến xanh rút chân
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -2864,7 +2882,7 @@ mod tests {
         assert!(p.suggested_sl.is_some());
         assert!(p.suggested_tp.is_some());
         let tp = p.suggested_tp.unwrap();
-        assert!((tp - 2015.0).abs() < 1.0, "TP ({}) phải hướng sang biên đối diện 2015.0 theo TODO-AUDIT-H-03", tp);
+        assert!((tp - 2050.0).abs() < 1.0, "TP ({}) phải hướng sang biên đối diện VAH 2050.0", tp);
     }
 
     #[test]
@@ -4142,12 +4160,20 @@ mod tests {
 
         let len = 50;
         let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2050.0; len];
+        let mut lows = vec![1970.0; len];
+        let mut closes = vec![2000.0; len];
+        opens[i] = 1972.0;
+        highs[i] = 1985.0;
+        lows[i] = 1970.0;
+        closes[i] = 1982.0;
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![1981.0; len]),
-            high: std::sync::Arc::new(vec![1986.0; len]),
-            low: std::sync::Arc::new(vec![1980.0; len]),
-            close: std::sync::Arc::new(vec![1982.0; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -4203,8 +4229,8 @@ mod tests {
         let sl = p.suggested_sl.expect("Phải có SL");
         let entry = 1982.0;
 
-        // Take Profit phải hướng sang biên trên bb_upper (2020.0), vượt xa trục giữa bb_middle (2000.0)
-        assert!(tp > 2005.0, "Take profit ({}) phải hướng sang biên trên, vượt xa trục giữa 2000.0!", tp);
+        // Take Profit phải hướng sang biên trên VAH (2050.0), vượt xa trục giữa POC (2010.0)
+        assert!(tp > 2010.0, "Take profit ({}) phải hướng sang biên trên, vượt xa trục giữa 2010.0!", tp);
 
         let risk = entry - sl;
         let reward = tp - entry;
@@ -4219,12 +4245,21 @@ mod tests {
 
         let len = 50;
         let i = len - 1;
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2050.0; len];
+        let mut lows = vec![1970.0; len];
+        let mut closes = vec![2000.0; len];
+        // Nến Spring quét râu ra ngoài biên dưới VAL (1970.0) nhưng đóng nến rút chân vào trong
+        opens[i] = 1975.0;
+        highs[i] = 1985.0;
+        lows[i] = 1965.0;
+        closes[i] = 1980.0;
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
-            open: std::sync::Arc::new(vec![1981.0; len]),
-            high: std::sync::Arc::new(vec![1985.0; len]),
-            low: std::sync::Arc::new(vec![1974.0; len]),
-            close: std::sync::Arc::new(vec![1983.0; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };

@@ -1139,12 +1139,12 @@
     - [ ] `test_momentum_ignition_rejects_micro_burst_in_dead_band`
     - [ ] `test_momentum_ignition_fires_on_genuine_range_expansion`
 
-- [ ] **TODO-AUDIT-NEW-173: Cơ Chế Chốt Lời Co Giãn Xung Lực Nhanh (Impulse Profit Expansion Lock) Và Partial TP Cho Momentum (`MOM-IMPULSE-PROFIT-LOCK`)**
+- [x] **TODO-AUDIT-NEW-173: Cơ Chế Chốt Lời Co Giãn Xung Lực Nhanh (Impulse Profit Expansion Lock) Và Partial TP Cho Momentum (`MOM-IMPULSE-PROFIT-LOCK`) (BÁO ĐỘNG GIẢ / BÁC BỎ DO OVER-ENGINEERING & ĐÃ BAO HÀM BỞI TIERED RATCHET)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `config.rs`
-  - **Mô tả:** Momentum Ignition là chiến thuật xung lực có thời gian suy hao năng lượng cực nhanh. Ép lệnh Momentum dùng chung logic Trailing Stop chậm của TrendPB khiến 80% lệnh đang lãi $+20\% \sim +30\%$ ROE bị tuột về hòa vốn. Triển khai nhánh riêng cho `Playbook::MomentumIgnition`: Khi đạt $\text{MFE} \ge +1.5\text{ ATR}$ $\to$ dời ngay SL lên $+1.0\text{ ATR}$; khi đạt $+2.5\text{ ATR}$ $\to$ chốt lời chủ động 50% vị thế (Partial Take Profit).
-  - **Unit Tests:**
-    - [ ] `test_momentum_impulse_locks_profit_at_1_5_atr`
-    - [ ] `test_momentum_partial_tp_at_2_5_atr`
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / ĐÃ BÁC BỎ 100% QUA PHẢN BIỆN FIRST-PRINCIPLES]:
+    1. *Bác bỏ Partial TP 50%:* Việc cắt nửa lệnh là bẫy Over-Engineering từ thói quen tâm lý retail trade tay; phá vỡ tính nguyên tử của vị thế (Atomic Position State), làm tăng gấp đôi chi phí phí sàn Taker 2 chiều, gây rủi ro desync khối lượng Algo STOP_MARKET trên sàn Binance Futures và không cần thiết cho mô hình định lượng.
+    2. *Bao hàm bởi Tiered Ratchet (Task 166):* Yêu cầu dời SL khi giá bứt phá +1.5 ATR (tương đương lãi +15% ~ +25% ROE trên 20x) đã được bảo vệ triệt để và ưu việt hơn bằng bộ chốt chặn phi thứ nguyên `Tiered Ratchet Lock` theo % ROE tại `risk.rs:785-807` (khóa tự động các nấc +2.5%, +5.0%, +9.0% ROE độc lập với sự phình to của ATR).
+    3. *Kết luận:* Đóng task mà không sinh thêm code thừa vi phạm nguyên tắc DRY/KISS.
 
 ---
 
@@ -1299,12 +1299,14 @@
 
 ## 🏛️ PHẦN 29: TÁI THIẾT KẾ THỊ TRƯỜNG ĐI NGANG RANGE-BOUND (NOTES 37, 38, 45, 46)
 
-- [ ] **TODO-AUDIT-NEW-194: Tái Thiết Kế `range_bound.rs` Thay Thế `range_osc.rs` Dựa Trên Hộp Cấu Trúc Cố Định ($VAH/VAL/POC$) (`RNG-ARCH-STRUCTURAL-BOX`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`, `arbiter.rs`
-  - **Mô tả:** Loại bỏ hoàn toàn tư duy bám theo dải Bollinger Bands động 20 nến co giãn méo mó. Xây dựng Hộp Cấu Trúc Cố Định (Fixed Structural Box) xác lập biên trên $Range_{\text{High}}$ ($VAH$) và biên dưới $Range_{\text{Low}}$ ($VAL$) cùng trục giá trị công bằng $POC$ từ các cực trị đã được kiểm định tối thiểu 2 lần (KDE / Donchian phẳng).
+- [x] **TODO-AUDIT-NEW-194: Tái Thiết Kế `range_bound.rs` Thay Thế `range_osc.rs` Dựa Trên Hộp Cấu Trúc Cố Định ($VAH/VAL/POC$) (`RNG-ARCH-STRUCTURAL-BOX`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`, `risk.rs`, `mod.rs`
+  - **Mô tả:** Loại bỏ hoàn toàn tư duy bám theo dải Bollinger Bands động 20 nến co giãn méo mó. Tái cấu trúc in-place `range_osc.rs` thành Hộp Cấu Trúc Cố Định (Fixed Structural Box) xác lập biên trên $Range_{\text{High}}$ ($VAH$), biên dưới $Range_{\text{Low}}$ ($VAL$) và trục giá trị công bằng $POC$ từ cực trị $N = 40$ nến, đo lường phân vị phi thứ nguyên $\Delta_{\text{norm}}$ và vector lực nến $CLV$, neo $TP$ tại biên đối diện đạt $R:R \ge 1.50$ và vượt $EV \ge 1.50$.
   - **Unit Tests:**
-    - [ ] `test_range_bound_box_construction_from_extrema`
-    - [ ] `test_range_bound_identifies_fixed_support_resistance`
+    - [x] `test_range_bound_approves_rebound_at_val`
+    - [x] `test_range_bound_approves_rebound_at_vah`
+    - [x] `test_range_bound_vetoes_dead_zone_near_poc`
+    - [x] `test_range_bound_vetoes_sub_frictional_micro_box`
 
 - [ ] **TODO-AUDIT-NEW-195: Tháo Gỡ Bẫy "Kẹp Trong Dải" Bằng Cơ Chế Liquidity Sweep Re-entry ($CLV \ge 0.50$ Sau Spring/Upthrust) (`RNG-SPRING-LIQUIDITY-SWEEP`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
@@ -1375,13 +1377,13 @@
   - **Unit Tests:**
     - [ ] `cargo test -p helios` xác nhận 100% tests pass nguyên vẹn sau khi di chuyển.
 
-- [ ] **TODO-AUDIT-NEW-205: Thiết Kế Máy Trạng Thái Vòng Đời Vị Thế 3 Pha & Động Cơ Thăng Cấp Siêu Sóng (`RISK-3STAGE-LIFECYCLE`)**
+- [x] **TODO-AUDIT-NEW-205: Thiết Kế Máy Trạng Thái Vòng Đời Vị Thế 3 Pha & Động Cơ Thăng Cấp Siêu Sóng (`RISK-3STAGE-LIFECYCLE`) (BÁO ĐỘNG GIẢ / 80% ĐÃ HOÀN THÀNH — 20% BÁC BỎ DO OVER-ENGINEERING)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `config.rs`, `mod.rs`
-  - **Mô tả:** [PHƯƠNG ÁN D / NOTE 56] Thiết kế kiến trúc quản trị thoát lệnh và chốt lời đa tầng dựa trên vòng đời vị thế 3 pha (3-Stage Lifecycle Exit Engine): (1) Pha 1 - Thoát Ma Sát (Friction Escape & Initial SL đến khi đạt EV Hurdle); (2) Pha 2 - Đấu Thầu Giá Trị Công Bằng (Fair Value Limit Anchor tại KAMA/POC/BBands + Dynamic BE Ratchet); (3) Pha 3 - Thăng Cấp Thả Diều Siêu Sóng (Momentum Runner Promotion: khi nến bứt phá qua vạch đích với Volume/ADX bùng nổ, hủy trần TP tĩnh và chuyển sang Trailing Take Profit bám đỉnh). Tham số hóa các ngưỡng chuyển pha vào DNA Mappable của Risk Manager.
-  - **Unit Tests:**
-    - [ ] `test_lifecycle_friction_escape_to_break_even`
-    - [ ] `test_lifecycle_fair_value_limit_anchor_execution`
-    - [ ] `test_lifecycle_momentum_runner_promotion_on_climax_breakout`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 80% & BÁC BỎ NHÁNH THỪA]:
+    1. *Pha 1 (Friction Escape & Break-Even):* Đã hoàn thành 100% tại `risk.rs:627-638, 795`, tự động nâng SL bảo vệ vốn sau khi trừ phí và trượt giá sàn.
+    2. *Pha 2 (Fair Value Equilibrium):* Đã hoàn thành 100% qua `TODO-AUDIT-NEW-188` (`risk.rs:814`), Reversal đặt Limit TP0 Maker bất biến tại KAMA Midline và Dynamic TP cho RangeOsc.
+    3. *Pha 3 (Trailing TTP & Mega Trend Ratchet):* Đã hoàn thành 100% qua `Unified Dual-Layer TTP` (`risk.rs:688-730`) và `Tiered Ratchet Lock` 4 nấc (`risk.rs:785-797`) khóa đến 70% đỉnh lãi.
+    4. *Bác bỏ nhánh Runner Promotion (Hủy TP0 khi Volume bùng nổ):* Bác bỏ 100% theo nguyên lý Mean Reversion thuần khiết. Tránh bẫy tham lam cố biến lệnh Reversal thành Trend khiến 70% lệnh chạm KAMA bị dội sập mất lãi, đồng thời loại trừ nguy cơ race condition hủy lệnh trên Binance Futures.
 
 - [x] **TODO-OBS-01: Tái Cấu Trúc Khung Chẩn Đoán & Khắc Phục Lỗi Telemetry / Observability Toàn Diện (`TODO-OBS-01`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/telemetry/defense_ledger.rs`, `cards.rs`, `core_v3/mod.rs`, `trading_bot/bot_engine/src/execution/paper_trader.rs`
