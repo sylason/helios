@@ -1118,12 +1118,12 @@
     - [ ] `test_momentum_ignition_detects_first_micro_breakout_before_15m_expansion`
     - [ ] `test_momentum_ignition_ignores_subthreshold_micro_noise`
 
-- [ ] **TODO-AUDIT-NEW-170: Chốt Chặn Trần Quá Độ Biến Động & Bão Thanh Lý Dây Chuyền $|Z| \le 3.0$ (`MOM-MAX-PRICE-Z-CAP`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `config.rs`
-  - **Mô tả:** Khi bão thanh lý Short xảy ra, giá bị giật bay 5–10 ATR vào "túi khí" sổ lệnh mỏng. Mua tại đây là mua ngay trước cú sụp đổ hồi quy. Thiết lập trần quá độ $|Price\_Z| \le \text{max\_price\_z}$ (mặc định $3.0\sigma$) và cự ly bứt phá không vượt quá $1.5\text{ ATR}$ tính từ đường trung bình, tự động VETO các cú kích hỏa đã bị kéo dãn quá đà.
+- [x] **TODO-AUDIT-NEW-170: Chốt Chặn Cự Ly Vọt Xà Vi Mô Ngoài Dải Biên (`MOM-MAX-BREAKOUT-EXTENSION-CAP`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Triển khai chốt chặn cự ly vọt xà ngoài dải biên Bollinger Bands $\frac{|Close - BB_{\text{band}}|}{ATR} \le \text{max\_breakout\_extension\_atr}$, VETO tức thời `Proposal` (`return None;`) khi nến bị kéo dãn quá đà vào túi khí sổ lệnh mỏng (EC-MOM-04 & HB-07). Tích hợp gen DNA trực giao `max_breakout_extension_atr` `[1.00, 3.50]`, step `0.10`, mặc định `1.50`, nâng `DNA_WIDTH` từ 116 lên 117. Unit tests pass 100% (201/201 tests).
   - **Unit Tests:**
-    - [ ] `test_momentum_ignition_vetoes_blown_out_liquidation_cascade`
-    - [ ] `test_momentum_ignition_accepts_healthy_early_breakout`
+    - [x] `test_momentum_ignition_vetoes_blown_out_liquidation_cascade`
+    - [x] `test_momentum_ignition_accepts_healthy_early_breakout`
 
 - [ ] **TODO-AUDIT-NEW-171: Chốt Chặn Kiểm Tra Khoảng Trống Cản Vĩ Mô MTF Headroom $\ge 1.5\text{ ATR}$ (`MOM-MTF-HEADROOM`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `arbiter.rs`

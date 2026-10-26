@@ -120,14 +120,18 @@ impl TacticalScanner for MomentumIgnitionScanner {
             }
         }
 
-        // 🛡️ TODO-AUDIT-NEW-40: Cầu chì kẹp trần cự ly phi thứ nguyên chống Buying/Selling Climax
+        // 🛡️ TODO-AUDIT-NEW-170 (Kế thừa & Nâng cấp TODO-AUDIT-NEW-40): Cầu chì kẹp trần cự ly phi thứ nguyên chống bão thanh lý & Buying/Selling Climax
         // Ngăn chặn 100% bẫy đu đỉnh/đáy kiệt sức khi cây nến tăng/giảm quá sốc ngoài dải BB
         let dist = match signal_type {
             SignalType::Long => close - bb_u,
             SignalType::Short => bb_l - close,
         };
-        let climax_cap = mom_cfg.climax_expansion_cap.max(1.0);
-        if dist > atr * climax_cap {
+        let max_ext = if mom_cfg.max_breakout_extension_atr <= 0.0 {
+            1.50
+        } else {
+            mom_cfg.max_breakout_extension_atr.max(0.50)
+        };
+        if dist > atr * max_ext {
             return None; // VETO: Cự ly vượt quá ngưỡng trần an toàn -> Không mua đỉnh / bán đáy
         }
 

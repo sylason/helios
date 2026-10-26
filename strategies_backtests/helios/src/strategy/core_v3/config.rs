@@ -802,9 +802,10 @@ pub struct TacticalMomentumParams {
     #[serde(default = "default_momentum_squeeze_threshold")]
     pub squeeze_threshold: f64,
 
-    /// 🛑 [TODO-AUDIT-NEW-40] Kẹp trần cự ly bứt phá chống Buying/Selling Climax (1.0 -> 5.0 ATR vi mô, Mặc định 2.50)
-    #[serde(default = "default_momentum_climax_cap")]
-    pub climax_expansion_cap: f64,
+    /// 🛑 [TODO-AUDIT-NEW-170 / TODO-AUDIT-NEW-40] Ngưỡng cự ly vọt xà ngoài dải biên Bollinger Bands tối đa cho phép chống bão thanh lý & Climax (1.00 -> 3.50 ATR, Step 0.10 -> 26 nấc)
+    #[dna(min = 1.00, max = 3.50, step = 0.10)]
+    #[serde(default = "default_momentum_max_breakout_extension_atr", alias = "climax_expansion_cap")]
+    pub max_breakout_extension_atr: f64,
 }
 
 impl Default for TacticalMomentumParams {
@@ -822,7 +823,7 @@ impl Default for TacticalMomentumParams {
             stagnation_exit_bars: default_momentum_stagnation_bars(),
             stagnation_max_roe: default_momentum_stagnation_max_roe(),
             squeeze_threshold: default_momentum_squeeze_threshold(),
-            climax_expansion_cap: default_momentum_climax_cap(),
+            max_breakout_extension_atr: default_momentum_max_breakout_extension_atr(),
         }
     }
 }
@@ -1489,8 +1490,13 @@ fn default_momentum_squeeze_threshold() -> f64 {
     0.40
 }
 
+fn default_momentum_max_breakout_extension_atr() -> f64 {
+    1.50
+}
+
+#[allow(dead_code)]
 fn default_momentum_climax_cap() -> f64 {
-    2.50
+    default_momentum_max_breakout_extension_atr()
 }
 
 fn default_range_sl_buffer_atr() -> f64 {
