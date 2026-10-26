@@ -1757,7 +1757,19 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 115, "DNA_WIDTH phải là 115 chiều sau khi thêm gen mfi_absorption_thresh cho Absorption (TODO-AUDIT-NEW-49)!");
+        assert_eq!(width, 116, "DNA_WIDTH phải là 116 chiều sau khi thêm gen squeeze_threshold cho Momentum (TODO-AUDIT-NEW-43)!");
+
+        let mom_sqz_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.squeeze_threshold"));
+        assert!(mom_sqz_def.is_some(), "defs phải chứa tactical_sniper.momentum.squeeze_threshold!");
+        let (_, mom_sqz_attr) = mom_sqz_def.unwrap();
+        match mom_sqz_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert!((min - 0.10).abs() < 1e-12, "squeeze_threshold min phải là 0.10");
+                assert!((max - 0.90).abs() < 1e-12, "squeeze_threshold max phải là 0.90");
+                assert_eq!(*step, Some(0.05), "squeeze_threshold step phải là Some(0.05)");
+            }
+            _ => panic!("squeeze_threshold phải là ParamDefinition::Range"),
+        }
 
         let abs_mfi_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.absorption.mfi_absorption_thresh"));
         assert!(abs_mfi_def.is_some(), "defs phải chứa tactical_sniper.absorption.mfi_absorption_thresh!");
@@ -1994,14 +2006,18 @@ mod tests {
         // 2. Kiểm tra MomentumIgnitionScanner
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.closes = std::sync::Arc::new(vec![2025.0; len]); // Phá vỡ BB Upper (2020.0)
-        let matrix_mom = MarketMatrixV3::from_sensors(&config, &sensors);
+        let mut matrix_mom = MarketMatrixV3::from_sensors(&config, &sensors);
+        matrix_mom.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]); // Đạt điều kiện Prior Squeeze
+
+        let mut closes_mom = vec![2018.0; len];
+        closes_mom[i] = 2025.0; // Rising Edge: nến i bứt phá 2025 > 2020, nến i-1 tích lũy 2018 <= 2020
 
         let raw_cache_mom = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
             open: std::sync::Arc::new(vec![2015.0; len]),
             high: std::sync::Arc::new(vec![2026.0; len]),
             low: std::sync::Arc::new(vec![2014.0; len]),
-            close: std::sync::Arc::new(vec![2025.0; len]),
+            close: std::sync::Arc::new(closes_mom),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -3639,13 +3655,16 @@ mod tests {
         let len = 50;
         let i = 49;
 
+        let mut closes = vec![2018.0; len];
+        closes[i] = 2025.0; // Rising Edge: nến i bứt phá 2025 > 2020, nến i-1 tích lũy 2018 <= 2020
+
         // Nến bùng nổ chuẩn: Open=2015, High=2026, Low=2014, Close=2025 (CLV = 0.833, close > open)
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
             open: std::sync::Arc::new(vec![2015.0; len]),
             high: std::sync::Arc::new(vec![2026.0; len]),
             low: std::sync::Arc::new(vec![2014.0; len]),
-            close: std::sync::Arc::new(vec![2025.0; len]),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -3678,7 +3697,8 @@ mod tests {
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
         sensors.kama_slope_adj = std::sync::Arc::new(vec![0.10; len]); // Thuận trend
 
-        let matrix = MarketMatrixV3::default();
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]); // Đạt điều kiện Prior Squeeze
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "Nến bùng nổ hợp lệ PHẢI được duyệt Proposal Long!");
@@ -3699,12 +3719,15 @@ mod tests {
         // Nến bứt phá nhẹ qua BB Upper: Close=2021 > bb_upper 2020.0, Low=2018, High=2022, Open=2019
         // CLV = (2*2021 - 2022 - 2018) / 4 = 2/4 = 0.50 >= 0.20
         // Breakout dist = 1.0, Target breakout = 10 * 0.25 = 2.5 => f_break = 1.0 / 2.5 = 0.40
+        let mut closes = vec![2018.0; len];
+        closes[i] = 2021.0; // Nến i bứt phá 2021 > 2020, nến i-1 tích lũy 2018 <= 2020 (Rising Edge)
+
         let raw_cache = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
             open: std::sync::Arc::new(vec![2019.0; len]),
             high: std::sync::Arc::new(vec![2022.0; len]),
             low: std::sync::Arc::new(vec![2018.0; len]),
-            close: std::sync::Arc::new(vec![2021.0; len]),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -3729,8 +3752,7 @@ mod tests {
         config.tactical_sniper.momentum.vol_z_threshold = 1.5;
         config.tactical_sniper.momentum.w_breakout = 0.35;
         config.tactical_sniper.momentum.w_volume = 0.35;
-        // Điểm Breakout (0.35 * 0.40) + Vol (0.35 * tanh(1.0) = 0.266) = 0.406.
-        // Cần thêm f_rsi > 0 để vượt ngưỡng kích hoạt 0.50.
+        // Điểm BOP + Vol + RSI vượt ngưỡng kích hoạt 0.50
         config.tactical_sniper.momentum.min_activation_score = 0.50;
 
         let mut sensors = HeliosSensors::default();
@@ -3740,7 +3762,8 @@ mod tests {
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
         sensors.kama_slope_adj = std::sync::Arc::new(vec![0.10; len]);
 
-        let matrix = MarketMatrixV3::default();
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]); // Đạt điều kiện Prior Squeeze (0.70 >= 0.40)
 
         // 1. Kịch bản RSI = 45.0 (< 50.0, xu hướng yếu/giảm):
         // Nếu không có clamp >= 50.0, rsi_threshold=25.0 sẽ cho rsi_excess = 45 - 25 = 20, f_rsi = tanh(20/15) = 0.87,
@@ -3762,6 +3785,9 @@ mod tests {
         let len = 50;
         let i = 49;
 
+        let mut closes = vec![2018.0; len];
+        closes[i] = 2025.0; // Nến i bứt phá 2025 > 2020, nến i-1 tích lũy 2018 <= 2020 (Rising Edge)
+
         // Nến 1m bùng nổ vượt đỉnh BB Upper (Long candidate):
         // Open=2015, High=2026, Low=2014, Close=2025 > bb_upper 2020.0 (CLV = 0.833, close > open)
         let raw_cache = RawDataCache {
@@ -3769,7 +3795,7 @@ mod tests {
             open: std::sync::Arc::new(vec![2015.0; len]),
             high: std::sync::Arc::new(vec![2026.0; len]),
             low: std::sync::Arc::new(vec![2014.0; len]),
-            close: std::sync::Arc::new(vec![2025.0; len]),
+            close: std::sync::Arc::new(closes),
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -3802,6 +3828,7 @@ mod tests {
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
 
         let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]); // Đạt điều kiện Prior Squeeze
 
         // 1. Kịch bản Ca 1: Vĩ mô 15m/1h dốc âm mạnh (Downtrend thác lũ -0.10 < -0.02)
         // Dù nến 1m bùng nổ rất đẹp, MTF Phase Coherence Gate PHẢI VETO cấm bắt dao rơi!
@@ -3823,12 +3850,14 @@ mod tests {
 
         // 4. Kịch bản Ca 4: Nến 1m Short (close < bb_lower) nhưng vĩ mô dốc dương mạnh (+0.10 > 0.02)
         // Cản đầu xe tăng -> VETO!
+        let mut closes_short = vec![1982.0; len];
+        closes_short[i] = 1975.0; // Nến i bứt phá 1975 < 1980, nến i-1 tích lũy 1982 >= 1980 (Rising Edge Short)
         let raw_cache_short = RawDataCache {
             datetime: std::sync::Arc::new(vec![0i64; len]),
             open: std::sync::Arc::new(vec![1985.0; len]),
             high: std::sync::Arc::new(vec![1986.0; len]),
             low: std::sync::Arc::new(vec![1974.0; len]),
-            close: std::sync::Arc::new(vec![1975.0; len]), // < bb_lower 1980.0
+            close: std::sync::Arc::new(closes_short), // < bb_lower 1980.0
             volume: std::sync::Arc::new(vec![1000.0; len]),
             custom_columns: HashMap::new(),
         };
@@ -3849,6 +3878,327 @@ mod tests {
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.10; len]);
         let prop_short_veto = MomentumIgnitionScanner.scan(&tick_short, &sensors, &matrix, &config);
         assert!(prop_short_veto.is_none(), "Bùng nổ Short khi macro KAMA dốc dương mạnh (+0.10 > 0.02) PHẢI bị VETO!");
+    }
+
+    // ========================================================================
+    // 🚀 UNIT TESTS CHO CỤM 4 TASK MOMENTUM IGNITION (TODO-AUDIT-NEW-40, 43, 44, 45)
+    // ========================================================================
+
+    #[test]
+    fn test_momentum_first_ignition_rising_edge() {
+        let len = 50;
+        let mut closes = vec![2018.0; len];
+        closes[48] = 2018.0; // <= bb_upper 2020.0
+        closes[49] = 2025.0; // > bb_upper 2020.0 -> Nến 1 giao cắt (First Ignition)
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2015.0; len]),
+            high: std::sync::Arc::new(vec![2026.0; len]),
+            low: std::sync::Arc::new(vec![2014.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.rsi_threshold = 60.0;
+        config.tactical_sniper.momentum.vol_z_threshold = 1.0;
+        config.tactical_sniper.momentum.min_activation_score = 0.20;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        // 1. Nến 49 là sườn xung giao cắt đầu tiên -> DUYỆT!
+        let prop_first = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_first.is_some(), "Nến 1 giao cắt đầu tiên PHẢI được duyệt!");
+
+        // 2. Kịch bản nến thứ 2 (Spam nến): nếu nến 48 trước đó đã ở ngoài dải (> 2020.0)
+        let mut closes_spam = vec![2022.0; len]; // Cả nến 48 và 49 đều ở ngoài dải
+        closes_spam[49] = 2026.0;
+        let raw_cache_spam = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2021.0; len]),
+            high: std::sync::Arc::new(vec![2027.0; len]),
+            low: std::sync::Arc::new(vec![2020.0; len]),
+            close: std::sync::Arc::new(closes_spam),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_spam = DataView::new(raw_cache_spam);
+        let tick_spam = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view_spam,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let prop_spam = MomentumIgnitionScanner.scan(&tick_spam, &sensors, &matrix, &config);
+        assert!(prop_spam.is_none(), "Nến thứ 2 trở đi không phải sườn xung đầu tiên PHẢI bị VETO cấm spam!");
+    }
+
+    #[test]
+    fn test_momentum_prior_squeeze_veto() {
+        let len = 50;
+        let mut closes = vec![2018.0; len];
+        closes[49] = 2025.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2015.0; len]),
+            high: std::sync::Arc::new(vec![2026.0; len]),
+            low: std::sync::Arc::new(vec![2014.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.squeeze_threshold = 0.50; // Ngưỡng nén yêu cầu 0.50
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        // 1. Khi squeeze_intensity = 0.20 < 0.50 (thị trường không nén) -> VETO!
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.20; len]);
+        let prop_no_sqz = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_no_sqz.is_none(), "Khi không có tiền đề nén (0.20 < 0.50), scanner PHẢI bị VETO!");
+
+        // 2. Khi squeeze_intensity = 0.65 >= 0.50 (lò xo nén chặt) -> DUYỆT!
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.65; len]);
+        let prop_sqz = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_sqz.is_some(), "Khi có tiền đề nén chặt (0.65 >= 0.50), scanner PHẢI được duyệt!");
+    }
+
+    #[test]
+    fn test_momentum_buying_climax_veto() {
+        let len = 50;
+        let mut closes = vec![2018.0; len];
+        // Cự ly bứt phá = 2055 - 2020 = 35.0 > 2.5 * ATR (2.5 * 10 = 25.0) -> Climax kiệt sức!
+        closes[49] = 2055.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2015.0; len]),
+            high: std::sync::Arc::new(vec![2056.0; len]),
+            low: std::sync::Arc::new(vec![2014.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.climax_expansion_cap = 2.50; // Kẹp trần 2.5 ATR
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]); // ATR = 10.0 => trần 25.0
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop_climax = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop_climax.is_none(), "Nến bứt phá vượt 3.5 ATR (> 2.5 ATR) là Buying Climax kiệt sức PHẢI bị VETO!");
+    }
+
+    #[test]
+    fn test_momentum_bop_body_purity_scoring() {
+        let len = 50;
+        let mut closes = vec![2018.0; len];
+        closes[49] = 2030.0; // Vượt bb_upper 2020.0
+
+        // Nến 1: Marubozu đặc ruột tuyệt đối (Open=2015, High=2030, Low=2015, Close=2030 => BOP = 1.0)
+        let raw_cache_pure = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2015.0; len]),
+            high: std::sync::Arc::new(vec![2030.0; len]),
+            low: std::sync::Arc::new(vec![2015.0; len]),
+            close: std::sync::Arc::new(closes.clone()),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_pure = DataView::new(raw_cache_pure);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick_pure = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view_pure,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.w_breakout = 0.50;
+        config.tactical_sniper.momentum.w_volume = 0.25;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop_pure = MomentumIgnitionScanner.scan(&tick_pure, &sensors, &matrix, &config).unwrap();
+
+        // Nến 2: Nến có râu trên dài (Open=2024, High=2034, Low=2015, Close=2030 => range=19, body=6 => BOP = 6/19 = 0.315)
+        let raw_cache_wick = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2024.0; len]),
+            high: std::sync::Arc::new(vec![2034.0; len]),
+            low: std::sync::Arc::new(vec![2015.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view_wick = DataView::new(raw_cache_wick);
+        let tick_wick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view_wick,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+        let prop_wick = MomentumIgnitionScanner.scan(&tick_wick, &sensors, &matrix, &config).unwrap();
+
+        assert!(
+            prop_pure.raw_score > prop_wick.raw_score,
+            "Nến thân đặc Marubozu (score: {:.3}) PHẢI có điểm cao hơn nến râu dài (score: {:.3})!",
+            prop_pure.raw_score,
+            prop_wick.raw_score
+        );
+    }
+
+    #[test]
+    fn test_momentum_dynamic_rsi_calibration() {
+        let len = 50;
+        let mut closes = vec![2018.0; len];
+        closes[49] = 2025.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2015.0; len]),
+            high: std::sync::Arc::new(vec![2026.0; len]),
+            low: std::sync::Arc::new(vec![2014.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        // Kịch bản ngưỡng RSI cực biên 89.0
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.rsi_threshold = 89.0;
+        config.tactical_sniper.momentum.min_activation_score = 0.10;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![95.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "Threshold RSI cao vẫn phải tính toán trơn mượt không panic chia cho 0!");
+        let score = prop.unwrap().raw_score;
+        assert!(score >= 0.0 && score <= 1.0, "Score ({:.3}) phải trong [0.0, 1.0]", score);
     }
 
     #[test]

@@ -201,3 +201,20 @@
   3. *Kiểm thử 100% Zero-Regression:*
      - Viết mới `test_trend_pb_sl_buffer_supports_up_to_2_0_atr` xác minh đệm $2.0\ \text{ATR}$ không còn bị nghẽn.
      - 180/180 tests `helios::lib` pass 100%.
+
+
+---
+
+### ❌ Lỗi #013: Bẫy Đếm Nến Giáo Điều, Thoát Lệnh Non Bào Mòn Phí & Ngộ Nhận R:R Đỉnh Cũ Trong Trend Pullback (TODO-AUDIT-NEW-183 & TODO-AUDIT-NEW-185)
+- **Hiện tượng & Giả định ngầm ban đầu:**
+  1. *Tại `TODO-AUDIT-NEW-183`:* Đề xuất đếm số nến của sóng đẩy $T_{\text{impulse}}$, giới hạn thời gian sóng hồi $T_{\text{retrace}} \le 3 \times T_{\text{impulse}}$, và sau khi vào lệnh nếu sau 6 nến không có đỉnh mới thì kích hoạt Stagnation Exit đóng hòa vốn.
+  2. *Tại `TODO-AUDIT-NEW-185`:* Đề xuất bắt buộc tỷ lệ $\frac{\text{Distance to Prior High}}{\text{Distance to SL}} \ge 1.5$ và mở khóa ngoại lệ Continuation Flag trong Squeeze.
+- **Phân tích bản chất vi cấu trúc & Nguyên nhân bị bác bỏ (Falsified qua /helios-debate 26/10/2026):**
+  1. *Vi phạm nguyên tắc tối cao GEMINI.md:* Cấm tuyệt đối hành vi đếm nến rời rạc (Candle Counting) và phân tích Price Action cảm tính.
+  2. *Lượng hóa toán học đã giải quyết triệt để:* Nhịp hồi cù nhầy suy kiệt động lượng trong thực tế được đo lường chính xác bằng các đại lượng phi thứ nguyên liên tục: dải biến động nén nghẹt (`squeeze_intensity`) và độ dốc KAMA nằm phẳng (`kama_slope_atr < slope_thresh`). Code hiện tại ở `trend_pb.rs:64, 79` đã tự động khóa chặt scanner khi thị trường cù nhầy mà không cần bất kỳ biến đếm nến nào.
+  3. *Bẫy Bào Mòn Vốn Vì Phí Sàn (Fee Churning Choke):* Trong Crypto, sau một cú breakout hoặc hồi quy, giá thường đi ngang tái tích lũy $8 \sim 15$ nến quanh giá vào lệnh trước khi bùng nổ sóng tiếp diễn. Cưỡng bức cắt hòa vốn sau 6 nến khiến hệ thống gánh chịu chi phí phí sàn $2 \times \text{Taker Fee } (0.04\%) + \text{Trượt giá} \approx 0.08\% \sim 0.10\%$ sau mỗi lần cắt. 10 lệnh bị cắt non sẽ làm bốc hơi $1.0\%$ tài khoản mà không hề có lệnh nào vi phạm Stop Loss.
+  4. *Ngoại lệ Continuation Flag đã hoàn thành 100%:* Đoạn mã tại `trend_pb.rs:76-81` đã triển khai đầy đủ việc mở khóa ngoại lệ khi KAMA dốc vượt trội ($\ge 2 \times \text{thresh}$) và nến giữ vững trục `kama_mid`.
+  5. *Ngộ nhận R:R Đỉnh cũ mâu thuẫn trực tiếp với Trend Following:* Trend-Following sinh lời lớn nhất từ việc thả diều lợi nhuận (`suggested_tp: None`) khi giá bứt phá đỉnh cũ (Higher High). Nếu ép trần TP ở Đỉnh cũ để tính R:R $\ge 1.5$, hệ thống sẽ bị biến thành Scalping ăn non và từ chối chính những cú Pullback nông mạnh nhất của Supertrend. Toàn bộ tính kinh tế sau phí đã được Arbiter's `validate_ev_hurdle` kiểm soát tập trung.
+- **Quyết định kiến trúc:**
+  - Chính thức đóng `TODO-AUDIT-NEW-183` và `TODO-AUDIT-NEW-185` trong `TODO.md` và `ROADMAP.md`.
+  - Giữ nguyên triết lý không đếm nến và quản trị vị thế động theo biến động ATR trong `RiskManager`.

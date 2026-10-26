@@ -796,6 +796,15 @@ pub struct TacticalMomentumParams {
     /// 🎯 [TODO-AUDIT-NEW-47] Ngưỡng ROE tối đa để kích hoạt Stagnation Exit khi bứt phá xịt (Mặc định: +2.0% ROE)
     #[serde(default = "default_momentum_stagnation_max_roe")]
     pub stagnation_max_roe: f64,
+
+    /// 🌪️ [TODO-AUDIT-NEW-43] Ngưỡng nén biến động trước đó tối thiểu để cho phép bùng nổ (0.10 -> 0.90, Step 0.05 -> 17 nấc)
+    #[dna(min = 0.10, max = 0.90, step = 0.05)]
+    #[serde(default = "default_momentum_squeeze_threshold")]
+    pub squeeze_threshold: f64,
+
+    /// 🛑 [TODO-AUDIT-NEW-40] Kẹp trần cự ly bứt phá chống Buying/Selling Climax (1.0 -> 5.0 ATR vi mô, Mặc định 2.50)
+    #[serde(default = "default_momentum_climax_cap")]
+    pub climax_expansion_cap: f64,
 }
 
 impl Default for TacticalMomentumParams {
@@ -812,6 +821,8 @@ impl Default for TacticalMomentumParams {
             w_volume: default_momentum_w_volume(),
             stagnation_exit_bars: default_momentum_stagnation_bars(),
             stagnation_max_roe: default_momentum_stagnation_max_roe(),
+            squeeze_threshold: default_momentum_squeeze_threshold(),
+            climax_expansion_cap: default_momentum_climax_cap(),
         }
     }
 }
@@ -1472,6 +1483,14 @@ fn default_momentum_stagnation_bars() -> usize {
 
 fn default_momentum_stagnation_max_roe() -> f64 {
     0.02
+}
+
+fn default_momentum_squeeze_threshold() -> f64 {
+    0.40
+}
+
+fn default_momentum_climax_cap() -> f64 {
+    2.50
 }
 
 fn default_range_sl_buffer_atr() -> f64 {

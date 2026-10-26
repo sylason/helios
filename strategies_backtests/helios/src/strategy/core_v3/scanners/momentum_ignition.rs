@@ -23,7 +23,7 @@ use crate::strategy::sensors::HeliosSensors;
 use crate::strategy::core_v3::matrix::MarketMatrixV3;
 use crate::strategy::core_v3::arbiter::{TacticalScanner, Proposal, SignalType, ScannerId};
 use crate::strategy::core_v3::config::HeliosConfigV3;
-use crate::strategy::core_v3::normalization::{sat_unbounded, sat_penetration, convex_combine};
+use crate::strategy::core_v3::normalization::{sat_unbounded, convex_combine};
 use crate::strategy::core_v3::risk::RiskManager;
 
 pub struct MomentumIgnitionScanner;
@@ -39,22 +39,38 @@ impl TacticalScanner for MomentumIgnitionScanner {
 
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
+        if i == 0 {
+            return None; // Cần tối thiểu 1 nến lịch sử để phát hiện sườn xung giao cắt
+        }
+        let prev_i = i - 1;
         let mom_cfg = &config.tactical_sniper.momentum;
         
         let bb_u = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
         let bb_l = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
         let close = tick.closes()[i];
 
-        if bb_u.is_nan() || bb_l.is_nan() || close.is_nan() {
+        let prev_bb_u = sensors.bb_upper.get(prev_i).copied().unwrap_or(f64::NAN);
+        let prev_bb_l = sensors.bb_lower.get(prev_i).copied().unwrap_or(f64::NAN);
+        let prev_close = tick.closes()[prev_i];
+
+        if bb_u.is_nan() || bb_l.is_nan() || close.is_nan() || prev_bb_u.is_nan() || prev_bb_l.is_nan() || prev_close.is_nan() {
             return None;
         }
 
-        // 🛡️ VẤN ĐỀ 2 (TODO-P0-04): Early Exit Guard (Khử 100% điểm ảo Sigmoid)
-        // Giá bắt buộc phải thực sự vượt biên dải Bollinger Bands mới được coi là Breakout
-        let is_long_candidate = close > bb_u;
-        let is_short_candidate = close < bb_l;
+        // 🛡️ TODO-AUDIT-NEW-43: Bắt buộc có Tiền Đề Nén Biến Động (Prior Squeeze Guard)
+        // Lò xo bắt buộc phải tích lũy năng lượng nén chặt trước khi bung sóng, khử 100% lệnh mua đuổi khi trend đã tăng dốc từ lâu
+        let prior_squeeze = matrix.squeeze_intensity.get(prev_i).copied().unwrap_or(0.0);
+        let min_squeeze = mom_cfg.squeeze_threshold.clamp(0.05, 0.95);
+        if prior_squeeze < min_squeeze {
+            return None;
+        }
+
+        // 🛡️ TODO-AUDIT-NEW-44: Nhận Diện Cú Bung Đầu Tiên (Discrete Rising Edge Detection)
+        // Chỉ chấp nhận nến giao cắt đầu tiên vượt biên dải, cấm tuyệt đối spam lệnh ở nến 2, 3, 4
+        let is_long_candidate = close > bb_u && prev_close <= prev_bb_u;
+        let is_short_candidate = close < bb_l && prev_close >= prev_bb_l;
         if !is_long_candidate && !is_short_candidate {
-            return None; // Giá nằm trong dải -> Dứt khoát không có Breakout
+            return None; // Giá chưa vượt biên hoặc đã bứt phá từ các nến trước -> Loại bỏ
         }
 
         let atr = sensors.atr_sl.get(i).copied().unwrap_or(f64::NAN);
@@ -104,36 +120,49 @@ impl TacticalScanner for MomentumIgnitionScanner {
             }
         }
 
-        // 🛡️ VẤN ĐỀ 4 (TODO-P0-06): Chuẩn hóa điểm số phi thứ nguyên qua Tanh & Trọng số DNA
+        // 🛡️ TODO-AUDIT-NEW-40: Cầu chì kẹp trần cự ly phi thứ nguyên chống Buying/Selling Climax
+        // Ngăn chặn 100% bẫy đu đỉnh/đáy kiệt sức khi cây nến tăng/giảm quá sốc ngoài dải BB
+        let dist = match signal_type {
+            SignalType::Long => close - bb_u,
+            SignalType::Short => bb_l - close,
+        };
+        let climax_cap = mom_cfg.climax_expansion_cap.max(1.0);
+        if dist > atr * climax_cap {
+            return None; // VETO: Cự ly vượt quá ngưỡng trần an toàn -> Không mua đỉnh / bán đáy
+        }
+
+        // 🛡️ TODO-AUDIT-NEW-45: Chấm điểm Uy lực qua Độ đặc thân nến BOP & Động hóa mẫu số RSI
         let vol_thresh = if mom_cfg.vol_z_threshold <= 0.0 { 1.50 } else { mom_cfg.vol_z_threshold.max(0.10) };
         let rsi_thresh = if mom_cfg.rsi_threshold <= 0.0 { 60.0 } else { mom_cfg.rsi_threshold.clamp(50.0, 90.0) };
 
         let f_vol = sat_unbounded(raw_vol_z, vol_thresh);
-        // Đặt mục tiêu bứt phá chuẩn qua BB là 0.25 ATR
-        let target_breakout = atr * 0.25;
 
-        let (f_break, f_rsi) = match signal_type {
+        // Balance of Power (BOP: độ dài thân nến so với biên độ nến): nến càng đặc, phe chủ động càng áp đảo
+        let bop = match signal_type {
+            SignalType::Long => (close - open) / candle_range,
+            SignalType::Short => (open - close) / candle_range,
+        };
+        let f_body = bop.clamp(0.0, 1.0);
+
+        // Chuẩn hóa động khoảng cách RSI theo DNA (Khử triệt để mẫu số cứng 15.0)
+        let f_rsi = match signal_type {
             SignalType::Long => {
-                let dist = (close - bb_u).max(0.0);
-                let f_b = sat_penetration(dist, target_breakout);
                 let rsi_excess = (rsi_mom - rsi_thresh).max(0.0);
-                let f_r = sat_unbounded(rsi_excess, 15.0);
-                (f_b, f_r)
+                let rsi_range = (100.0 - rsi_thresh).max(1.0);
+                (rsi_excess / rsi_range).clamp(0.0, 1.0)
             }
             SignalType::Short => {
-                let dist = (bb_l - close).max(0.0);
-                let f_b = sat_penetration(dist, target_breakout);
-                let rsi_excess = ((100.0 - rsi_thresh) - rsi_mom).max(0.0);
-                let f_r = sat_unbounded(rsi_excess, 15.0);
-                (f_b, f_r)
+                let rsi_excess = (rsi_thresh - rsi_mom).max(0.0);
+                let rsi_range = rsi_thresh.max(1.0);
+                (rsi_excess / rsi_range).clamp(0.0, 1.0)
             }
         };
 
-        // Tổ hợp lồi 3 thành phần động từ DNA
+        // Tổ hợp lồi 3 thành phần động từ DNA (w_breakout làm trọng số cho độ đặc thân nến)
         let w_break = if mom_cfg.w_breakout <= 0.0 { 0.40 } else { mom_cfg.w_breakout.clamp(0.10, 0.80) };
         let w_vol = if mom_cfg.w_volume <= 0.0 { 0.30 } else { mom_cfg.w_volume.clamp(0.10, 0.80) };
         let w_rsi = (1.0 - w_break - w_vol).max(0.05);
-        let raw_score = convex_combine(&[f_break, f_vol, f_rsi], &[w_break, w_vol, w_rsi]);
+        let raw_score = convex_combine(&[f_body, f_vol, f_rsi], &[w_break, w_vol, w_rsi]);
 
         if raw_score < mom_cfg.min_activation_score {
             return None;
