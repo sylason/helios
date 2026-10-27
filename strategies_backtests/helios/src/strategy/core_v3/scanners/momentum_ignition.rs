@@ -88,6 +88,23 @@ impl TacticalScanner for MomentumIgnitionScanner {
 
         // 🛡️ VẤN ĐỀ 1 (TODO-P0-02): Màu nến & CLV Guard (Khử 100% bẫy râu nến Fakeout)
         let candle_range = (high - low).max(1e-5);
+
+        // 🛡️ TODO-AUDIT-NEW-172: Chốt chặn lọc vi bứt phá giả trong dải nén quá hẹp (MOM-MIN-EXPANSION-SPAN)
+        // 1. Khối lượng bắt buộc phải cao hơn mức trung bình (khử 100% bứt phá trong chân không thanh khoản)
+        if raw_vol_z <= 0.0 {
+            return None; // VETO: Khối lượng cạn kiệt, không có dòng tiền thật
+        }
+
+        // 2. Chiều dài nến kích hỏa bắt buộc phải có xung lực thực tế so với ATR (khử 100% nến que tăm trong Dead Band)
+        let min_range_mult = if mom_cfg.min_ignition_range_atr <= 0.0 {
+            0.60
+        } else {
+            mom_cfg.min_ignition_range_atr.max(0.10)
+        };
+        if candle_range < min_range_mult * atr {
+            return None; // VETO: Nến que tăm không đủ xung lực biên độ so với ATR
+        }
+
         let clv = (2.0 * close - high - low) / candle_range;
         let min_clv = if mom_cfg.min_clv <= 0.0 { 0.20 } else { mom_cfg.min_clv.clamp(0.05, 0.90) };
 

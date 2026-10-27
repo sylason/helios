@@ -1144,12 +1144,16 @@
     - [x] `test_momentum_ignition_allows_breakout_with_wide_headroom_high_rr`
     - [x] `test_momentum_ignition_allows_breakout_above_macro_resistance`
 
-- [ ] **TODO-AUDIT-NEW-172: Chốt Chặn Lọc Vi Bứt Phá Giả Trong Dải Nén Quá Hẹp (`MOM-MIN-EXPANSION-SPAN`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `matrix.rs`
-  - **Mô tả:** Khi dải BB co thắt cực hẹp ($< 0.10\%$), chỉ vài bước giá nhảy ngẫu nhiên của 1 lệnh nhỏ cũng làm nến đóng ngoài dải BB Upper dù không có dòng tiền thật. Yêu cầu nến kích hỏa phải có chiều dài thực tế tối thiểu $\text{Range} \ge 0.70 \times ATR$ và độ mở dải biến động $\Delta(\text{Band Width}) > 0$.
+- [x] **TODO-AUDIT-NEW-172: Chốt Chặn Lọc Vi Bứt Phá Giả Trong Dải Nén Quá Hẹp (`MOM-MIN-EXPANSION-SPAN`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `config.rs`, `mod.rs`
+  - **Mô tả:** [ĐÃ TRIỂN KHAI HOÀN TẤT THEO PHƯƠNG ÁN B+ FIRST-PRINCIPLES]:
+    1. *Khử nến que tăm trong Dead Band:* Bổ sung gen DNA trực giao `min_ignition_range_atr` [0.30, 1.20] ATR (step 0.05, default 0.60), nâng DNA_WIDTH lên 125 chiều. Nến kích hỏa bắt buộc phải có chiều dài thực tế: `candle_range >= min_ignition_range_atr * atr`.
+    2. *Sàn khối lượng thực:* Bổ sung chốt chặn `raw_vol_z <= 0.0 -> VETO` để loại bỏ 100% các cú nhảy giá ảo trong chân không thanh khoản.
+    3. *Bác bỏ vi sai dải bậc thang MTF:* Bác bỏ điều kiện `cur_width <= prev_width` vì dải BB vi mô 5m khi rải bậc thang xuống 1m sẽ gây VETO oan 80% số nến 1m.
   - **Unit Tests:**
-    - [ ] `test_momentum_ignition_rejects_micro_burst_in_dead_band`
-    - [ ] `test_momentum_ignition_fires_on_genuine_range_expansion`
+    - [x] `test_momentum_ignition_rejects_micro_burst_in_dead_band_narrow_candle`
+    - [x] `test_momentum_ignition_rejects_sub_average_volume`
+    - [x] `test_momentum_ignition_fires_on_genuine_range_expansion`
 
 - [x] **TODO-AUDIT-NEW-173: Cơ Chế Chốt Lời Co Giãn Xung Lực Nhanh (Impulse Profit Expansion Lock) Và Partial TP Cho Momentum (`MOM-IMPULSE-PROFIT-LOCK`) (BÁO ĐỘNG GIẢ / BÁC BỎ DO OVER-ENGINEERING & ĐÃ BAO HÀM BỞI TIERED RATCHET)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`, `config.rs`

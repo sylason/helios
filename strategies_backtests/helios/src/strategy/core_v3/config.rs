@@ -874,6 +874,11 @@ pub struct TacticalMomentumParams {
     #[dna(min = 0.50, max = 2.00, step = 0.10)]
     #[serde(default = "default_momentum_min_mtf_headroom_rr")]
     pub min_mtf_headroom_rr: f64,
+
+    /// 🚀 [TODO-AUDIT-NEW-172] Chiều dài nến kích hỏa tối thiểu so với ATR (0.30 -> 1.20 ATR, Step 0.05 -> 19 nấc)
+    #[dna(min = 0.30, max = 1.20, step = 0.05)]
+    #[serde(default = "default_momentum_min_ignition_range_atr")]
+    pub min_ignition_range_atr: f64,
 }
 
 impl Default for TacticalMomentumParams {
@@ -893,6 +898,7 @@ impl Default for TacticalMomentumParams {
             squeeze_threshold: default_momentum_squeeze_threshold(),
             max_breakout_extension_atr: default_momentum_max_breakout_extension_atr(),
             min_mtf_headroom_rr: default_momentum_min_mtf_headroom_rr(),
+            min_ignition_range_atr: default_momentum_min_ignition_range_atr(),
         }
     }
 }
@@ -1565,6 +1571,10 @@ fn default_momentum_max_breakout_extension_atr() -> f64 {
 
 fn default_momentum_min_mtf_headroom_rr() -> f64 {
     1.00
+}
+
+fn default_momentum_min_ignition_range_atr() -> f64 {
+    0.60
 }
 
 #[allow(dead_code)]
