@@ -830,6 +830,11 @@ pub struct TacticalMomentumParams {
     #[dna(min = 1.00, max = 3.50, step = 0.10)]
     #[serde(default = "default_momentum_max_breakout_extension_atr", alias = "climax_expansion_cap")]
     pub max_breakout_extension_atr: f64,
+
+    /// 🧭 [TODO-AUDIT-NEW-171] Tỷ lệ R:R tối thiểu tới cản vĩ mô MTF (0.50 -> 2.00, Step 0.10 -> 16 nấc)
+    #[dna(min = 0.50, max = 2.00, step = 0.10)]
+    #[serde(default = "default_momentum_min_mtf_headroom_rr")]
+    pub min_mtf_headroom_rr: f64,
 }
 
 impl Default for TacticalMomentumParams {
@@ -848,6 +853,7 @@ impl Default for TacticalMomentumParams {
             stagnation_max_roe: default_momentum_stagnation_max_roe(),
             squeeze_threshold: default_momentum_squeeze_threshold(),
             max_breakout_extension_atr: default_momentum_max_breakout_extension_atr(),
+            min_mtf_headroom_rr: default_momentum_min_mtf_headroom_rr(),
         }
     }
 }
@@ -1516,6 +1522,10 @@ fn default_momentum_squeeze_threshold() -> f64 {
 
 fn default_momentum_max_breakout_extension_atr() -> f64 {
     1.50
+}
+
+fn default_momentum_min_mtf_headroom_rr() -> f64 {
+    1.00
 }
 
 #[allow(dead_code)]

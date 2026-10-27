@@ -180,6 +180,40 @@ impl TacticalScanner for MomentumIgnitionScanner {
             SignalType::Long => low - buffer,
             SignalType::Short => high + buffer,
         };
+
+        // 🛡️ TODO-AUDIT-NEW-171: Chốt chặn kiểm tra tỷ lệ R:R tới cản vĩ mô MTF (Dynamic R:R Hurdle Gate)
+        let min_rr = if mom_cfg.min_mtf_headroom_rr <= 0.0 {
+            1.00
+        } else {
+            mom_cfg.min_mtf_headroom_rr.max(0.20)
+        };
+        let bb_macro_u = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
+        let bb_macro_l = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
+        if bb_macro_u.is_nan() || bb_macro_l.is_nan() {
+            return None;
+        }
+
+        match signal_type {
+            SignalType::Long => {
+                if close < bb_macro_u {
+                    let reward_dist = bb_macro_u - close;
+                    let risk_dist = (close - raw_sl).max(atr * 0.10);
+                    if (reward_dist / risk_dist) < min_rr {
+                        return None; // VETO: Tỷ lệ R:R tới trần cản vĩ mô quá thấp (< min_rr) -> Tránh Bull Trap
+                    }
+                }
+            }
+            SignalType::Short => {
+                if close > bb_macro_l {
+                    let reward_dist = close - bb_macro_l;
+                    let risk_dist = (raw_sl - close).max(atr * 0.10);
+                    if (reward_dist / risk_dist) < min_rr {
+                        return None; // VETO: Tỷ lệ R:R tới sàn hỗ trợ vĩ mô quá thấp (< min_rr) -> Tránh Bear Trap
+                    }
+                }
+            }
+        }
+
         let sl = RiskManager::sanitize_structural_sl(
             signal_type == SignalType::Long,
             close,

@@ -1767,7 +1767,7 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 120, "DNA_WIDTH phải là 120 chiều sau khi thêm 3 gen bbands_momentum cho Momentum (TODO-AUDIT-NEW-169)!");
+        assert_eq!(width, 121, "DNA_WIDTH phải là 121 chiều sau khi thêm gen min_mtf_headroom_rr cho Momentum (TODO-AUDIT-NEW-171)!");
 
         let mom_sqz_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.squeeze_threshold"));
         assert!(mom_sqz_def.is_some(), "defs phải chứa tactical_sniper.momentum.squeeze_threshold!");
@@ -1791,6 +1791,18 @@ mod tests {
                 assert_eq!(*step, Some(0.10), "max_breakout_extension_atr step phải là Some(0.10)");
             }
             _ => panic!("max_breakout_extension_atr phải là ParamDefinition::Range"),
+        }
+
+        let mom_rr_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.min_mtf_headroom_rr"));
+        assert!(mom_rr_def.is_some(), "defs phải chứa tactical_sniper.momentum.min_mtf_headroom_rr!");
+        let (_, mom_rr_attr) = mom_rr_def.unwrap();
+        match mom_rr_attr {
+            ferro_trade::optimizer::params::ParamDefinition::Range { min, max, step } => {
+                assert!((min - 0.50).abs() < 1e-12, "min_mtf_headroom_rr min phải là 0.50");
+                assert!((max - 2.00).abs() < 1e-12, "min_mtf_headroom_rr max phải là 2.00");
+                assert_eq!(*step, Some(0.10), "min_mtf_headroom_rr step phải là Some(0.10)");
+            }
+            _ => panic!("min_mtf_headroom_rr phải là ParamDefinition::Range"),
         }
 
         let abs_mfi_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.absorption.mfi_absorption_thresh"));
@@ -4926,6 +4938,172 @@ mod tests {
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "Nến vi mô dao động bên trong dải bb_mom_upper (1995 < 2000) PHẢI bị bỏ qua!");
+    }
+
+    #[test]
+    fn test_momentum_ignition_rejects_breakout_directly_into_macro_resistance_low_rr() {
+        let len = 50;
+        let mut closes = vec![1998.0; len];
+        closes[49] = 2005.0; // Bứt phá dải vi mô bb_mom_upper (2000.0)
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1999.0; len]),
+            high: std::sync::Arc::new(vec![2006.0; len]),
+            low: std::sync::Arc::new(vec![1997.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.max_breakout_extension_atr = 1.50;
+        config.tactical_sniper.momentum.squeeze_threshold = 0.40;
+        config.tactical_sniper.momentum.min_mtf_headroom_rr = 1.00;
+
+        let mut sensors = HeliosSensors::default();
+        // Cản vĩ mô ở ngay sát đầu: bb_upper = 2010.0 (Reward = 2010.0 - 2005.0 = 5.0)
+        // Trong khi low = 1997.0, atr = 10.0, buffer = 5.0 -> raw_sl = 1992.0 -> Risk = 2005.0 - 1992.0 = 13.0
+        // Tỷ lệ R:R = 5.0 / 13.0 = 0.3846 < min_rr (1.00) -> PHẢI VETO!
+        sensors.bb_upper = std::sync::Arc::new(vec![2010.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "Nến bứt phá đâm đầu vào cản vĩ mô với tỷ lệ R:R = 0.38 < 1.0 PHẢI bị VETO (TODO-AUDIT-NEW-171)!");
+    }
+
+    #[test]
+    fn test_momentum_ignition_allows_breakout_with_wide_headroom_high_rr() {
+        let len = 50;
+        let mut closes = vec![1998.0; len];
+        closes[49] = 2005.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1999.0; len]),
+            high: std::sync::Arc::new(vec![2006.0; len]),
+            low: std::sync::Arc::new(vec![1997.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.max_breakout_extension_atr = 1.50;
+        config.tactical_sniper.momentum.squeeze_threshold = 0.40;
+        config.tactical_sniper.momentum.min_mtf_headroom_rr = 1.00;
+
+        let mut sensors = HeliosSensors::default();
+        // Cản vĩ mô ở xa: bb_upper = 2030.0 (Reward = 2030.0 - 2005.0 = 25.0)
+        // Risk = 13.0 -> R:R = 25.0 / 13.0 = 1.923 >= 1.00 -> Chấp thuận!
+        sensors.bb_upper = std::sync::Arc::new(vec![2030.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "Nến bứt phá có khoảng trống cản vĩ mô R:R = 1.92 >= 1.0 PHẢI được chấp thuận!");
+    }
+
+    #[test]
+    fn test_momentum_ignition_allows_breakout_above_macro_resistance() {
+        let len = 50;
+        let mut closes = vec![1998.0; len];
+        // Giá bứt phá vượt hẳn lên trên cản vĩ mô bb_upper = 2020.0
+        closes[49] = 2022.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2015.0; len]),
+            high: std::sync::Arc::new(vec![2023.0; len]),
+            low: std::sync::Arc::new(vec![2014.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.max_breakout_extension_atr = 2.50; // Cho phép vọt xà tới 2.5 ATR
+        config.tactical_sniper.momentum.squeeze_threshold = 0.40;
+        config.tactical_sniper.momentum.min_mtf_headroom_rr = 1.00;
+
+        let mut sensors = HeliosSensors::default();
+        // Cản vĩ mô ở 2020.0, giá ở 2022.0 >= bb_upper -> Blue Sky / S-R Flip
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "Nến bứt phá vượt qua cản vĩ mô (Blue Sky / S-R Flip) PHẢI được chấp thuận!");
     }
 }
 

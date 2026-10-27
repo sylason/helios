@@ -1125,12 +1125,13 @@
     - [x] `test_momentum_ignition_vetoes_blown_out_liquidation_cascade`
     - [x] `test_momentum_ignition_accepts_healthy_early_breakout`
 
-- [ ] **TODO-AUDIT-NEW-171: Chốt Chặn Kiểm Tra Khoảng Trống Cản Vĩ Mô MTF Headroom $\ge 1.5\text{ ATR}$ (`MOM-MTF-HEADROOM`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `arbiter.rs`
-  - **Mô tả:** Khi nến 1m bùng nổ nhưng ngay phía trên đầu ($< 0.5\text{ ATR}$) là đỉnh Swing High 4h hoặc dải BB Upper 1h/4h, giá sẽ đâm sầm vào tường cản cứng và dội ngược lại tạo Bull Trap. Bắt buộc kiểm tra khoảng trống dư địa (Headroom): $\text{Distance to MTF Resistance} \ge 1.5\text{ ATR}$; nếu không thỏa mãn tự động hủy Proposal.
+- [x] **TODO-AUDIT-NEW-171: Chốt Chặn Kiểm Tra Tỷ Lệ R:R Tới Cản Vĩ Mô MTF (`MOM-MTF-HEADROOM-RR`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `config.rs`, `core_v3/mod.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Triển khai chốt chặn Dynamic R:R Hurdle Gate: Kiểm tra tỷ lệ kỳ vọng $\frac{R_{\text{reward}}}{R_{\text{risk}}} = \frac{|BB_{\text{macro}} - Close|}{|Close - raw\_sl|} \ge \text{min\_mtf\_headroom\_rr}$, VETO tức thời `Proposal` (`return None;`) khi tỷ lệ $R:R$ tới trần cản vĩ mô (Bollinger Upper/Lower MTF 15m+) quá hẹp để chống Bull Trap / Bear Trap (HB-21 & HB-22 / Glass Ceiling Trap). Tự động cho phép đi tiếp khi giá đã bứt phá vượt hẳn cản vĩ mô ($Close \ge BB_{\text{upper}}$ hoặc $Close \le BB_{\text{lower}}$) theo cơ chế Blue Sky / S-R Flip. Mở gen DNA trực giao `min_mtf_headroom_rr` `[0.50, 2.00]`, step `0.10`, mặc định `1.00`, nâng `DNA_WIDTH` từ 120 lên 121 chiều. Unit tests pass 100% (206/206 tests).
   - **Unit Tests:**
-    - [ ] `test_momentum_ignition_rejects_breakout_directly_into_4h_resistance`
-    - [ ] `test_momentum_ignition_allows_breakout_with_wide_headroom`
+    - [x] `test_momentum_ignition_rejects_breakout_directly_into_macro_resistance_low_rr`
+    - [x] `test_momentum_ignition_allows_breakout_with_wide_headroom_high_rr`
+    - [x] `test_momentum_ignition_allows_breakout_above_macro_resistance`
 
 - [ ] **TODO-AUDIT-NEW-172: Chốt Chặn Lọc Vi Bứt Phá Giả Trong Dải Nén Quá Hẹp (`MOM-MIN-EXPANSION-SPAN`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `matrix.rs`
