@@ -436,9 +436,13 @@
     - [x] `test_absorption_veto_when_falling_knife_accelerates`
     - [x] `test_absorption_veto_when_money_flow_continues_bleeding`
 
-- [ ] **TODO-AUDIT-NEW-50: Khắc Phục Bẫy Vỡ Tường Limit & Nhận Diện Ngưỡng Cản Cấu Trúc Thực Sự (`ABS-STRUCTURAL-WALL`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`, `sensors.rs`
-  - **Mô tả:** Nhận diện vùng hấp thụ tại các ngưỡng hỗ trợ/kháng cự cấu trúc thực sự (Prior Swing Lows / Value Area) thay vì dải Bollinger trôi nổi; bổ sung chốt chặn vỡ tường Limit khi lực xả phá vỡ đáy hấp thụ.
+- [x] **TODO-AUDIT-NEW-50: Khắc Phục Bẫy Vỡ Tường Limit & Nhận Diện Ngưỡng Cản Cấu Trúc Thực Sự (`ABS-STRUCTURAL-WALL`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100% THEO PHƯƠNG ÁN 4 - PURE PHYSICAL RECLAIM & CLEAN LINEAGE]. Khắc phục triệt để bẫy vỡ tường Limit (Limit Wall Shatter) bằng chốt chặn Reclaim Gate toán học tự nhiên: Long bắt buộc `pct_b_close >= 0.0` (nến đóng cửa phải giữ vững bên trong/trên dải đáy), Short bắt buộc `pct_b_close <= 1.0` (nến đóng cửa phải giữ vững bên trong/dưới dải đỉnh), râu nến vẫn được quét thanh khoản sâu ngoài dải. Triệt tiêu hoàn toàn ô nhiễm tham số chéo (không dùng chéo `max_adverse_slope` cho BB slope), tuân thủ 100% nguyên tắc Single Responsibility. Bảo toàn nguyên vẹn `DNA_WIDTH = 124` chiều; bộ test 19/19 tests absorption và 212/212 tests helios PASS 100%.
+  - **Unit Tests:**
+    - [x] `test_absorption_veto_when_limit_wall_shatters_breakdown`
+    - [x] `test_absorption_approved_when_limit_wall_holds_spring_reclaim`
+    - [x] `test_absorption_short_veto_when_upper_wall_shatters_breakout`
 
 - [x] **TODO-AUDIT-NEW-51: Triển Khai Chuỗi Xác Nhận Đảo Chiều Đa Nến & Cổng Kiểm Tra R:R Tối Thiểu (`REV-SEQUENCE-RR`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `config.rs`, `core_v3/mod.rs`
