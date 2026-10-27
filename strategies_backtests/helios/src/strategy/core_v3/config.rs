@@ -82,6 +82,12 @@ pub struct IndicatorsConfig {
     pub dow_structure: DowStructureParams,
     #[dna(nest)]
     pub cmo_micro: CmoMicroParams,
+    #[dna(nest)]
+    pub impulse_wave: ImpulseWaveParams,
+    #[dna(nest)]
+    pub cmo_trend_wave: CmoWaveParams,
+    #[dna(nest)]
+    pub cmf_trend: CmfTrendParams,
 }
 
 #[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
@@ -479,6 +485,63 @@ impl Default for CmoMicroParams {
     }
 }
 
+/// Cảm biến Sóng Đẩy Phục Vụ Đo Tỷ Lệ Hồi Quy (TODO-AUDIT-NEW-180)
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct ImpulseWaveParams {
+    #[dna(subset = "5m, 15m, 30m, 1h, 2h, 4h")]
+    pub timeframe: Timeframe,
+    #[dna(min = 6.0, max = 60.0, step = 3.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub period: usize,
+}
+
+impl Default for ImpulseWaveParams {
+    fn default() -> Self {
+        Self {
+            timeframe: Timeframe::T15m,
+            period: 21,
+        }
+    }
+}
+
+/// Cảm biến Vận Tốc Sóng CMO Đo Bất Đối Xứng v_impulse vs v_retrace (TODO-AUDIT-NEW-180)
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct CmoWaveParams {
+    #[dna(subset = "1m, 3m, 5m, 15m, 30m")]
+    pub timeframe: Timeframe,
+    #[dna(min = 6.0, max = 60.0, step = 3.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub period: usize,
+}
+
+impl Default for CmoWaveParams {
+    fn default() -> Self {
+        Self {
+            timeframe: Timeframe::T5m,
+            period: 15,
+        }
+    }
+}
+
+/// Cảm biến Dòng Tiền Chaikin Money Flow Đo Bất Đối Xứng Tích Lũy/Xả Hàng (TODO-AUDIT-NEW-179)
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct CmfTrendParams {
+    #[dna(subset = "1m, 3m, 5m, 15m, 30m")]
+    pub timeframe: Timeframe,
+    #[dna(min = 6.0, max = 60.0, step = 3.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub period: usize,
+}
+
+impl Default for CmfTrendParams {
+    fn default() -> Self {
+        Self {
+            timeframe: Timeframe::T5m,
+            period: 21,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct MatrixConfig {
     /// 🚀 Hệ số co giãn độ dốc KAMA chuẩn hóa theo ATR qua Tanh scaling (0.02 -> 1.00, Step 0.02 -> 50 nấc)
@@ -782,11 +845,20 @@ pub struct TacticalPullbackParams {
     #[serde(default = "default_pullback_min_clv")]
     pub min_clv: f64,
 
-    /// 12. Ngưỡng Cực Trị Thác Lũ Thanh Lý / Bắt Dao Rơi (5.0 -> 25.0, Step 2.0 -> 11 nấc)
-    /// Chỉ khi Stochastic rơi vào vùng xả lũ cực đoan này mới kích hoạt Soft Hook Guard.
-    #[dna(min = 5.0, max = 25.0, step = 2.0)]
-    #[serde(default = "default_pullback_stoch_climax_thresh")]
-    pub stoch_climax_thresh: f64,
+    /// 12. Tỷ lệ hồi quy cực đại cho phép so với biên độ sóng đẩy (0.20 -> 0.95, Step 0.05 -> 16 nấc, TODO-AUDIT-NEW-180)
+    #[dna(min = 0.20, max = 0.95, step = 0.05)]
+    #[serde(default = "default_pullback_max_retracement_ratio")]
+    pub max_retracement_ratio: f64,
+
+    /// 13. Vận tốc sóng tối thiểu CMO [-1.0, 1.0] đo bất đối xứng v_impulse vs v_retrace (-0.60 -> 0.40, Step 0.05 -> 21 nấc, TODO-AUDIT-NEW-180)
+    #[dna(min = -0.60, max = 0.40, step = 0.05)]
+    #[serde(default = "default_pullback_min_wave_cmo")]
+    pub min_wave_cmo: f64,
+
+    /// 14. Dòng tiền Chaikin Money Flow tối thiểu [-1.0, 1.0] đo cạn cung/toxic flow (-0.60 -> 0.40, Step 0.05 -> 21 nấc, TODO-AUDIT-NEW-179)
+    #[dna(min = -0.60, max = 0.40, step = 0.05)]
+    #[serde(default = "default_pullback_min_cmf_trend")]
+    pub min_cmf_trend: f64,
 }
 
 impl Default for TacticalPullbackParams {
@@ -803,7 +875,9 @@ impl Default for TacticalPullbackParams {
             max_boundary_z: default_pullback_max_boundary_z(),
             max_squeeze_intensity: default_pullback_max_squeeze_intensity(),
             min_clv: default_pullback_min_clv(),
-            stoch_climax_thresh: default_pullback_stoch_climax_thresh(),
+            max_retracement_ratio: default_pullback_max_retracement_ratio(),
+            min_wave_cmo: default_pullback_min_wave_cmo(),
+            min_cmf_trend: default_pullback_min_cmf_trend(),
         }
     }
 }
@@ -1646,8 +1720,16 @@ fn default_pullback_min_clv() -> f64 {
     0.20
 }
 
-fn default_pullback_stoch_climax_thresh() -> f64 {
-    10.0
+fn default_pullback_max_retracement_ratio() -> f64 {
+    0.75
+}
+
+fn default_pullback_min_wave_cmo() -> f64 {
+    -0.10
+}
+
+fn default_pullback_min_cmf_trend() -> f64 {
+    -0.10
 }
 
 fn default_reversal_climax_vol_threshold() -> f64 {

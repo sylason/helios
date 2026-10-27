@@ -67,4 +67,10 @@ pub struct HeliosSensors {
     pub dow_floor: Arc<Vec<f64>>,
     pub dow_ceiling: Arc<Vec<f64>>,
     pub cmo_micro: Arc<Vec<f64>>,
+
+    // --- Orthogonal Wave Sensors (TODO-AUDIT-NEW-179 & TODO-AUDIT-NEW-180) ---
+    pub impulse_floor: Arc<Vec<f64>>,
+    pub impulse_ceiling: Arc<Vec<f64>>,
+    pub cmo_trend_wave: Arc<Vec<f64>>,
+    pub cmf_trend: Arc<Vec<f64>>,
 }

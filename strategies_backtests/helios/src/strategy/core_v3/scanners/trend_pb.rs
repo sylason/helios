@@ -116,6 +116,34 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
+            // 🛡️ CHỐT CHẶN TỶ LỆ HỒI QUY CỰC ĐẠI (TODO-AUDIT-NEW-180 Part 1):
+            // Đo biên độ sóng đẩy impulse_range = impulse_ceiling - impulse_floor
+            // retrace_ratio = (impulse_ceiling - close) / impulse_range <= max_retracement_ratio
+            let imp_floor = sensors.impulse_floor.get(i).copied().unwrap_or(f64::NAN);
+            let imp_ceiling = sensors.impulse_ceiling.get(i).copied().unwrap_or(f64::NAN);
+            if !imp_floor.is_finite() || !imp_ceiling.is_finite() || imp_ceiling <= imp_floor {
+                return None;
+            }
+            let impulse_range = (imp_ceiling - imp_floor).max(current_atr * 0.1);
+            let retrace_ratio = ((imp_ceiling - close) / impulse_range).clamp(0.0, 2.0);
+            if retrace_ratio > pb_cfg.max_retracement_ratio {
+                return None;
+            }
+
+            // 🛡️ CHỐT CHẶN BẤT ĐỐI XỨNG VẬN TỐC SÓNG (TODO-AUDIT-NEW-180 Part 2):
+            // cmo_trend_wave [-1.0, 1.0]: Nếu nhịp hồi xả dốc đứng (thác đổ), cmo < min_wave_cmo -> VETO!
+            let wave_cmo = sensors.cmo_trend_wave.get(i).copied().unwrap_or(f64::NAN);
+            if !wave_cmo.is_finite() || wave_cmo < pb_cfg.min_wave_cmo {
+                return None;
+            }
+
+            // 🛡️ CHỐT CHẶN DÒNG TIỀN TÍCH LŨY / CẠN CUNG NO-SUPPLY (TODO-AUDIT-NEW-179):
+            // cmf_trend [-1.0, 1.0]: Nếu xuất hiện áp lực xả hàng độc hại (toxic flow), cmf < min_cmf_trend -> VETO!
+            let cmf_val = sensors.cmf_trend.get(i).copied().unwrap_or(f64::NAN);
+            if !cmf_val.is_finite() || cmf_val < pb_cfg.min_cmf_trend {
+                return None;
+            }
+
             // 🛡️ CHỐT CHẶN KHOẢNG CÁCH KAMA (TODO-AUDIT-NEW-38):
             // delta_kama < -inval_floor: Giá đâm thủng sâu qua hỗ trợ KAMA (Breakdown Trap) -> VETO!
             // delta_kama > max_dist: Giá lơ lửng trên không trung xa KAMA (Floating Ghost Pullback) -> VETO!
@@ -167,6 +195,34 @@ impl TacticalScanner for TrendPBScanner {
             // Bảo vệ đỉnh sóng xoay chiều Lower High (Swing High cũ). Nếu giá đâm thủng đỉnh này -> VETO!
             let dow_ceiling = sensors.dow_ceiling.get(i).copied().unwrap_or(f64::NAN);
             if dow_ceiling.is_nan() || close > dow_ceiling {
+                return None;
+            }
+
+            // 🛡️ CHỐT CHẶN TỶ LỆ HỒI QUY CỰC ĐẠI (TODO-AUDIT-NEW-180 Part 1):
+            // Đo biên độ sóng đẩy impulse_range = impulse_ceiling - impulse_floor
+            // retrace_ratio = (close - impulse_floor) / impulse_range <= max_retracement_ratio
+            let imp_floor = sensors.impulse_floor.get(i).copied().unwrap_or(f64::NAN);
+            let imp_ceiling = sensors.impulse_ceiling.get(i).copied().unwrap_or(f64::NAN);
+            if !imp_floor.is_finite() || !imp_ceiling.is_finite() || imp_ceiling <= imp_floor {
+                return None;
+            }
+            let impulse_range = (imp_ceiling - imp_floor).max(current_atr * 0.1);
+            let retrace_ratio = ((close - imp_floor) / impulse_range).clamp(0.0, 2.0);
+            if retrace_ratio > pb_cfg.max_retracement_ratio {
+                return None;
+            }
+
+            // 🛡️ CHỐT CHẶN BẤT ĐỐI XỨNG VẬN TỐC SÓNG (TODO-AUDIT-NEW-180 Part 2):
+            // cmo_trend_wave [-1.0, 1.0]: Nếu nhịp hồi đẩy tăng tốc chớp nhoáng, wave_cmo > -min_wave_cmo -> VETO!
+            let wave_cmo = sensors.cmo_trend_wave.get(i).copied().unwrap_or(f64::NAN);
+            if !wave_cmo.is_finite() || wave_cmo > -pb_cfg.min_wave_cmo {
+                return None;
+            }
+
+            // 🛡️ CHỐT CHẶN DÒNG TIỀN PHÂN PHỐI / CẠN CẦU NO-DEMAND (TODO-AUDIT-NEW-179):
+            // cmf_trend [-1.0, 1.0]: Nếu xuất hiện lực gom hàng ngược xu hướng, cmf > -min_cmf_trend -> VETO!
+            let cmf_val = sensors.cmf_trend.get(i).copied().unwrap_or(f64::NAN);
+            if !cmf_val.is_finite() || cmf_val > -pb_cfg.min_cmf_trend {
                 return None;
             }
 
@@ -249,6 +305,24 @@ mod tests {
         (DataView::new(raw_cache), IndicatorManager::new(), SmallVec::new(), Vec::new())
     }
 
+    fn mock_pb_sensors_long(len: usize) -> HeliosSensors {
+        let mut s = HeliosSensors::default();
+        s.impulse_floor = std::sync::Arc::new(vec![1950.0; len]);
+        s.impulse_ceiling = std::sync::Arc::new(vec![2050.0; len]);
+        s.cmo_trend_wave = std::sync::Arc::new(vec![0.20; len]);
+        s.cmf_trend = std::sync::Arc::new(vec![0.10; len]);
+        s
+    }
+
+    fn mock_pb_sensors_short(len: usize) -> HeliosSensors {
+        let mut s = HeliosSensors::default();
+        s.impulse_floor = std::sync::Arc::new(vec![1950.0; len]);
+        s.impulse_ceiling = std::sync::Arc::new(vec![2050.0; len]);
+        s.cmo_trend_wave = std::sync::Arc::new(vec![-0.20; len]);
+        s.cmf_trend = std::sync::Arc::new(vec![-0.10; len]);
+        s
+    }
+
     #[test]
     fn test_trend_pb_sl_geometry_no_kama_suction() {
         let len = 10;
@@ -282,7 +356,7 @@ mod tests {
         config.tactical_sniper.pullback.struct_sl_buffer_atr = 0.50;
         config.tactical_sniper.pullback.max_pullback_dist_atr = 2.0;
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         // Giả lập KAMA 15m nằm dưới giá (1998.0 so với giá 2004.0 -> delta_kama = (2004 - 1998)/(4 * sqrt(3)) = 6/6.93 = 0.86 <= 2.0)
         sensors.kama_mid = std::sync::Arc::new(vec![1998.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]); // buffer = 4.0 * 0.5 = 2.0
@@ -339,7 +413,7 @@ mod tests {
         config.tactical_sniper.pullback.rsi_max_cap = 70.0;
         config.tactical_sniper.pullback.min_activation_score = 0.10;
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![1998.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
@@ -386,7 +460,7 @@ mod tests {
         config.tactical_sniper.pullback.min_activation_score = 0.10;
         config.tactical_sniper.pullback.struct_sl_buffer_atr = 0.50; // buffer = 4.0 * 0.5 = 2.0
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
@@ -438,7 +512,7 @@ mod tests {
         config.tactical_sniper.pullback.min_activation_score = 0.10;
         config.tactical_sniper.pullback.min_clv = 0.20;
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![1998.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
@@ -492,7 +566,7 @@ mod tests {
         cmo_falling[i - 1] = 0.20;
         cmo_falling[i] = 0.05;
 
-        let mut sensors_falling = HeliosSensors::default();
+        let mut sensors_falling = mock_pb_sensors_long(len);
         sensors_falling.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_falling.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_falling.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
@@ -508,7 +582,7 @@ mod tests {
         cmo_hooked[i - 1] = 0.05;
         cmo_hooked[i] = 0.20;
 
-        let mut sensors_hooked = HeliosSensors::default();
+        let mut sensors_hooked = mock_pb_sensors_long(len);
         sensors_hooked.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_hooked.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_hooked.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
@@ -552,7 +626,7 @@ mod tests {
         config.tactical_sniper.pullback.min_clv = 0.20;
 
         // Long bão hòa sàn 0.0: K = 0.0, D = 0.0
-        let mut sensors_zero = HeliosSensors::default();
+        let mut sensors_zero = mock_pb_sensors_long(len);
         sensors_zero.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_zero.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_zero.stoch_trend_k = std::sync::Arc::new(vec![0.0; len]);
@@ -566,7 +640,7 @@ mod tests {
         assert!(prop_zero.is_none(), "Hook Guard PHẢI chặn đứng sàn bão hòa xả lũ K=D=0.0!");
 
         // Short bão hòa trần 100.0: K = 100.0, D = 100.0
-        let mut sensors_hundred = HeliosSensors::default();
+        let mut sensors_hundred = mock_pb_sensors_long(len);
         sensors_hundred.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_hundred.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_hundred.stoch_trend_k = std::sync::Arc::new(vec![100.0; len]);
@@ -620,7 +694,6 @@ mod tests {
 
         let mut config = HeliosConfigV3::default();
         config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
-        config.tactical_sniper.pullback.stoch_climax_thresh = 10.0;
         config.tactical_sniper.pullback.stoch_pullback_thresh = 35.0;
         config.tactical_sniper.pullback.min_activation_score = 0.10;
         config.tactical_sniper.pullback.min_clv = 0.20;
@@ -629,7 +702,7 @@ mod tests {
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
 
         // Kịch bản A: Giá đâm thủng DowFloor (close 1998.0 < dow_floor 2002.0) -> VETO!
-        let mut sensors_deadzone = HeliosSensors::default();
+        let mut sensors_deadzone = mock_pb_sensors_long(len);
         sensors_deadzone.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_deadzone.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_deadzone.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
@@ -641,7 +714,7 @@ mod tests {
         assert!(prop_deadzone.is_none(), "Dow Structure Guard PHẢI VETO khi giá đâm thủng đáy Higher Low cũ (close < dow_floor)!");
 
         // Kịch bản B: Giá giữ vững DowFloor (close 1998.0 >= dow_floor 1990.0) -> APPROVED!
-        let mut sensors_rebound = HeliosSensors::default();
+        let mut sensors_rebound = mock_pb_sensors_long(len);
         sensors_rebound.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_rebound.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_rebound.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
@@ -676,7 +749,6 @@ mod tests {
 
         let mut config = HeliosConfigV3::default();
         config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
-        config.tactical_sniper.pullback.stoch_climax_thresh = 10.0;
         config.tactical_sniper.pullback.stoch_pullback_thresh = 35.0;
         config.tactical_sniper.pullback.min_activation_score = 0.10;
         config.tactical_sniper.pullback.min_clv = 0.20;
@@ -688,7 +760,7 @@ mod tests {
         let mut config_high_clv = config.clone();
         config_high_clv.tactical_sniper.pullback.min_clv = 0.60;
 
-        let mut sensors_fake = HeliosSensors::default();
+        let mut sensors_fake = mock_pb_sensors_long(len);
         sensors_fake.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_fake.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_fake.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
@@ -700,7 +772,7 @@ mod tests {
         assert!(prop_fake.is_none(), "Micro CLV Guard PHẢI chặn đứng khi nến chưa rút chân đạt min_clv!");
 
         // Kịch bản B: Nến rút chân đạt chuẩn (min_clv = 0.20 <= CLV = 0.50) -> APPROVED!
-        let mut sensors_confirmed = HeliosSensors::default();
+        let mut sensors_confirmed = mock_pb_sensors_long(len);
         sensors_confirmed.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_confirmed.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors_confirmed.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
@@ -737,7 +809,7 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.25; len]); // Uptrend mạnh
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         let mut stoch_k_vec = vec![30.0; len];
@@ -898,7 +970,7 @@ mod tests {
 
         let config = HeliosConfigV3::default(); // default max_boundary_z = 1.60
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         // Stoch uốn cong ngóc đầu lên từ đáy: prev = 20.0, curr = 25.0
@@ -959,7 +1031,7 @@ mod tests {
 
         let config = HeliosConfigV3::default(); // default max_boundary_z = 1.60
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_short(len);
         sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         // Stoch uốn cong chúc đầu xuống từ đỉnh: prev = 80.0, curr = 75.0
@@ -1019,7 +1091,7 @@ mod tests {
 
         let config = HeliosConfigV3::default(); // default max_squeeze_intensity = 0.75, slope_thresh = 0.05
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         let mut stoch_k = vec![30.0; len];
@@ -1071,7 +1143,7 @@ mod tests {
 
         let config = HeliosConfigV3::default();
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         let mut stoch_k = vec![30.0; len];
@@ -1120,7 +1192,7 @@ mod tests {
         config.tactical_sniper.pullback.min_activation_score = 0.10;
         config.tactical_sniper.pullback.struct_sl_buffer_atr = 2.00; // Đệm 2.0 ATR
 
-        let mut sensors = HeliosSensors::default();
+        let mut sensors = mock_pb_sensors_long(len);
         sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]); // ATR = 5.0 -> Buffer = 10.0
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
@@ -1137,5 +1209,178 @@ mod tests {
 
         // Low = 1990.0, Buffer = 5.0 * 2.0 = 10.0 -> SL phải là 1980.0 (nếu bị kẹp ở 1.20 cũ thì sẽ là 1990.0 - 6.0 = 1984.0)
         assert!((sl - 1980.0).abs() < 1e-4, "SL phải hỗ trợ buffer tới 2.0 ATR (1980.0), thực tế: {}", sl);
+    }
+
+    #[test]
+    fn test_trend_pb_rejects_high_volume_distribution_retrace() {
+        let len = 10;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2010.0; len];
+        let lows = vec![1990.0; len];
+        let closes = vec![2008.0; len];
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.min_cmf_trend = -0.10;
+
+        let mut sensors = mock_pb_sensors_long(len);
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
+
+        // CMF rất âm (-0.35 < -0.10): Xả hàng volume lớn (Toxic Flow)
+        sensors.cmf_trend = std::sync::Arc::new(vec![-0.35; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "Trend_PB PHẢI chặn nhịp hồi xả hàng volume lớn (CMF < min_cmf_trend)!");
+    }
+
+    #[test]
+    fn test_trend_pb_accepts_volume_dry_up() {
+        let len = 10;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2010.0; len];
+        let lows = vec![1990.0; len];
+        let closes = vec![2008.0; len];
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.min_cmf_trend = -0.10;
+
+        let mut sensors = mock_pb_sensors_long(len);
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
+
+        // CMF dương (+0.15 >= -0.10): Cạn cung lành mạnh (No-supply Pullback)
+        sensors.cmf_trend = std::sync::Arc::new(vec![0.15; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "Trend_PB PHẢI chấp thuận nhịp hồi cạn cung lành mạnh (CMF >= min_cmf_trend)!");
+    }
+
+    #[test]
+    fn test_trend_pb_rejects_deep_retracement_exceeding_ratio() {
+        let len = 10;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2010.0; len];
+        let lows = vec![1990.0; len];
+        // Giá hiện tại là 1995.0. Sóng đẩy từ 1980.0 lên 2060.0 (Impulse Range = 80.0)
+        // Retracement = (2060.0 - 1995.0) / 80.0 = 65.0 / 80.0 = 0.8125 > max_ratio (0.75)
+        let closes = vec![1995.0; len];
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.max_retracement_ratio = 0.75;
+        config.tactical_sniper.pullback.max_pullback_dist_atr = 5.0; // Mở rộng để không bị chặn bởi delta_kama
+        config.tactical_sniper.pullback.invalidation_buffer_atr = 5.0;
+
+        let mut sensors = mock_pb_sensors_long(len);
+        sensors.kama_mid = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
+
+        // Cấu hình sóng đẩy: Floor 1980, Ceiling 2060 -> Range 80
+        sensors.impulse_floor = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.impulse_ceiling = std::sync::Arc::new(vec![2060.0; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "Trend_PB PHẢI chặn nhịp hồi quá sâu (retrace_ratio = 81.25% > 75%)!");
+    }
+
+    #[test]
+    fn test_trend_pb_rejects_flash_velocity_inversion() {
+        let len = 10;
+        let i = len - 1;
+        let opens = vec![2000.0; len];
+        let highs = vec![2010.0; len];
+        let lows = vec![1990.0; len];
+        let closes = vec![2008.0; len];
+
+        let (data_view, ind_mgr, mut actions, trades) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &ind_mgr,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.min_wave_cmo = -0.10;
+
+        let mut sensors = mock_pb_sensors_long(len);
+        sensors.kama_mid = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
+
+        // Vận tốc sóng bị đảo chiều âm cực mạnh (-0.45 < -0.10): Cú sập thác chớp nhoáng
+        sensors.cmo_trend_wave = std::sync::Arc::new(vec![-0.45; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "Trend_PB PHẢI chặn cú sập thác gia tốc giảm cực mạnh (wave_cmo < min_wave_cmo)!");
     }
 }

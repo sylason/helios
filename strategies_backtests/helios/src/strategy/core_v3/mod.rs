@@ -233,6 +233,27 @@ impl Strategy for HeliosStrategyV3 {
             ind.cmo_micro.period,
         );
 
+        // 🌊 [TODO-AUDIT-NEW-179 & NEW-180] Cảm biến sóng trực giao: Impulse Wave, CMO Trend Wave, CMF Trend
+        let (imp_floor, imp_ceiling) = ctx.dow_structure(
+            ind.impulse_wave.timeframe,
+            "ImpulseWave",
+            ind.impulse_wave.period,
+        );
+        s.impulse_floor = imp_floor;
+        s.impulse_ceiling = imp_ceiling;
+
+        s.cmo_trend_wave = ctx.cmo(
+            ind.cmo_trend_wave.timeframe,
+            "CmoTrendWave",
+            ind.cmo_trend_wave.period,
+        );
+
+        s.cmf_trend = ctx.cmf(
+            ind.cmf_trend.timeframe,
+            "CmfTrend",
+            ind.cmf_trend.period,
+        );
+
         // 🛡️ FLAW-REG.10 & TODO-AUDIT-NEW-37: Tính độ dốc chuẩn hóa của trục giữa Bollinger Bands (SMA 20) qua ATR
         // Bước nhảy k_bars tỷ lệ thuận theo timeframe của BB (Single Source of Truth qua Timeframe::to_minutes())
         // triệt tiêu hoàn toàn dị tật bậc thang phẳng (trừ ra 0.0 giả tạo).
@@ -1624,7 +1645,7 @@ mod tests {
         assert!(has_be_trigger_abs, "defs phải chứa be_atr_trigger_absorption theo TODO-STAB-01!");
         assert!(has_be_buffer_abs, "defs phải chứa be_buffer_atr_absorption theo TODO-STAB-01!");
         let has_stoch_climax = defs.iter().any(|(name, _)| name.contains("stoch_climax_thresh"));
-        assert!(has_stoch_climax, "defs phải chứa tactical_sniper.pullback.stoch_climax_thresh!");
+        assert!(!has_stoch_climax, "defs KHÔNG được chứa stoch_climax_thresh đã bị khai trừ!");
         let has_micro_natr_tf = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.timeframe"));
         let has_micro_natr_period = defs.iter().any(|(name, _)| name.contains("indicators.micro_natr.period"));
         assert!(has_micro_natr_tf, "defs phải chứa indicators.micro_natr.timeframe!");
@@ -1784,7 +1805,7 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 125, "DNA_WIDTH phải là 125 chiều sau khi thêm gen min_ignition_range_atr cho Momentum (TODO-AUDIT-NEW-172)!");
+        assert_eq!(width, 133, "DNA_WIDTH phải là 133 chiều sau khi thêm 3 cảm biến sóng và 3 ngưỡng pullback trực giao (TODO-AUDIT-NEW-179/180)!");
 
         let dow_tf_def = defs.iter().find(|(name, _)| name.contains("indicators.dow_structure.timeframe"));
         assert!(dow_tf_def.is_some(), "defs phải chứa indicators.dow_structure.timeframe!");
@@ -1792,6 +1813,20 @@ mod tests {
         assert!(dow_p_def.is_some(), "defs phải chứa indicators.dow_structure.period!");
         let cmo_p_def = defs.iter().find(|(name, _)| name.contains("indicators.cmo_micro.period"));
         assert!(cmo_p_def.is_some(), "defs phải chứa indicators.cmo_micro.period!");
+
+        // Assert 3 orthogonal wave indicator defs
+        assert!(defs.iter().any(|(name, _)| name.contains("indicators.impulse_wave.timeframe")), "defs phải chứa indicators.impulse_wave.timeframe!");
+        assert!(defs.iter().any(|(name, _)| name.contains("indicators.impulse_wave.period")), "defs phải chứa indicators.impulse_wave.period!");
+        assert!(defs.iter().any(|(name, _)| name.contains("indicators.cmo_trend_wave.timeframe")), "defs phải chứa indicators.cmo_trend_wave.timeframe!");
+        assert!(defs.iter().any(|(name, _)| name.contains("indicators.cmo_trend_wave.period")), "defs phải chứa indicators.cmo_trend_wave.period!");
+        assert!(defs.iter().any(|(name, _)| name.contains("indicators.cmf_trend.timeframe")), "defs phải chứa indicators.cmf_trend.timeframe!");
+        assert!(defs.iter().any(|(name, _)| name.contains("indicators.cmf_trend.period")), "defs phải chứa indicators.cmf_trend.period!");
+
+        // Assert 3 pullback threshold defs and absence of stoch_climax_thresh
+        assert!(!defs.iter().any(|(name, _)| name.contains("stoch_climax_thresh")), "defs không được chứa stoch_climax_thresh đã xóa bỏ!");
+        assert!(defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.max_retracement_ratio")), "defs phải chứa max_retracement_ratio!");
+        assert!(defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.min_wave_cmo")), "defs phải chứa min_wave_cmo!");
+        assert!(defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.min_cmf_trend")), "defs phải chứa min_cmf_trend!");
 
         let mom_sqz_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.squeeze_threshold"));
         assert!(mom_sqz_def.is_some(), "defs phải chứa tactical_sniper.momentum.squeeze_threshold!");
@@ -2070,6 +2105,10 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
         sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
+        sensors.impulse_floor = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.impulse_ceiling = std::sync::Arc::new(vec![2030.0; len]);
+        sensors.cmo_trend_wave = std::sync::Arc::new(vec![0.20; len]);
+        sensors.cmf_trend = std::sync::Arc::new(vec![0.10; len]);
 
         let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         let pb_prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
@@ -3109,6 +3148,10 @@ mod tests {
         sensors.rsi_trend = std::sync::Arc::new(vec![55.0; len]); // <= 70.0
         sensors.dow_floor = std::sync::Arc::new(vec![1995.0; len]); // 1995.0 <= close 2006.0 -> Giữ vững Dow Higher Low
         sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]); // cmo >= prev_cmo -> Động năng nảy lên
+        sensors.impulse_floor = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.impulse_ceiling = std::sync::Arc::new(vec![2030.0; len]);
+        sensors.cmo_trend_wave = std::sync::Arc::new(vec![0.20; len]);
+        sensors.cmf_trend = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
@@ -3391,6 +3434,10 @@ mod tests {
         sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]); // >= 100 - 70 = 30
         sensors.dow_ceiling = std::sync::Arc::new(vec![2005.0; len]); // 2005.0 >= close 1994.0 -> Giữ vững Dow Lower High
         sensors.cmo_micro = std::sync::Arc::new(vec![-0.10; len]); // cmo <= prev_cmo -> Động năng chúc xuống
+        sensors.impulse_floor = std::sync::Arc::new(vec![1970.0; len]);
+        sensors.impulse_ceiling = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.cmo_trend_wave = std::sync::Arc::new(vec![-0.20; len]);
+        sensors.cmf_trend = std::sync::Arc::new(vec![-0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
@@ -5267,6 +5314,10 @@ mod tests {
         let mut cmo = vec![0.10; len];
         cmo[i] = 0.20;
         sensors.cmo_micro = std::sync::Arc::new(cmo);
+        sensors.impulse_floor = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.impulse_ceiling = std::sync::Arc::new(vec![2030.0; len]);
+        sensors.cmo_trend_wave = std::sync::Arc::new(vec![0.20; len]);
+        sensors.cmf_trend = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);

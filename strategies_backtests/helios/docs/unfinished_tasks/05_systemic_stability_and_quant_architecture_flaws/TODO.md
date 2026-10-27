@@ -1208,19 +1208,25 @@
     - [x] `test_trend_pb_allows_entry_in_strong_macro_uptrend`
     - [x] `test_trend_pb_allows_short_entry_in_strong_macro_downtrend`
 
-- [ ] **TODO-AUDIT-NEW-179: Xác Thực Bất Đối Xứng Khối Lượng & Chốt Chặn Cạn Cung No-Supply Trong Nhịp Hồi (`TREND-VOL-ASYMMETRY`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs:60-80`
-  - **Mô tả:** Bản chất của một nhịp hồi lành mạnh là khối lượng phải cạn kiệt ($Vol_{\text{pullback}} \le 0.80 \times SMA_{\text{vol}}$) để chứng minh phe bán không có nguồn cung để xả lũ (No-Supply). Nếu giá rơi về KAMA với volume bùng nổ ($Vol \ge 1.5 \times SMA_{\text{vol}}$) $\implies$ VETO hủy lệnh Long ngay lập tức để phòng ngừa phân phối đỉnh và gãy xu hướng.
+- [x] **TODO-AUDIT-NEW-179: Xác Thực Bất Đối Xứng Khối Lượng & Chốt Chặn Cạn Cung No-Supply Trong Nhịp Hồi (`TREND-VOL-ASYMMETRY`)**
+  - **Tài liệu kỹ thuật:** [`58_todo_audit_new_179_180_trend_pb_pure_quant_wave_isolation.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/notes/58_todo_audit_new_179_180_trend_pb_pure_quant_wave_isolation.md)
+  - **File:** `ferro_trade/src/indicators/{identifier.rs, calculate/bulk.rs, factory/bulk.rs}`, `strategies_backtests/helios/src/strategy/{sensors.rs, core_v3/config.rs, core_v3/mod.rs, core_v3/scanners/trend_pb.rs}`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH - PHƯƠNG ÁN 6 (12/12 PASS)] Triển khai chỉ báo Chaikin Money Flow (`yata::indicators::ChaikinMoneyFlow`) vào `ferro_trade` với warmup `0..(period-1)` an toàn chia cho 0. Tích hợp cảm biến sóng trực giao `cmf_trend: CmfTrendParams` (khung `1m..30m`, period `6..60`) và tham số ngưỡng DNA `min_cmf_trend` $\in [-0.60, 0.40]$ (mặc định `-0.10`). Phủ quyết dứt khoát khi nhịp hồi bị xả hàng độc hại (Toxic Flow / Heavy Distribution) và chấp thuận khi cạn cung (No-Supply).
   - **Unit Tests:**
-    - [ ] `test_trend_pb_rejects_high_volume_distribution_retrace`
-    - [ ] `test_trend_pb_accepts_volume_dry_up`
+    - [x] `test_cmf_math_warmup_and_zero_volume_safety` (ferro_trade)
+    - [x] `test_trend_pb_rejects_high_volume_distribution_retrace` (helios)
+    - [x] `test_trend_pb_accepts_volume_dry_up` (helios)
 
-- [ ] **TODO-AUDIT-NEW-180: Chốt Chặn Giới Hạn Biên Độ Thoái Lui ($L_{retrace} \le 0.618 \times L_{impulse}$) & So Sánh Vận Tốc ($v_{retrace} < v_{impulse}$) (`TREND-MAX-RETRACEMENT-RATIO`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`
-  - **Mô tả:** Sóng hồi không được xâm thực quá 61.8% chiều dài bước sóng đẩy trước đó ($L_{\text{retrace}} \le 0.618 \times L_{\text{impulse}}$). Đồng thời, vận tốc rơi của nhịp hồi ($\frac{\Delta P}{\Delta t}$) bắt buộc phải nhỏ hơn vận tốc của sóng đẩy ($v_{\text{retrace}} < v_{\text{impulse}}$). Nếu giá sập hình chữ V với vận tốc cực lớn $\implies$ Hủy bỏ trạng thái Pullback.
+- [x] **TODO-AUDIT-NEW-180: Chốt Chặn Giới Hạn Biên Độ Thoái Lui ($L_{retrace} \le \text{ratio} \times L_{impulse}$) & Bất Đối Xứng Vận Tốc Sóng ($v_{retrace} < v_{impulse}$) (`TREND-MAX-RETRACEMENT-RATIO`)**
+  - **Tài liệu kỹ thuật:** [`58_todo_audit_new_179_180_trend_pb_pure_quant_wave_isolation.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/notes/58_todo_audit_new_179_180_trend_pb_pure_quant_wave_isolation.md)
+  - **File:** `ferro_trade_derive/src/lib.rs`, `strategies_backtests/helios/src/strategy/{sensors.rs, core_v3/config.rs, core_v3/mod.rs, core_v3/scanners/trend_pb.rs}`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH - PHƯƠNG ÁN 6 (12/12 PASS)]
+    1. *Tỷ lệ hồi quy cực đại:* Tách biệt hoàn toàn khỏi cấu trúc SL của `NEW-52`, nạp cảm biến sóng đẩy độc lập `impulse_wave: ImpulseWaveParams` (đo $L_{\text{impulse}} = \text{ceiling} - \text{floor}$ trên `5m..4h`, period `6..60`) và ngưỡng DNA `max_retracement_ratio` $\in [0.20, 0.95]$ (mặc định `0.75`). VETO khi nhịp hồi xâm thực quá sâu.
+    2. *Bất đối xứng vận tốc sóng:* Nạp cảm biến vận tốc sóng phi thứ nguyên `cmo_trend_wave: CmoWaveParams` (`yata::CMO` trên `1m..30m`, period `6..60`) và ngưỡng DNA `min_wave_cmo` $\in [-0.60, 0.40]$ (mặc định `-0.10`). VETO tức thì khi nhịp hồi có gia tốc rơi dốc đứng (thác sập chớp nhoáng).
   - **Unit Tests:**
-    - [ ] `test_trend_pb_rejects_deep_retracement_exceeding_618`
-    - [ ] `test_trend_pb_rejects_flash_velocity_inversion`
+    - [x] `test_trend_pb_rejects_deep_retracement_exceeding_ratio` (helios)
+    - [x] `test_trend_pb_rejects_flash_velocity_inversion` (helios)
+    - [x] `test_dna_width_and_parameter_defs_integrity` (helios, DNA_WIDTH = 133)
 
 - [ ] **TODO-AUDIT-NEW-181: Độ Sâu Nhịp Hồi Thích Ứng Cho Supertrend Dốc Đứng (`TREND-ADAPTIVE-DEPTH`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `matrix.rs`
