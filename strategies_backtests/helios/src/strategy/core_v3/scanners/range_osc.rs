@@ -89,19 +89,20 @@ impl TacticalScanner for RangeOscScanner {
 
         let range_cfg = &config.tactical_sniper.range;
         let buffer = current_atr * range_cfg.struct_sl_buffer_atr.max(0.10);
-        let min_score = range_cfg.min_activation_score.max(0.05);
+        // Đường biên tuyến tính liên tục (Continuous Coupling Frontier): 0.5*|delta_norm| + 0.5*|CLV| >= 0.50
+        let effective_min_score = range_cfg.min_activation_score.max(0.50);
         let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
         let max_adverse = range_cfg.max_adverse_slope.max(0.01);
 
         // 4. Định tuyến tín hiệu Long/Short
-        if delta_norm <= -0.70 && clv >= 0.35 {
+        if delta_norm <= -0.50 && close >= val && clv >= 0.35 {
             // 🛡️ CHỐNG BẮT DAO RƠI: Cấm Long khi KAMA slope dốc xuống mạnh
             if kama_slope < -max_adverse {
                 return None;
             }
 
             let raw_score = (0.5 * delta_norm.abs() + 0.5 * clv).clamp(0.0, 1.0);
-            if raw_score < min_score {
+            if raw_score < effective_min_score {
                 return None;
             }
 
@@ -110,6 +111,13 @@ impl TacticalScanner for RangeOscScanner {
             let sl = RiskManager::sanitize_structural_sl(true, close, raw_sl, 0.0015, fallback_buf);
             let tp = vah; // Chốt lời sang biên đối diện hộp (Value Area High)
 
+            // 🛡️ BỘ LỌC KỲ VỌNG TOÁN HỌC: Bắt buộc R:R >= 1.50 (Tự động lọc nến quét râu quá sâu / dao rơi)
+            let reward = (tp - close).max(0.0);
+            let risk = (close - sl).max(1e-5);
+            if reward / risk < 1.50 {
+                return None;
+            }
+
             return Some(Proposal {
                 signal_type: SignalType::Long,
                 raw_score,
@@ -117,14 +125,14 @@ impl TacticalScanner for RangeOscScanner {
                 suggested_sl: Some(sl),
                 suggested_tp: Some(tp),
             });
-        } else if delta_norm >= 0.70 && clv <= -0.35 {
+        } else if delta_norm >= 0.50 && close <= vah && clv <= -0.35 {
             // 🛡️ CHỐNG CẢN TÀU: Cấm Short khi KAMA slope dốc lên mạnh
             if kama_slope > max_adverse {
                 return None;
             }
 
             let raw_score = (0.5 * delta_norm.abs() + 0.5 * (-clv)).clamp(0.0, 1.0);
-            if raw_score < min_score {
+            if raw_score < effective_min_score {
                 return None;
             }
 
@@ -132,6 +140,13 @@ impl TacticalScanner for RangeOscScanner {
             let fallback_buf = buffer.max(current_atr * 0.20);
             let sl = RiskManager::sanitize_structural_sl(false, close, raw_sl, 0.0015, fallback_buf);
             let tp = val; // Chốt lời sang biên đối diện hộp (Value Area Low)
+
+            // 🛡️ BỘ LỌC KỲ VỌNG TOÁN HỌC: Bắt buộc R:R >= 1.50 (Tự động lọc nến quét râu quá sâu / tên lửa)
+            let reward = (close - tp).max(0.0);
+            let risk = (sl - close).max(1e-5);
+            if reward / risk < 1.50 {
+                return None;
+            }
 
             return Some(Proposal {
                 signal_type: SignalType::Short,
@@ -340,5 +355,138 @@ mod tests {
 
         let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_none(), "RangeBound PHẢI VETO khi chiều cao hộp nhỏ hơn sàn chi phí 2.0 ATR!");
+    }
+
+    #[test]
+    fn test_range_bound_spring_liquidity_sweep_reentry() {
+        let len = 50;
+        let i = len - 1;
+        // Hộp: VAH = 2100, VAL = 2000, POC = 2050 (BoxHeight = 100 >= 2 * ATR)
+        let opens = vec![2050.0; len];
+        let mut highs = vec![2060.0; len];
+        let mut lows = vec![2040.0; len];
+        let mut closes = vec![2050.0; len];
+        highs[10] = 2100.0;
+        lows[15] = 2000.0;
+
+        // Kịch bản 1: Quét thanh khoản dưới VAL (Low = 1992 < 2000) rồi rút chân mạnh vào hộp
+        // Close = 2022 -> delta_norm = -0.56 (nằm trong [-0.70, -0.50]), CLV = +0.714, R:R = 2.36 >= 1.50
+        highs[i] = 2027.0;
+        lows[i] = 1992.0;
+        closes[i] = 2022.0;
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "RangeBound PHẢI duyệt cú quét thanh khoản rút chân mạnh vào vùng [-0.70, -0.50]!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+        assert_eq!(p.suggested_tp, Some(2100.0));
+        assert!(p.suggested_sl.unwrap() < 1992.0, "SL phải nằm dưới đáy râu quét 1992.0");
+
+        // Kịch bản 2: Nến đâm thủng đóng ngoài hộp (Close = 1998 < VAL 2000) -> VETO!
+        closes[i] = 1998.0;
+        let (dv_brk, im_brk, mut act_brk, tr_brk) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick_brk = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_brk,
+            indicator_manager: &im_brk,
+            trades: &tr_brk,
+            last_closed_trade: None,
+            actions: &mut act_brk,
+            position: Position::default(),
+        };
+        assert!(RangeOscScanner.scan(&tick_brk, &sensors, &matrix, &config).is_none(), "Phải VETO khi nến đóng ngoài hộp (Close < VAL)!");
+
+        // Kịch bản 3: Râu quét quá sâu (Low = 1940) làm R:R < 1.50 -> VETO!
+        lows[i] = 1940.0;
+        closes[i] = 2022.0;
+        let (dv_deep, im_deep, mut act_deep, tr_deep) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick_deep = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_deep,
+            indicator_manager: &im_deep,
+            trades: &tr_deep,
+            last_closed_trade: None,
+            actions: &mut act_deep,
+            position: Position::default(),
+        };
+        assert!(RangeOscScanner.scan(&tick_deep, &sensors, &matrix, &config).is_none(), "Phải VETO khi râu quét quá sâu làm R:R < 1.50!");
+    }
+
+    #[test]
+    fn test_range_bound_upthrust_reentry() {
+        let len = 50;
+        let i = len - 1;
+        let opens = vec![2050.0; len];
+        let mut highs = vec![2060.0; len];
+        let mut lows = vec![2040.0; len];
+        let mut closes = vec![2050.0; len];
+        highs[10] = 2100.0;
+        lows[15] = 2000.0;
+
+        // Kịch bản 1: Quét thanh khoản trên VAH (High = 2108 > 2100) rồi đóng cửa rút chân vào hộp
+        // Close = 2078 -> delta_norm = +0.56, CLV = -0.714, R:R = 2.36 >= 1.50
+        highs[i] = 2108.0;
+        lows[i] = 2073.0;
+        closes[i] = 2078.0;
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "RangeBound PHẢI duyệt cú quét thanh khoản trần VAH rút chân vào vùng [0.50, 0.70]!");
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Short);
+        assert_eq!(p.suggested_tp, Some(2000.0));
+        assert!(p.suggested_sl.unwrap() > 2108.0, "SL phải nằm trên đỉnh râu quét 2108.0");
+
+        // Kịch bản 2: Nến đóng ngoài hộp trên VAH (Close = 2102 > 2100) -> VETO!
+        closes[i] = 2102.0;
+        let (dv_brk, im_brk, mut act_brk, tr_brk) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick_brk = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_brk,
+            indicator_manager: &im_brk,
+            trades: &tr_brk,
+            last_closed_trade: None,
+            actions: &mut act_brk,
+            position: Position::default(),
+        };
+        assert!(RangeOscScanner.scan(&tick_brk, &sensors, &matrix, &config).is_none(), "Phải VETO khi nến đóng vượt ngoài đỉnh VAH!");
     }
 }

@@ -1329,12 +1329,12 @@
     - [x] `test_range_bound_vetoes_dead_zone_near_poc`
     - [x] `test_range_bound_vetoes_sub_frictional_micro_box`
 
-- [ ] **TODO-AUDIT-NEW-195: Tháo Gỡ Bẫy "Kẹp Trong Dải" Bằng Cơ Chế Liquidity Sweep Re-entry ($CLV \ge 0.50$ Sau Spring/Upthrust) (`RNG-SPRING-LIQUIDITY-SWEEP`)**
+- [x] **TODO-AUDIT-NEW-195: Tháo Gỡ Bẫy "Kẹp Trong Dải" Bằng Cơ Chế Liquidity Sweep Re-entry ($CLV \ge 0.50$ Sau Spring/Upthrust) (`RNG-SPRING-LIQUIDITY-SWEEP`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
   - **Mô tả:** Xóa bỏ điều kiện `close <= bb_m && close >= bb_l` (vốn ép điểm = 0 khi nến quét râu ngoài biên); cho phép và ưu tiên bắt đảo chiều khi giá quét thủng biên hộp để nuốt thanh khoản nhưng nến đóng cửa rút chân trở lại vào bên trong hộp với $|CLV| \ge 0.50$ (Mô hình Wyckoff Spring & Upthrust).
   - **Unit Tests:**
-    - [ ] `test_range_bound_spring_liquidity_sweep_reentry`
-    - [ ] `test_range_bound_upthrust_reentry`
+    - [x] `test_range_bound_spring_liquidity_sweep_reentry`
+    - [x] `test_range_bound_upthrust_reentry`
 
 - [ ] **TODO-AUDIT-NEW-196: Chốt Lời Sang Biên Đối Diện Hộp (Opposite Boundary TP, $R:R \ge 1.5$) & Khóa Lãi Hòa Vốn Tại $POC$ (`RNG-OPPOSITE-BOUNDARY-TP`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`, `risk.rs`
