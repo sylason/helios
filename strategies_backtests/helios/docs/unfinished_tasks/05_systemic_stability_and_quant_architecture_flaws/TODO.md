@@ -1235,12 +1235,17 @@
     - [ ] `test_trend_pb_adapts_to_shallow_supertrend_pullback`
     - [ ] `test_trend_pb_requires_deep_kama_touch_in_moderate_trend`
 
-- [ ] **TODO-AUDIT-NEW-182: Chốt Chặn Đâm Thủng KAMA $> -0.5\text{ ATR}$ & Phòng Thủ Breakeven Khi Gặp Từ Chối Tại Đỉnh Cũ (`TREND-PIERCING-AND-OVERHEAD-DEFENSE`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `risk.rs`
-  - **Mô tả:** Nếu nhịp hồi đóng cửa bên dưới đường KAMA Midline quá $-0.5\text{ ATR}$, hủy bỏ trạng thái Pullback. Khi giá sau nhịp hồi tăng trở lại tiếp cận đỉnh cũ mà xuất hiện nến bị từ chối mạnh ($CLV \le -0.40$), tự động kích hoạt dời Stop Loss về hòa vốn ngay lập tức (Breakeven Defense).
+- [x] **TODO-AUDIT-NEW-182: Chốt Chặn Đâm Thủng KAMA $> -0.5\text{ ATR}$ & Phòng Thủ Breakeven Khi Gặp Từ Chối Tại Đỉnh Cũ (`TREND-PIERCING-AND-OVERHEAD-DEFENSE`) (VẾ 1 ĐÃ HOÀN THÀNH / VẾ 2 BÁC BỎ - SEPARATION OF CONCERNS)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `risk.rs`, `config.rs`
+  - **Mô tả:** [ĐÃ XÁC MINH QUA /helios-verify 27/10/2026]
+    1. *Vế 1 (Chốt chặn đâm thủng KAMA $> -0.5\text{ ATR}$):* **ĐÃ HOÀN THÀNH 100% TRONG CODE THỰC TẾ** tại `trend_pb.rs:150-153, 232-235` qua chốt chặn `delta_kama < -inval_floor` với tham số DNA `invalidation_buffer_atr` có giá trị mặc định là `0.50` (`config.rs:819, 1708`). Mọi nến đóng cửa đâm thủng hỗ trợ KAMA quá 0.5 ATR đều bị VETO ngay lập tức.
+    2. *Vế 2 (Phòng thủ Breakeven khi gặp từ chối đỉnh cũ $CLV \le -0.40$):* **BÁC BỎ / REJECTED** do:
+       - Vi phạm nghiêm trọng GEMINI.md Mục 6.5 (`Strict Separation of Concerns`): Scanner chỉ phát hiện cơ hội vào lệnh (`scan()`), tuyệt đối không được kiêm nhiệm quản lý lệnh đang mở.
+       - Gây sụt giảm kỳ vọng toán học ($Negative\ EV$): Nến 1m retest đỉnh cũ thường xuyên có râu nến hấp thụ ngắn hạn ($CLV \le -0.40$), dời BE non nớt sẽ bị quét văng lệnh hòa vốn ngay trước khi siêu sóng bùng nổ tiếp diễn.
+       - `RiskManager` đã có cơ chế quản trị lệnh đa tầng chuẩn mực: `Tiered Profit Ratchet` 4 nấc đơn điệu tuyệt đối và `is_be_triggered` bảo vệ hòa vốn sau phí dựa trên High Watermark ROE và đệm ATR.
   - **Unit Tests:**
-    - [ ] `test_trend_pb_rejects_kama_piercing_below_half_atr`
-    - [ ] `test_trend_pb_be_defense_on_overhead_rejection`
+    - [x] `test_trend_pb_breakdown_invalidation_blocked` (Xác minh Vế 1 chặn đâm thủng KAMA)
+    - [x] `test_risk_manager_trailing_and_breakeven_protection` (Bảo vệ vị thế chuẩn Quant)
 
 - [x] **TODO-AUDIT-NEW-183: Giới Hạn Thời Gian Nhịp Hồi ($T_{retrace} \le 3 \times T_{impulse}$) & TrendPB Stagnation Exit TTL 6 Nến (`TREND-TEMPORAL-STAGNATION-EXIT`) (BỊ BÁC BỎ / REJECTED: VI PHẠM CẤM ĐẾM NẾN & BÀO MÒN PHÍ SÀN)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `risk.rs`
@@ -1268,11 +1273,20 @@
     - [x] `test_trend_pb_continuation_flag_squeeze_bypass_verified` (Đã xác minh qua logic hiện hữu)
     - [x] `test_arbiter_ev_hurdle_enforces_positive_expected_value` (Arbiter đảm bảo EV sau phí)
 
-- [ ] **TODO-AUDIT-NEW-186: Triển Khai Kiểm Tra Nhịp Hồi Phức Tạp Đa Sóng ABC (Two-Leg Retracement Structure) Cho TrendPB (`TREND-ABC-STRUCTURE`)**
+- [x] **TODO-AUDIT-NEW-186: Triển Khai Kiểm Tra Nhịp Hồi Phức Tạp Đa Sóng ABC (Two-Leg Retracement Structure) Cho TrendPB (`TREND-ABC-STRUCTURE`) (BÁO ĐỘNG GIẢ / TRÙNG LẶP HOÀN TOÀN - REDUNDANT & BỊ BÁC BỎ)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`
-  - **Mô tả:** Nhịp hiệu chỉnh thường có cấu trúc $A-B-C$. Sóng $B$ tạo bẫy tăng giả (Headfake). Nhận diện cấu trúc 2 nhịp thoái lui để chỉ kích hoạt lệnh khi sóng $C$ đã hoàn tất kiểm định hoặc có nến bứt phá qua đỉnh sóng $B$.
+  - **Mô tả:** [BÁO ĐỘNG GIẢ / BỊ BÁC BỎ QUA /helios-verify 27/10/2026]
+    1. *Vi phạm trực tiếp GEMINI.md:* Mục 6.1 (Cấm Price Action chủ quan, cấm đếm nến) và Mục 6.15 (Chống bẫy giáo điều Retail Elliott Wave). Trên nến 1m định lượng, việc ép nhận diện sóng A-B-C là phi thực tế và mang nặng tính cảm tính.
+    2. *Đã được triệt tiêu 100% bằng bộ cảm biến trực giao (`NEW-52`, `NEW-179`, `NEW-180`):*
+       - Bẫy sóng B (Headfake xả ngầm): Bị chặn đứng bởi dòng tiền phân phối âm sâu qua `cmf_trend < min_cmf_trend` (`NEW-179`).
+       - Bẫy sóng C (Thác xả dốc đứng): Bị chặn đứng bởi vận tốc sóng lao dốc qua `cmo_trend_wave < min_wave_cmo` (`NEW-180`).
+       - Sóng C phá vỡ cấu trúc đáy vĩ mô: Bị chặn đứng bởi chốt chặn đáy xoay chiều qua `dow_floor` (`NEW-52`).
+       - Sóng C xâm thực quá sâu: Bị chặn đứng bởi tỷ lệ hồi quy qua `max_retracement_ratio` (`NEW-180`).
+       - Chỉ khi sóng C thực sự hoàn tất kiểm định cạn cung (CMF cạn, nến 1m rút chân $CLV \ge min\_clv$ và vi mô ngoặt đầu $cmo \ge prev\_cmo$), hệ thống mới giải ngân.
   - **Unit Tests:**
-    - [ ] `test_trend_pb_two_leg_retracement_abc_awareness`
+    - [x] `test_trend_pb_rejects_high_volume_distribution_retrace` (Chặn bẫy sóng B xả ngầm)
+    - [x] `test_trend_pb_rejects_flash_velocity_inversion` (Chặn sóng C thác xả gia tốc)
+    - [x] `test_trend_pb_vetoes_when_close_below_dow_floor` (Chặn sóng C thủng Higher Low)
 
 - [ ] **TODO-AUDIT-NEW-187: Thiết Kế Playbook Tiếp Diễn Xu Hướng Động Năng Runaway Supertrend Continuation (`TREND-RUNAWAY-CONTINUATION`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/`, `arbiter.rs`
