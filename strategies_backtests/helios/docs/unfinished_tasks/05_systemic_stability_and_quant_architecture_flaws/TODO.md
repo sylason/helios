@@ -1357,12 +1357,12 @@
     - [x] `test_range_bound_targets_opposite_boundary_rr_ge_1_5`
     - [x] `test_range_bound_breakeven_lock_at_poc`
 
-- [ ] **TODO-AUDIT-NEW-197: Bộ Đếm Chu Kỳ Sống Của Hộp (Boundary Touch Counter: Chỉ Đánh Lần 2, 3, 4; Cấm Lần 5+) & Anti-Breakout Veto (`RNG-TOUCH-COUNTER-AND-ANTI-BREAKOUT`)**
+- [x] **TODO-AUDIT-NEW-197: Bộ Đếm Chu Kỳ Sống Của Hộp (Boundary Touch Counter: Chỉ Đánh Lần 2, 3, 4; Cấm Lần 5+) & Anti-Breakout Veto (`RNG-TOUCH-COUNTER-AND-ANTI-BREAKOUT`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
   - **Mô tả:** Đếm số lần kiểm định biên của hộp: Chỉ cho phép mở lệnh đảo chiều ở lần chạm thứ 2, 3, 4; khóa hoàn toàn giao dịch nảy biên từ lần chạm thứ 5 trở đi vì xác suất vỡ cản $> 80\%$. Nếu nến đóng ngoài biên hộp kèm Volume $\ge 2.5 \times SMA_{\text{vol}}$ và $|CLV| \ge 0.70 \implies$ Hủy bỏ ngay lập tức trạng thái Range để chống cản đầu xe tăng.
   - **Unit Tests:**
-    - [ ] `test_range_bound_touch_counter_locks_after_4_touches`
-    - [ ] `test_range_bound_breakout_volume_invalidates_range`
+    - [x] `test_range_bound_touch_counter_locks_after_4_touches`
+    - [x] `test_range_bound_breakout_volume_invalidates_range`
 
 - [ ] **TODO-AUDIT-NEW-198: Sàn Chi Phí Sinh Tồn Của Hộp (Minimum Economic Height $\ge 1.2\%$) & Vùng Cấm Trade $40\%$ Quanh POC (`RNG-ECONOMIC-HEIGHT-AND-DEADZONE`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`

@@ -94,8 +94,66 @@ impl TacticalScanner for RangeOscScanner {
         let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
         let max_adverse = range_cfg.max_adverse_slope.max(0.01);
 
+        // 🛡️ CHỐT CHẶN 5: Bộ Đếm Chu Kỳ Sống Của Hộp (Boundary Touch Counter: Chỉ Đánh Lần 2, 3, 4; Cấm Lần 5+)
+        // & Anti-Breakout Directional Volume Veto (TODO-AUDIT-NEW-197)
+        let zone_lower = val + 0.15 * box_height;
+        let reset_lower = val + 0.30 * box_height;
+        let zone_upper = vah - 0.15 * box_height;
+        let reset_upper = vah - 0.30 * box_height;
+
+        let vols = tick.volumes();
+        let mut sum_vol = 0.0;
+        let mut count_vol = 0usize;
+        for idx in (i - lookback)..i {
+            let v = vols[idx];
+            if !v.is_nan() && v > 0.0 {
+                sum_vol += v;
+                count_vol += 1;
+            }
+        }
+        let avg_box_vol = if count_vol > 0 { sum_vol / (count_vol as f64) } else { 1.0 };
+        let start_breakout_idx = i.saturating_sub(2);
+        let closes = tick.closes();
+
         // 4. Định tuyến tín hiệu Long/Short
         if delta_norm <= -0.50 && close >= val && clv >= 0.35 {
+            // 🛡️ BỘ ĐẾM CHU KỲ SỐNG: Đếm chu kỳ chạm đáy VAL bằng Schmitt Trigger Hysteresis 15%/30%
+            let mut lower_touches = 0usize;
+            let mut in_lower_zone = false;
+            for idx in (i - lookback)..=i {
+                let l = lows[idx];
+                if !l.is_nan() && l <= zone_lower {
+                    if !in_lower_zone {
+                        lower_touches += 1;
+                        in_lower_zone = true;
+                    }
+                } else if !l.is_nan() && l > reset_lower {
+                    in_lower_zone = false;
+                }
+            }
+
+            // Khóa hoàn toàn giao dịch nảy biên khi hộp đã lão hóa (chạm từ lần thứ 5 trở đi)
+            if lower_touches > 4 {
+                return None;
+            }
+
+            // 🛡️ ANTI-BREAKOUT DIRECTIONAL VOLUME VETO: Quét cụm 3 nến gần nhất (i-2..=i)
+            // Ngăn chặn cản đầu xe tăng khi có nến xả thủng đáy kèm Volume đột biến
+            for idx in start_breakout_idx..=i {
+                let vol_z = sensors.vol_z_score.get(idx).copied().unwrap_or(0.0);
+                let vol_ratio = if avg_box_vol > 0.0 { vols[idx] / avg_box_vol } else { 0.0 };
+                let is_vol_spike = vol_z >= 2.0 || vol_ratio >= 2.5;
+
+                if is_vol_spike {
+                    let rng = (highs[idx] - lows[idx]).max(1e-5);
+                    let clv_idx = ((2.0 * closes[idx] - highs[idx] - lows[idx]) / rng).clamp(-1.0, 1.0);
+                    let is_downward_breakdown = (clv_idx <= -0.70 && closes[idx] <= reset_lower) || closes[idx] < val;
+                    if is_downward_breakdown {
+                        return None;
+                    }
+                }
+            }
+
             // 🛡️ CHỐNG BẮT DAO RƠI: Cấm Long khi KAMA slope dốc xuống mạnh
             if kama_slope < -max_adverse {
                 return None;
@@ -126,6 +184,43 @@ impl TacticalScanner for RangeOscScanner {
                 suggested_tp: Some(tp),
             });
         } else if delta_norm >= 0.50 && close <= vah && clv <= -0.35 {
+            // 🛡️ BỘ ĐẾM CHU KỲ SỐNG: Đếm chu kỳ chạm đỉnh VAH bằng Schmitt Trigger Hysteresis 15%/30%
+            let mut upper_touches = 0usize;
+            let mut in_upper_zone = false;
+            for idx in (i - lookback)..=i {
+                let h = highs[idx];
+                if !h.is_nan() && h >= zone_upper {
+                    if !in_upper_zone {
+                        upper_touches += 1;
+                        in_upper_zone = true;
+                    }
+                } else if !h.is_nan() && h < reset_upper {
+                    in_upper_zone = false;
+                }
+            }
+
+            // Khóa hoàn toàn giao dịch nảy biên khi hộp đã lão hóa (chạm từ lần thứ 5 trở đi)
+            if upper_touches > 4 {
+                return None;
+            }
+
+            // 🛡️ ANTI-BREAKOUT DIRECTIONAL VOLUME VETO: Quét cụm 3 nến gần nhất (i-2..=i)
+            // Ngăn chặn cản đầu tên lửa khi có nến mua bứt phá đỉnh kèm Volume đột biến
+            for idx in start_breakout_idx..=i {
+                let vol_z = sensors.vol_z_score.get(idx).copied().unwrap_or(0.0);
+                let vol_ratio = if avg_box_vol > 0.0 { vols[idx] / avg_box_vol } else { 0.0 };
+                let is_vol_spike = vol_z >= 2.0 || vol_ratio >= 2.5;
+
+                if is_vol_spike {
+                    let rng = (highs[idx] - lows[idx]).max(1e-5);
+                    let clv_idx = ((2.0 * closes[idx] - highs[idx] - lows[idx]) / rng).clamp(-1.0, 1.0);
+                    let is_upward_breakout = (clv_idx >= 0.70 && closes[idx] >= reset_upper) || closes[idx] > vah;
+                    if is_upward_breakout {
+                        return None;
+                    }
+                }
+            }
+
             // 🛡️ CHỐNG CẢN TÀU: Cấm Short khi KAMA slope dốc lên mạnh
             if kama_slope > max_adverse {
                 return None;
@@ -574,5 +669,146 @@ mod tests {
             position: Position::default(),
         };
         assert!(RangeOscScanner.scan(&tick_bad, &sensors, &matrix, &config).is_none(), "R:R < 1.50 bắt buộc phải bị VETO!");
+    }
+
+    #[test]
+    fn test_range_bound_touch_counter_locks_after_4_touches() {
+        let len = 50;
+        let i = len - 1;
+        let opens = vec![2050.0; len];
+        let mut highs = vec![2060.0; len];
+        let mut lows = vec![2040.0; len];
+        let mut closes = vec![2050.0; len];
+        // Hộp: VAH = 2100.0, VAL = 2000.0, POC = 2050.0, box_height = 100.0 >= 2.0 * ATR
+        // Lưu ý: Cửa sổ 40 nến tính từ (i - 40) = 9 đến i = 49. Đặt cực trị tại idx >= 10.
+        highs[10] = 2100.0;
+        lows[10] = 2000.0; // Chạm lần 1
+
+        // Tạo thêm 3 chu kỳ chạm - nảy nữa tại các nến 15, 20, 25 (Tổng cộng đã chạm 4 lần trong quá khứ)
+        // Zone threshold = 2000 + 0.15 * 100 = 2015; Reset threshold = 2000 + 0.30 * 100 = 2030
+        // (lows mặc định 2040 > 2030 -> đã reset giữa các lần)
+        lows[15] = 2005.0; // Chạm lần 2
+        lows[20] = 2008.0; // Chạm lần 3
+        lows[25] = 2010.0; // Chạm lần 4
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        // KỊCH BẢN A: Nến hiện tại i chạm đáy lần thứ 5 -> PHẢI BỊ KHÓA (VETO)!
+        lows[i] = 2002.0;
+        highs[i] = 2015.0;
+        closes[i] = 2012.0;
+        let (dv_5, im_5, mut act_5, tr_5) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick_5 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_5,
+            indicator_manager: &im_5,
+            trades: &tr_5,
+            last_closed_trade: None,
+            actions: &mut act_5,
+            position: Position::default(),
+        };
+        let prop_5 = RangeOscScanner.scan(&tick_5, &sensors, &matrix, &config);
+        assert!(prop_5.is_none(), "RangeBound PHẢI VETO khi chạm biên đáy lần thứ 5 (hộp đã lão hóa)!");
+
+        // KỊCH BẢN B: Xóa bớt 1 lần chạm (chỉ còn 3 lần quá khứ + nến i là lần thứ 4) -> PHẢI ĐƯỢC DUYỆT!
+        lows[25] = 2040.0; // Hủy lần chạm 4 quá khứ
+        let (dv_4, im_4, mut act_4, tr_4) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick_4 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_4,
+            indicator_manager: &im_4,
+            trades: &tr_4,
+            last_closed_trade: None,
+            actions: &mut act_4,
+            position: Position::default(),
+        };
+        let prop_4 = RangeOscScanner.scan(&tick_4, &sensors, &matrix, &config);
+        assert!(prop_4.is_some(), "RangeBound PHẢI DUYỆT khi chạm biên đáy lần thứ 4 (hộp còn trong vòng đời)!");
+        assert_eq!(prop_4.unwrap().signal_type, SignalType::Long);
+    }
+
+    #[test]
+    fn test_range_bound_breakout_volume_invalidates_range() {
+        let len = 50;
+        let i = len - 1;
+        let opens = vec![2050.0; len];
+        let mut highs = vec![2060.0; len];
+        let mut lows = vec![2040.0; len];
+        let mut closes = vec![2050.0; len];
+        highs[10] = 2100.0;
+        lows[15] = 2000.0;
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        // KỊCH BẢN A: Cây nến ngay trước đó (i - 1) nổ Volume xả thủng đáy (Breakdown)
+        // Nến i hồi nhẹ lờ đờ tại sàn VAL -> PHẢI BỊ VETO (chống bẫy Retest sau Breakout)!
+        let mut vol_z = vec![0.0; len];
+        vol_z[i - 1] = 2.8; // Nổ Volume Z-Score >= 2.0
+        sensors.vol_z_score = Arc::new(vol_z);
+
+        // Nến i - 1: Xả đâm thủng VAL (Close = 1986, High = 2010, Low = 1985 -> CLV = -0.92 <= -0.70)
+        highs[i - 1] = 2010.0;
+        lows[i - 1] = 1985.0;
+        closes[i - 1] = 1986.0;
+
+        // Nến i: Nhịp nảy nhẹ (Close = 2012, CLV = +0.60)
+        lows[i] = 2000.0;
+        highs[i] = 2015.0;
+        closes[i] = 2012.0;
+
+        let (dv_retest, im_retest, mut act_retest, tr_retest) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick_retest = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_retest,
+            indicator_manager: &im_retest,
+            trades: &tr_retest,
+            last_closed_trade: None,
+            actions: &mut act_retest,
+            position: Position::default(),
+        };
+        let prop_retest = RangeOscScanner.scan(&tick_retest, &sensors, &matrix, &config);
+        assert!(prop_retest.is_none(), "RangeBound PHẢI VETO nhịp nảy nhẹ sau khi cây nến trước đó vừa xả thủng đáy với Volume lớn!");
+
+        // KỊCH BẢN B: Nến i nổ Volume lớn nhưng là cú rút chân Spring (Close >= VAL, CLV >= +0.35)
+        // -> BẢO TOÀN SPRING: PHẢI ĐƯỢC DUYỆT!
+        let mut vol_z_spring = vec![0.0; len];
+        vol_z_spring[i] = 3.2; // Volume cực lớn do cá mập gom hàng tại đáy
+        sensors.vol_z_score = Arc::new(vol_z_spring);
+
+        // Nến i - 1 bình thường
+        highs[i - 1] = 2060.0;
+        lows[i - 1] = 2040.0;
+        closes[i - 1] = 2050.0;
+
+        // Nến i là nến Spring: quét râu xuống 1995 rồi rút chân đóng 2012 bên trong hộp (CLV = +0.70)
+        lows[i] = 1995.0;
+        highs[i] = 2015.0;
+        closes[i] = 2012.0;
+
+        let (dv_spring, im_spring, mut act_spring, tr_spring) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick_spring = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_spring,
+            indicator_manager: &im_spring,
+            trades: &tr_spring,
+            last_closed_trade: None,
+            actions: &mut act_spring,
+            position: Position::default(),
+        };
+        let prop_spring = RangeOscScanner.scan(&tick_spring, &sensors, &matrix, &config);
+        assert!(prop_spring.is_some(), "RangeBound PHẢI DUYỆT cú Spring rút chân nổ Volume gom hàng (Bảo toàn Task 195)!");
+        assert_eq!(prop_spring.unwrap().signal_type, SignalType::Long);
     }
 }
