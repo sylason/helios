@@ -489,4 +489,90 @@ mod tests {
         };
         assert!(RangeOscScanner.scan(&tick_brk, &sensors, &matrix, &config).is_none(), "Phải VETO khi nến đóng vượt ngoài đỉnh VAH!");
     }
+
+    #[test]
+    fn test_range_bound_targets_opposite_boundary_rr_ge_1_5() {
+        let len = 50;
+        let i = len - 1;
+        let opens = vec![2050.0; len];
+        let mut highs = vec![2060.0; len];
+        let mut lows = vec![2040.0; len];
+        let mut closes = vec![2050.0; len];
+        // Thiết lập hộp cấu trúc 40 nến: VAL = 2000.0, VAH = 2100.0, POC = 2050.0
+        highs[10] = 2100.0;
+        lows[15] = 2000.0;
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        // KỊCH BẢN 1 (LONG): Chạm biên dưới VAL nảy lên -> TP phải là VAH (2100.0) và R:R >= 1.50
+        // Close = 2017 -> delta_norm = -0.66, CLV = +0.60
+        lows[i] = 2005.0;
+        highs[i] = 2020.0;
+        closes[i] = 2017.0;
+        let (dv_l, im_l, mut act_l, tr_l) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick_l = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_l,
+            indicator_manager: &im_l,
+            trades: &tr_l,
+            last_closed_trade: None,
+            actions: &mut act_l,
+            position: Position::default(),
+        };
+        let prop_l = RangeOscScanner.scan(&tick_l, &sensors, &matrix, &config);
+        assert!(prop_l.is_some(), "Long hợp lệ phải được duyệt");
+        let p_l = prop_l.unwrap();
+        assert_eq!(p_l.signal_type, SignalType::Long);
+        assert_eq!(p_l.suggested_tp, Some(2100.0), "TP của Long PHẢI là biên trên VAH (2100.0)!");
+        let sl_l = p_l.suggested_sl.unwrap();
+        let rr_l = (2100.0 - 2017.0) / (2017.0 - sl_l);
+        assert!(rr_l >= 1.50, "R:R của Long ({:.2}) phải >= 1.50", rr_l);
+
+        // KỊCH BẢN 2 (SHORT): Chạm biên trên VAH dội xuống -> TP phải là VAL (2000.0) và R:R >= 1.50
+        // Close = 2083 -> delta_norm = +0.66, CLV = -0.60
+        lows[i] = 2080.0;
+        highs[i] = 2095.0;
+        closes[i] = 2083.0;
+        let (dv_s, im_s, mut act_s, tr_s) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick_s = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_s,
+            indicator_manager: &im_s,
+            trades: &tr_s,
+            last_closed_trade: None,
+            actions: &mut act_s,
+            position: Position::default(),
+        };
+        let prop_s = RangeOscScanner.scan(&tick_s, &sensors, &matrix, &config);
+        assert!(prop_s.is_some(), "Short hợp lệ phải được duyệt");
+        let p_s = prop_s.unwrap();
+        assert_eq!(p_s.signal_type, SignalType::Short);
+        assert_eq!(p_s.suggested_tp, Some(2000.0), "TP của Short PHẢI là biên dưới VAL (2000.0)!");
+        let sl_s = p_s.suggested_sl.unwrap();
+        let rr_s = (2083.0 - 2000.0) / (sl_s - 2083.0);
+        assert!(rr_s >= 1.50, "R:R của Short ({:.2}) phải >= 1.50", rr_s);
+
+        // KỊCH BẢN 3: R:R < 1.50 do SL quá xa (Low = 1965) -> PHẢI BỊ VETO!
+        lows[i] = 1965.0;
+        highs[i] = 2026.0;
+        closes[i] = 2024.0;
+        let (dv_bad, im_bad, mut act_bad, tr_bad) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick_bad = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_bad,
+            indicator_manager: &im_bad,
+            trades: &tr_bad,
+            last_closed_trade: None,
+            actions: &mut act_bad,
+            position: Position::default(),
+        };
+        assert!(RangeOscScanner.scan(&tick_bad, &sensors, &matrix, &config).is_none(), "R:R < 1.50 bắt buộc phải bị VETO!");
+    }
 }

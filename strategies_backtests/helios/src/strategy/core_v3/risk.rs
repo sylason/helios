@@ -625,16 +625,34 @@ impl RiskManager {
             let fee_buffer_pct = round_trip_fee + slippage;
 
             // 4. Sàn kinh tế kích hoạt BE an toàn (Khử triệt để magic number 0.06 & kế thừa 100% DNA BE)
+            // 🛡️ TODO-AUDIT-NEW-196: Với RANGE_OSC có TP0 tại biên đối diện (VAH/VAL), kẹp trần ngưỡng kích hoạt BE
+            // tại trung điểm hành trình (0.50 * |TP0 - Entry| >= POC0) nhưng luôn bảo toàn sàn phí net_be_roe.
             let friction_roe = fee_buffer_pct * leverage;
             let net_be_roe = friction_roe + (0.0003 * leverage);
-            let be_trigger_roe = risk_cfg.base_be_roe_trigger.max(net_be_roe);
+            let structural_poc_dist = if tag_str == "RANGE_OSC" {
+                trade.tp_price
+                    .map(|tp| (tp - trade.entry_price).abs() * 0.50)
+                    .unwrap_or(f64::INFINITY)
+            } else {
+                f64::INFINITY
+            };
+            let structural_poc_roe = if trade.entry_price > 0.0 && structural_poc_dist.is_finite() {
+                (structural_poc_dist / trade.entry_price) * leverage
+            } else {
+                f64::INFINITY
+            };
+            let be_trigger_roe = risk_cfg.base_be_roe_trigger.min(structural_poc_roe).max(net_be_roe);
 
-            // Khoảng cách giá đỉnh tối thiểu: Kết hợp sàn kinh tế DNA và đệm biến động Regime Simplex
+            // Khoảng cách giá đỉnh tối thiểu: Kết hợp sàn kinh tế DNA và đệm biến động Regime / POC
+            let net_be_gain = trade.entry_price * (net_be_roe / leverage);
             let min_required_gain = trade.entry_price * (be_trigger_roe / leverage);
             let atr_required_gain = current_atr * be_trigger_mult;
-            let required_price_gain = min_required_gain.max(atr_required_gain);
+            let required_price_gain = min_required_gain
+                .max(atr_required_gain)
+                .min(structural_poc_dist)
+                .max(net_be_gain);
 
-            // 5. Kích hoạt theo Chốt Chặn Kép: Vượt sàn kinh tế DNA VÀ vượt đệm biến động Regime
+            // 5. Kích hoạt theo Chốt Chặn Kép: Vượt sàn kinh tế DNA VÀ vượt đệm biến động Regime / POC
             let is_be_triggered = peak_dist >= required_price_gain && peak_roe >= be_trigger_roe;
 
             // =========================================================================
@@ -807,72 +825,13 @@ impl RiskManager {
                 }
             }
 
-            // =========================================================================
-            // 🎯 [FLAW-TSL.1: HYBRID TTP - NHÁNH A: DYNAMIC STRUCTURAL TAKE PROFIT]
-            // =========================================================================
-            // 🛡️ TODO-AUDIT-NEW-188: REVERSAL đã được tách sang Static Limit Anchor TP0 kết hợp Unified TTP trong RAM.
-            // 🛡️ TODO-AUDIT-NEW-194: RANGE_OSC đã được nâng cấp sang Hộp Cấu Trúc Cố Định (VAH/VAL/POC),
-            // sử dụng TP biên đối diện cố định (Static Anchor Limit TP), không còn bám theo dải BB động gây co thắt R:R.
-            let mut new_tp_to_update = trade.tp_price;
-            if false && tag_str == "RANGE_OSC" {
-                let tp_ratio = config.tactical_sniper.range.tp_target_ratio.clamp(0.10, 0.90);
-                let bb_width = (sensors.bb_upper[i] - sensors.bb_lower[i]).max(0.0);
-                let raw_tp = if trade.is_long() {
-                    sensors.bb_lower[i] + bb_width * tp_ratio
-                } else {
-                    sensors.bb_upper[i] - bb_width * tp_ratio
-                };
-
-                if !raw_tp.is_nan() && raw_tp > 0.0 {
-                    let min_gain_pct = if risk_cfg.dynamic_tp_min_gain_pct > 0.0 {
-                        risk_cfg.dynamic_tp_min_gain_pct
-                    } else {
-                        0.002
-                    };
-
-                    // CHỐT CHẶN 1: Min Profit Floor Guard (Chống dải BB co thắt làm chốt lời thành chốt lỗ)
-                    let guarded_tp = if trade.is_long() {
-                        let min_tp_floor = trade.entry_price * (1.0 + min_gain_pct);
-                        raw_tp.max(min_tp_floor)
-                    } else {
-                        let max_tp_ceiling = trade.entry_price * (1.0 - min_gain_pct);
-                        raw_tp.min(max_tp_ceiling)
-                    };
-
-                    // CHỐT CHẶN 2: Spread Guard (Đảm bảo khoảng cách an toàn với SL >= 0.5 ATR)
-                    let spread_buffer = 0.5 * current_atr;
-                    let final_tp = if trade.is_long() {
-                        guarded_tp.max(calculated_sl + spread_buffer)
-                    } else {
-                        guarded_tp.min(calculated_sl - spread_buffer)
-                    };
-
-                    if !final_tp.is_nan() && final_tp > 0.0 {
-                        if let Some(old_tp) = trade.tp_price {
-                            if (final_tp - old_tp).abs() > 1e-4 && _debug_mode {
-                                tracing::debug!(
-                                    "🎯 [DYNAMIC TP UPDATED] Bar: {} | Trade #{:?} ({}) | Old TP: {:.2} -> New TP: {:.2} | Close: {:.2}",
-                                    i, trade.id, tag_str, old_tp, final_tp, current_close
-                                );
-                            }
-                        }
-                        new_tp_to_update = Some(final_tp);
-                    }
-                }
-            }
-
-            // Kiểm tra xem Take Profit có thay đổi cần đồng bộ sang Broker / PaperTrader không
-            let tp_changed = match (trade.tp_price, new_tp_to_update) {
-                (Some(old_tp), Some(new_tp)) => (old_tp - new_tp).abs() > 1e-4,
-                (None, Some(_)) | (Some(_), None) => true,
-                (None, None) => false,
-            };
-
             // [ENHANCEMENT 3: MONOTONIC RATCHET GUARD]
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
             // 🛡️ TODO-SEM-03: Bổ sung `|| is_be_triggered`. Khi vị thế đã thỏa mãn BE từ đỉnh High Watermark,
             // SL hòa vốn mới (min_be) vẫn được gửi sang Broker/Sàn ngay cả khi nến hiện tại đang retest quanh Entry (current_pnl <= 0.0).
             // 🛡️ TODO-AUDIT-NEW-48: Cho phép đồng bộ SL hòa vốn khi nến t+1 thỏa mãn Follow-Through của MOMENTUM_IGN.
+            // 🛡️ TODO-AUDIT-NEW-188 & 196: Toàn bộ Playbooks (bao gồm REVERSAL & RANGE_OSC) bảo toàn 100%
+            // Static Limit Anchor TP0 (trade.tp_price) kết hợp Unified Dual-Layer TTP trong RAM.
             if current_pnl > 0.0 || is_be_triggered || is_mega_trend || is_momentum_post_trigger_be {
                 // KHI CÓ LÃI DANH NGHĨA HOẶC ĐÃ THỎA MÃN BREAK-EVEN / MEGA TREND: Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
                 let sl_changed = if trade.is_long() {
@@ -881,16 +840,9 @@ impl RiskManager {
                     calculated_sl < trade.sl_price.unwrap_or(f64::INFINITY)
                 };
 
-                if sl_changed || tp_changed {
-                    let sl_to_send = if sl_changed { Some(calculated_sl) } else { trade.sl_price };
-                    tick.update_trade_sl_tp(trade.id, sl_to_send, new_tp_to_update);
+                if sl_changed {
+                    tick.update_trade_sl_tp(trade.id, Some(calculated_sl), trade.tp_price);
                 }
-            } else if tp_changed {
-                // 🛡️ TODO-RSK-02: KHI ĐANG ÂM HOẶC HÒA VỐN (current_pnl <= 0.0) VÀ CHƯA KÍCH HOẠT BE:
-                // Bảo toàn 100% Initial Structural SL do Scanner thiết lập, tuyệt đối không siết SL bằng hàm số mũ 0.8^n.
-                // Việc giải phóng vốn ngâm lâu đã có khối Stagnant Capital Release (dòng 348) và Zombie Trade Purge phụ trách.
-                // Chỉ cập nhật Take Profit nếu có thay đổi động (RangeOsc / Reversal), giữ nguyên mức SL hiện tại.
-                tick.update_trade_sl_tp(trade.id, trade.sl_price, new_tp_to_update);
             }
         }
     }
@@ -2436,5 +2388,91 @@ mod tests {
         RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_3, &sensors, false);
         let has_close_3 = actions_3.iter().any(|a| matches!(a, Action::ClosePosition { .. } | Action::CloseLongs { .. }));
         assert!(!has_close_3, "Kịch bản 3: TREND_PB TUYỆT ĐỐI KHÔNG bị Stagnation Exit đóng lệnh ở nến thứ 4!");
+    }
+
+    #[test]
+    fn test_range_bound_breakeven_lock_at_poc() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use ferro_trade::broker::trade::Trade;
+        use ferro_trade::broker::actions::Action;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        let len = 50;
+        let entry_bar = 40;
+        let i = len - 1;
+
+        let opens = vec![2005.0; len];
+        let highs = vec![2020.0; len];
+        let lows = vec![2000.0; len];
+        let mut closes = vec![2005.0; len];
+        // Nến hiện tại lùi về dưới entry (current_pnl <= 0) để chứng minh BE đã được chốt và bảo toàn
+        closes[i] = 2004.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+
+        // Lệnh RANGE_OSC Long: Entry 2005.0, TP0 2030.0 (VAH), SL0 1990.0
+        // Quãng đường tới TP0: 25.0 giá -> Trung điểm POC0: 12.5 giá (mốc giá 2017.5)
+        let mut trade = Trade::new(101, 1.0, 2005.0, entry_bar, None, Some("RANGE_OSC".to_string()));
+        trade.sl_price = Some(1990.0);
+        trade.tp_price = Some(2030.0);
+        trade.highest_favorable_price = 2018.0; // Đã chạm và vượt qua trung điểm POC0 (12.5 giá)
+        trade.peak_bar = 45;
+        let trades = vec![trade];
+
+        let mut tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        // Cấu hình stress-test: base_be_roe_trigger = 22% ROE và be_atr_trigger_range = 2.5 ATR (25 giá)
+        // Cả 2 đều đòi hỏi > 22 giá nếu không có chốt chặn structural_poc_dist
+        config.risk_management.stop_management.base_be_roe_trigger = 0.22;
+        config.risk_management.stop_management.be_atr_trigger_range = 2.5;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        let matrix = MarketMatrixV3::default();
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick, &sensors, false);
+
+        assert!(!actions.is_empty(), "Phải phát hành Action::UpdateTradeSlTp khi giá chạm/vượt POC0!");
+        let mut found_update = false;
+        for action in &actions {
+            if let Action::UpdateTradeSlTp { trade_id, new_sl_price, new_tp_price } = action {
+                if *trade_id == 101 {
+                    found_update = true;
+                    assert!(new_sl_price.is_some(), "SL mới phải được cập nhật");
+                    let new_sl = new_sl_price.unwrap();
+                    assert!(
+                        new_sl > 2005.0,
+                        "SL mới ({}) PHẢI vượt trên entry 2005.0 để bảo vệ vốn sau phí!",
+                        new_sl
+                    );
+                    assert_eq!(*new_tp_price, Some(2030.0), "TP0 tại biên đối diện 2030.0 PHẢI được bảo toàn nguyên vẹn!");
+                }
+            }
+        }
+        assert!(found_update, "Phải tìm thấy Action::UpdateTradeSlTp cho trade 101!");
     }
 }

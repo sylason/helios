@@ -659,6 +659,13 @@
   - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:16-28`
   - **Mô tả:** Tự động gọi `std::fs::create_dir_all(parent)` trước khi mở file CSDL SQLite, tránh lỗi IO crash khi đường dẫn thư mục tùy biến chưa được tạo trước.
 
+- [ ] **TODO-AUDIT-NEW-209: Mở Rộng Pipeline Dữ Liệu Lưu Trữ Quote Asset Volume Gốc Từ Binance API (`TB-DATA-QUOTE-VOLUME`)**
+  - **File:** `trading_bot/bot_engine/src/models.rs`, `data_engine/binance_rest.rs`, `data_engine/ws_manager.rs`, `data_engine/sqlite_impl.rs`, `actors/helios_bridge.rs`, `ferro_trade/src/data/cache.rs`
+  - **Mô tả:** Mở rộng struct `Candle` bổ sung trường `quote_volume: f64` (giá trị USDT danh nghĩa). Nạp `quote_volume` từ Binance REST klines (index 7) và WebSocket kline stream (`k.q`). Cập nhật schema bảng `candles` trong SQLite (`quote_volume DOUBLE DEFAULT 0.0`), cập nhật hàm parse nến và lưu trữ CSDL. Đồng thời kết nối `quote_volume` vào `RawDataCache` / `custom_columns` để các chiến thuật (như Absorption Scanner trong `TODO-AUDIT-NEW-174`) có thể truy cập trực tiếp giá trị thanh khoản danh nghĩa chuẩn xác 1:1 từ sàn.
+  - **Unit Tests:**
+    - [ ] `test_candle_quote_volume_parsing_rest_and_ws`
+    - [ ] `test_sqlite_candle_storage_with_quote_volume`
+
 ---
 
 ## 🏛️ PHẦN 17: KIỂM TOÁN HẠ TẦNG THỐNG ĐỐC QUẢN TRỊ RỦI RO DANH MỤC (`portfolio_guardian.rs`)
@@ -1336,13 +1343,13 @@
     - [x] `test_range_bound_spring_liquidity_sweep_reentry`
     - [x] `test_range_bound_upthrust_reentry`
 
-- [ ] **TODO-AUDIT-NEW-196: Chốt Lời Sang Biên Đối Diện Hộp (Opposite Boundary TP, $R:R \ge 1.5$) & Khóa Lãi Hòa Vốn Tại $POC$ (`RNG-OPPOSITE-BOUNDARY-TP`)**
+- [x] **TODO-AUDIT-NEW-196: Chốt Lời Sang Biên Đối Diện Hộp (Opposite Boundary TP, $R:R \ge 1.5$) & Khóa Lãi Hòa Vốn Tại $POC$ (`RNG-OPPOSITE-BOUNDARY-TP`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`, `risk.rs`
   - **Mô tả:** Khắc phục tử huyệt R:R âm do chốt lời non tại trục giữa ($bb\_middle$). Take Profit thực tế bắt buộc phải hướng sang biên đối diện của hộp ($VAL \to VAH$ hoặc $VAH \to VAL$) để bảo đảm $R:R \ge 1.5$. Trục giữa $POC$ chỉ đóng vai trò là điểm kích hoạt dời Stop Loss về hòa vốn (Break-Even Lock).
   - **Ghi chú Kiến trúc & Định hướng Refactor (Kế thừa Thảo luận Task 188):** Đánh giá chuyển đổi cơ chế TP của `RANGE_OSC` từ Dynamic BB sang **Static Limit Anchor $TP_0$ (tại biên đối diện) + Unified Adaptive TTP trong RAM** (đồng bộ với Reversal `TODO-AUDIT-NEW-188`). Khi hoàn tất, sẽ xóa bỏ hoàn toàn khối Dynamic TP còn lại tại `risk.rs:718-768`, vừa chống co thắt dải làm co hẹp TP, vừa tối ưu Maker fee và bảo toàn $R:R$ trên sổ lệnh sàn.
   - **Unit Tests:**
-    - [ ] `test_range_bound_targets_opposite_boundary_rr_ge_1_5`
-    - [ ] `test_range_bound_breakeven_lock_at_poc`
+    - [x] `test_range_bound_targets_opposite_boundary_rr_ge_1_5`
+    - [x] `test_range_bound_breakeven_lock_at_poc`
 
 - [ ] **TODO-AUDIT-NEW-197: Bộ Đếm Chu Kỳ Sống Của Hộp (Boundary Touch Counter: Chỉ Đánh Lần 2, 3, 4; Cấm Lần 5+) & Anti-Breakout Veto (`RNG-TOUCH-COUNTER-AND-ANTI-BREAKOUT`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
