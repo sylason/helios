@@ -139,12 +139,13 @@ impl Strategy for HeliosStrategyV3 {
 
         s.kama_mid = ctx.kama(ind.kama.timeframe, "KAMA", ind.kama.short_period, 2, ind.kama.long_period);
         
-        let (k_slope, k_slope_adj) = ctx.kama_slope(
+        // 🛡️ TASK-NEW-26: Chuẩn hóa bằng chu kỳ tự thân của KAMA (short_period), triệt tiêu ô nhiễm từ Stop Loss vi mô (ind.atr.period)
+        let (_k_slope, k_slope_adj) = ctx.kama_slope(
             ind.kama.timeframe, "KAMA_Slope", 
             ind.kama.short_period, 2, ind.kama.long_period, 
-            ind.kama.short_period, ind.atr.period
+            ind.kama.short_period, ind.kama.short_period
         );
-        s.kama_slope = k_slope;
+        // s.kama_slope = k_slope; // 🛡️ TASK-NEW-26: Cảm biến mồ côi (Dead Data trong Core V3), giữ Arc::default() để tối ưu RAM
         s.kama_slope_adj = k_slope_adj;
 
         let (bb_u, bb_m, bb_l, _bb_w, _bb_wp, _bb_sw, _bb_sq) = ctx.bbands(ind.bbands.timeframe, "BB", ind.bbands.period, ind.bbands.nbdev);

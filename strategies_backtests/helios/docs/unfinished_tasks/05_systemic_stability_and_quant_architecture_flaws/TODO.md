@@ -273,9 +273,9 @@
 - [x] **TODO-AUDIT-NEW-25: Gỡ Bỏ Lệnh Đánh Giá Lặp Lại Gatekeeper Trong Arbiter (`NEW-DOUBLE-EVAL`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/arbiter.rs:168-173`, `mod.rs:248-281`
   - **Mô tả:** [ĐÃ HOÀN THÀNH 100% - HỢP NHẤT VÀO TODO-AUDIT-NEW-54]. Đã thống nhất `HeliosArbiter::process_tick()` làm Single Source of Truth sở hữu Gatekeeper, gắn trường `pub gate_eval: GateEvaluation` vào `ArbiterDecision`. `core_v3/mod.rs` gọi `process_tick()` trước và tái sử dụng trực tiếp `&decision.gate_eval` cho `DefenseLedger`, triệt tiêu hoàn toàn lệnh gọi kép `RegimeGatekeeper::evaluate`. Unit test `test_single_gatekeeper_eval_propagated_through_arbiter_decision` đã kiểm chứng chuỗi 2 nến (Vào bão $\rightarrow$ Tan bão) và pass 100%.
-- [ ] **TODO-AUDIT-NEW-26: Dọn Cảm Biến Mồ Côi & Gỡ Ô Nhiễm Tham Số ATR Khỏi Độ Dốc KAMA (`ORPHAN-SENS`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:114-120`
-  - **Mô tả:** Xóa bỏ `sensors.kama_slope` không sử dụng; thay `ind.atr.period` bằng `ind.kama.short_period` trong hàm gọi `ctx.kama_slope` để tránh ô nhiễm tham số SL vào KAMA.
+- [x] **TODO-AUDIT-NEW-26: Dọn Cảm Biến Mồ Côi & Gỡ Ô Nhiễm Tham Số ATR Khỏi Độ Dốc KAMA (`ORPHAN-SENS`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/mod.rs:142-150`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH 100%]. Thay `ind.atr.period` bằng `ind.kama.short_period` trong `ctx.kama_slope` đảm bảo KAMA vĩ mô được chuẩn hóa bằng chính chu kỳ tự thân, triệt tiêu hoàn toàn rò rỉ siêu tham số từ Stop Loss vi mô; comment out dòng gán `s.kama_slope = k_slope;` giữ giá trị rỗng `Arc::default()` giải phóng bộ nhớ RAM. 203/203 unit tests PASS 100%, bảo tồn `DNA_WIDTH = 120`.
 
 ---
 
