@@ -98,7 +98,7 @@ impl Strategy for HeliosStrategyV3 {
         // Kiểm tra toàn bộ chu kỳ chỉ báo cốt tử thực tế được đăng ký với ctx để ngăn ngừa chia cho 0 và mảng rỗng
         let is_zero_period = ind.natr.period == 0 || ind.micro_natr.period == 0 ||
             ind.mfi.period == 0 || ind.kama.short_period == 0 || ind.kama.long_period == 0 ||
-            ind.adx.period == 0 || ind.bbands.period == 0 || ind.atr.period == 0 ||
+            ind.adx.period == 0 || ind.bbands.period == 0 || ind.bbands_momentum.period == 0 || ind.atr.period == 0 ||
             ind.vol_ma.period == 0 || ind.vwma.period == 0 ||
             ind.price_z_score.lookback == 0 || ind.vol_z_score.lookback == 0 ||
             ind.rsi_trend.period == 0 || ind.rsi_reversal.period == 0 || ind.rsi_momentum.period == 0 ||
@@ -151,6 +151,15 @@ impl Strategy for HeliosStrategyV3 {
         s.bb_upper = bb_u;
         s.bb_middle = bb_m;
         s.bb_lower = bb_l;
+
+        let (bb_mom_u, _, bb_mom_l, ..) = ctx.bbands(
+            ind.bbands_momentum.timeframe, 
+            "BB_Mom", 
+            ind.bbands_momentum.period, 
+            ind.bbands_momentum.nbdev
+        );
+        s.bb_mom_upper = bb_mom_u;
+        s.bb_mom_lower = bb_mom_l;
 
         // 🛡️ TASK-MAT-05: Khóa cứng đồng bộ 100% Timeframe của Keltner Channel theo Bollinger Bands (Serde-Safe)
         let (kc_u, _kc_m, kc_l) = ctx.keltner(
@@ -1757,7 +1766,7 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 117, "DNA_WIDTH phải là 117 chiều sau khi thêm gen max_breakout_extension_atr cho Momentum (TODO-AUDIT-NEW-170)!");
+        assert_eq!(width, 120, "DNA_WIDTH phải là 120 chiều sau khi thêm 3 gen bbands_momentum cho Momentum (TODO-AUDIT-NEW-169)!");
 
         let mom_sqz_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.squeeze_threshold"));
         assert!(mom_sqz_def.is_some(), "defs phải chứa tactical_sniper.momentum.squeeze_threshold!");
@@ -2003,6 +2012,8 @@ mod tests {
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.kc_upper = std::sync::Arc::new(vec![2025.0; len]);
         sensors.kc_lower = std::sync::Arc::new(vec![1975.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
@@ -3560,6 +3571,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
@@ -3605,6 +3618,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
 
         let matrix = MarketMatrixV3::default();
@@ -3651,6 +3666,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -3704,6 +3721,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![72.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -3770,6 +3789,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![1.5; len]);
         sensors.kama_slope_adj = std::sync::Arc::new(vec![0.10; len]);
@@ -3835,6 +3856,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -3935,6 +3958,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -4011,6 +4036,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -4067,6 +4094,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]); // ATR = 10.0 => trần 25.0
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -4118,6 +4147,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
@@ -4198,6 +4229,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![95.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.0; len]);
@@ -4717,6 +4750,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]); // ATR = 10.0 => trần 15.0
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -4770,6 +4805,8 @@ mod tests {
         let mut sensors = HeliosSensors::default();
         sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
         sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1980.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
         sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
@@ -4781,6 +4818,113 @@ mod tests {
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "Nến bứt phá sớm cự ly 0.50 ATR (<= 1.50) PHẢI được chấp thuận!");
+    }
+
+    #[test]
+    fn test_momentum_ignition_detects_first_micro_breakout_before_15m_expansion() {
+        let len = 50;
+        let mut closes = vec![1998.0; len];
+        // Giả lập nến vi mô 1m bứt phá dải vi mô bb_mom_upper (2000.0) tại 2005.0.
+        // Trong khi đó, dải MTF 15m bb_upper ở tận 2020.0 (giá 2005.0 nằm sâu bên trong dải 15m).
+        // Mô hình cũ so với dải 15m sẽ trả về None (bỏ lỡ chân sóng).
+        // Mô hình mới so với dải vi mô bb_mom_upper sẽ PHÁT HIỆN THÀNH CÔNG Proposal!
+        closes[49] = 2005.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1999.0; len]),
+            high: std::sync::Arc::new(vec![2006.0; len]),
+            low: std::sync::Arc::new(vec![1997.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.max_breakout_extension_atr = 1.50;
+        config.tactical_sniper.momentum.squeeze_threshold = 0.40;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]); // Dải vĩ mô 15m ở xa
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2000.0; len]); // Dải vi mô bb_mom vừa bị bứt phá
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "Nến vi mô bứt phá bb_mom_upper (2005 > 2000) khi dải 15m vẫn ở 2020 PHẢI sinh Proposal chân sóng thành công!");
+    }
+
+    #[test]
+    fn test_momentum_ignition_ignores_subthreshold_micro_noise() {
+        let len = 50;
+        let closes = vec![1995.0; len]; // Giá 1995 nằm dưới dải vi mô bb_mom_upper 2000
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1994.0; len]),
+            high: std::sync::Arc::new(vec![1996.0; len]),
+            low: std::sync::Arc::new(vec![1993.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i: 49,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.momentum.max_breakout_extension_atr = 1.50;
+        config.tactical_sniper.momentum.squeeze_threshold = 0.40;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.bb_upper = std::sync::Arc::new(vec![2020.0; len]);
+        sensors.bb_lower = std::sync::Arc::new(vec![1980.0; len]);
+        sensors.bb_mom_upper = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.bb_mom_lower = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.rsi_momentum = std::sync::Arc::new(vec![75.0; len]);
+        sensors.vol_z_score = std::sync::Arc::new(vec![2.5; len]);
+        sensors.kama_slope_adj = std::sync::Arc::new(vec![0.01; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.squeeze_intensity = std::sync::Arc::new(vec![0.70; len]);
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.01; len]);
+
+        let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "Nến vi mô dao động bên trong dải bb_mom_upper (1995 < 2000) PHẢI bị bỏ qua!");
     }
 }
 

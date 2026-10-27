@@ -1111,12 +1111,12 @@
 
 ## 🏛️ PHẦN 25: GIA CỐ TOÀN DIỆN CHIẾN ĐỘI MOMENTUM IGNITION (NOTES 28, 29, 30, 31)
 
-- [ ] **TODO-AUDIT-NEW-169: Khắc Phục Lệch Pha Thang Đo MTF Giữa Nến Vi Mô 1m & Dải Bollinger 15m (`MOM-MTF-SCALE`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:51-57`, `matrix.rs`
-  - **Mô tả:** Scanner so sánh `close` 1m với dải Bollinger 15m (`bb_upper`, `bb_lower`). Khi nến 1m đầu tiên bùng nổ thoát hộp nén vi mô, giá vẫn nằm trọn trong dải BB 15m $\implies$ Bỏ lỡ 100% điểm vào chân sóng, chỉ phát hiện khi nến đã chạy đến cây thứ 8–10 (sát đỉnh Climax). Chuyển sang so sánh với dải bứt phá vi mô tương thích (1m/5m Bollinger/Keltner Bands hoặc Micro Donchian Channel).
+- [x] **TODO-AUDIT-NEW-169: Khắc Phục Lệch Pha Thang Đo MTF Giữa Nến Vi Mô & Dải Bollinger (`MOM-MTF-SCALE`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs:48-74`, `config.rs`, `sensors.rs`, `core_v3/mod.rs`
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Triển khai cảm biến vi mô chuyên biệt `bbands_mom` (`BbandsMomentumParams`) thông qua `ctx.bbands(...)`, cấp 2 trường `bb_mom_upper` và `bb_mom_lower` vào `HeliosSensors`. Scanner chuyển toàn bộ phép so sánh sườn xung bứt phá đầu tiên (`Rising Edge`) và cự ly vọt xà (`TODO-170`) sang dải vi mô `bb_mom_u` / `bb_mom_l`, triệt tiêu hoàn toàn độ trễ 8–10 nến của dải 15m cũ để bắt trọn chân sóng vi mô. Tích hợp 3 gen DNA trực giao (`period` `[10.0, 50.0]`, `nbdev` `[1.5, 3.0]`, `timeframe` subset `1m, 3m, 5m, 10m`), nâng `DNA_WIDTH` từ 117 lên 120 chiều. Unit tests pass 100% (203/203 tests).
   - **Unit Tests:**
-    - [ ] `test_momentum_ignition_detects_first_micro_breakout_before_15m_expansion`
-    - [ ] `test_momentum_ignition_ignores_subthreshold_micro_noise`
+    - [x] `test_momentum_ignition_detects_first_micro_breakout_before_15m_expansion`
+    - [x] `test_momentum_ignition_ignores_subthreshold_micro_noise`
 
 - [x] **TODO-AUDIT-NEW-170: Chốt Chặn Cự Ly Vọt Xà Vi Mô Ngoài Dải Biên (`MOM-MAX-BREAKOUT-EXTENSION-CAP`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/momentum_ignition.rs`, `config.rs`, `core_v3/mod.rs`

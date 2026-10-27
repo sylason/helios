@@ -47,6 +47,8 @@ pub struct IndicatorsConfig {
     #[dna(nest)]
     pub bbands: BbandsParams,
     #[dna(nest)]
+    pub bbands_momentum: BbandsMomentumParams,
+    #[dna(nest)]
     pub keltner: KeltnerParams,
     #[dna(nest)]
     pub macd: MacdParams,
@@ -154,6 +156,28 @@ impl Default for BbandsParams {
             period: 20,
             nbdev: 2.0,
             timeframe: Timeframe::T15m,
+        }
+    }
+}
+
+/// Cảm biến Dải Bollinger Vi Mô Độc Lập cho Momentum Ignition (TODO-AUDIT-NEW-169)
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct BbandsMomentumParams {
+    #[dna(min = 10.0, max = 50.0, step = 2.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub period: usize,
+    #[dna(min = 1.5, max = 3.0, step = 0.5)]
+    pub nbdev: f64,
+    #[dna(subset = "1m, 3m, 5m, 10m")]
+    pub timeframe: Timeframe,
+}
+
+impl Default for BbandsMomentumParams {
+    fn default() -> Self {
+        Self {
+            period: 20,
+            nbdev: 2.0,
+            timeframe: Timeframe::T5m,
         }
     }
 }

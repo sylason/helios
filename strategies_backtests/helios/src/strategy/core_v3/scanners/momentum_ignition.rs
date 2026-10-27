@@ -45,15 +45,15 @@ impl TacticalScanner for MomentumIgnitionScanner {
         let prev_i = i - 1;
         let mom_cfg = &config.tactical_sniper.momentum;
         
-        let bb_u = sensors.bb_upper.get(i).copied().unwrap_or(f64::NAN);
-        let bb_l = sensors.bb_lower.get(i).copied().unwrap_or(f64::NAN);
+        let bb_mom_u = sensors.bb_mom_upper.get(i).copied().unwrap_or(f64::NAN);
+        let bb_mom_l = sensors.bb_mom_lower.get(i).copied().unwrap_or(f64::NAN);
         let close = tick.closes()[i];
 
-        let prev_bb_u = sensors.bb_upper.get(prev_i).copied().unwrap_or(f64::NAN);
-        let prev_bb_l = sensors.bb_lower.get(prev_i).copied().unwrap_or(f64::NAN);
+        let prev_bb_mom_u = sensors.bb_mom_upper.get(prev_i).copied().unwrap_or(f64::NAN);
+        let prev_bb_mom_l = sensors.bb_mom_lower.get(prev_i).copied().unwrap_or(f64::NAN);
         let prev_close = tick.closes()[prev_i];
 
-        if bb_u.is_nan() || bb_l.is_nan() || close.is_nan() || prev_bb_u.is_nan() || prev_bb_l.is_nan() || prev_close.is_nan() {
+        if bb_mom_u.is_nan() || bb_mom_l.is_nan() || close.is_nan() || prev_bb_mom_u.is_nan() || prev_bb_mom_l.is_nan() || prev_close.is_nan() {
             return None;
         }
 
@@ -65,10 +65,10 @@ impl TacticalScanner for MomentumIgnitionScanner {
             return None;
         }
 
-        // 🛡️ TODO-AUDIT-NEW-44: Nhận Diện Cú Bung Đầu Tiên (Discrete Rising Edge Detection)
-        // Chỉ chấp nhận nến giao cắt đầu tiên vượt biên dải, cấm tuyệt đối spam lệnh ở nến 2, 3, 4
-        let is_long_candidate = close > bb_u && prev_close <= prev_bb_u;
-        let is_short_candidate = close < bb_l && prev_close >= prev_bb_l;
+        // 🛡️ TODO-AUDIT-NEW-44 & TODO-AUDIT-NEW-169: Nhận Diện Cú Bung Đầu Tiên Trên Dải Vi Mô (Discrete Rising Edge Detection)
+        // Chỉ chấp nhận nến giao cắt đầu tiên vượt biên dải vi mô, cấm tuyệt đối spam lệnh ở nến 2, 3, 4
+        let is_long_candidate = close > bb_mom_u && prev_close <= prev_bb_mom_u;
+        let is_short_candidate = close < bb_mom_l && prev_close >= prev_bb_mom_l;
         if !is_long_candidate && !is_short_candidate {
             return None; // Giá chưa vượt biên hoặc đã bứt phá từ các nến trước -> Loại bỏ
         }
@@ -121,10 +121,10 @@ impl TacticalScanner for MomentumIgnitionScanner {
         }
 
         // 🛡️ TODO-AUDIT-NEW-170 (Kế thừa & Nâng cấp TODO-AUDIT-NEW-40): Cầu chì kẹp trần cự ly phi thứ nguyên chống bão thanh lý & Buying/Selling Climax
-        // Ngăn chặn 100% bẫy đu đỉnh/đáy kiệt sức khi cây nến tăng/giảm quá sốc ngoài dải BB
+        // Ngăn chặn 100% bẫy đu đỉnh/đáy kiệt sức khi cây nến tăng/giảm quá sốc ngoài dải BB vi mô
         let dist = match signal_type {
-            SignalType::Long => close - bb_u,
-            SignalType::Short => bb_l - close,
+            SignalType::Long => close - bb_mom_u,
+            SignalType::Short => bb_mom_l - close,
         };
         let max_ext = if mom_cfg.max_breakout_extension_atr <= 0.0 {
             1.50

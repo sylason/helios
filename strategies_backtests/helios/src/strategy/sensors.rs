@@ -35,6 +35,8 @@ pub struct HeliosSensors {
     pub bb_lower: Arc<Vec<f64>>,
     pub kc_upper: Arc<Vec<f64>>,
     pub kc_lower: Arc<Vec<f64>>,
+    pub bb_mom_upper: Arc<Vec<f64>>,
+    pub bb_mom_lower: Arc<Vec<f64>>,
 
     // --- Dedicated Per-Playbook RSI Sensors ---
     pub rsi_trend: Arc<Vec<f64>>,
