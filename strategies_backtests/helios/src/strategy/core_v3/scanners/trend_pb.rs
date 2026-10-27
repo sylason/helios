@@ -92,13 +92,12 @@ impl TacticalScanner for TrendPBScanner {
         let max_dist = pb_cfg.max_pullback_dist_atr.max(0.10);
         let inval_floor = pb_cfg.invalidation_buffer_atr.max(0.05);
 
-        let prev_stoch_k = if i >= 1 {
-            sensors.stoch_trend_k.get(i - 1).copied().unwrap_or(stoch_k)
+        let cmo = sensors.cmo_micro.get(i).copied().unwrap_or(0.0);
+        let prev_cmo = if i >= 1 {
+            sensors.cmo_micro.get(i - 1).copied().unwrap_or(cmo)
         } else {
-            stoch_k
+            cmo
         };
-        let stoch_d = sensors.stoch_trend_d.get(i).copied().filter(|v| !v.is_nan()).unwrap_or(stoch_k);
-        let climax_thresh = pb_cfg.stoch_climax_thresh.max(1.0);
 
         // Đạo hàm vi phân gradient nến: Close Location Value (CLV) [-1.0, +1.0]
         let tr_span = (high - low).max(1e-6);
@@ -110,6 +109,13 @@ impl TacticalScanner for TrendPBScanner {
         // 1. CHIẾN ĐỘI PULLBACK LONG (KAMA Dốc Lên + Hồi Quy Vi Mô + Lực Cầu Rút Chân)
         // -------------------------------------------------------------------------
         if kama_slope > slope_thresh {
+            // 🛡️ CHỐT CHẶN VETO CẤU TRÚC BẬC THANG DOW (TODO-AUDIT-NEW-52):
+            // Bảo vệ đáy sóng xoay chiều Higher Low (Swing Low cũ). Nếu giá đâm thủng đáy này -> VETO!
+            let dow_floor = sensors.dow_floor.get(i).copied().unwrap_or(f64::NAN);
+            if dow_floor.is_nan() || close < dow_floor {
+                return None;
+            }
+
             // 🛡️ CHỐT CHẶN KHOẢNG CÁCH KAMA (TODO-AUDIT-NEW-38):
             // delta_kama < -inval_floor: Giá đâm thủng sâu qua hỗ trợ KAMA (Breakdown Trap) -> VETO!
             // delta_kama > max_dist: Giá lơ lửng trên không trung xa KAMA (Floating Ghost Pullback) -> VETO!
@@ -123,26 +129,14 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            // Chốt chặn 1: Vùng hạ nhiệt Stochastic vi mô & Trần RSI an toàn
+            // Chốt chặn 1: Vùng hạ nhiệt Stochastic vi mô & Trần RSI an toàn (Single Responsibility)
             let stoch_thresh = pb_cfg.stoch_pullback_thresh.max(1.0);
             if stoch_k > stoch_thresh || rsi > pb_cfg.rsi_max_cap {
                 return None;
             }
 
-            // 🛡️ Chốt chặn 2: Two-Tier Stochastic Hook Guard (Chống bắt dao rơi toàn dải & sàn bão hòa)
-            let is_falling = if stoch_k <= 1.0 && stoch_d <= 1.0 {
-                true // Sàn bão hòa thác lũ cực đoan: cấm tuyệt đối
-            } else if stoch_k < climax_thresh {
-                stoch_k < prev_stoch_k || stoch_k < stoch_d // Vùng Climax: đòi hỏi xác nhận kép (không rơi VÀ không dưới %D)
-            } else {
-                stoch_k < prev_stoch_k || (stoch_k <= prev_stoch_k && stoch_k < stoch_d) // Vùng Pullback thường
-            };
-            if is_falling {
-                return None;
-            }
-
-            // Chốt chặn 3: Xác nhận lực cầu vi mô CLV (Close Location Value >= min_clv)
-            if clv < pb_cfg.min_clv {
+            // 🛡️ Chốt chặn 2: Xác nhận nảy lên thuận xu hướng vi mô (CMO 1m & CLV >= min_clv - TODO-AUDIT-NEW-52)
+            if cmo < prev_cmo || clv < pb_cfg.min_clv {
                 return None;
             }
 
@@ -152,8 +146,9 @@ impl TacticalScanner for TrendPBScanner {
             let score_long = convex_combine(&[f_slope, f_dist, f_stoch, f_clv], &[0.35, 0.25, 0.20, 0.20]);
 
             if score_long >= pb_cfg.min_activation_score {
-                // 🛡️ Structural SL neo chặt chẽ theo đáy nến vi mô hiện tại + đệm ATR chuẩn hóa
-                let sl = RiskManager::sanitize_structural_sl(true, close, low - buffer, 0.0015, buffer);
+                // 🛡️ Structural SL neo thích ứng ra ngoài đáy sóng xoay chiều Dow và đáy nến vi mô + đệm ATR
+                let struct_floor = dow_floor.min(low);
+                let sl = RiskManager::sanitize_structural_sl(true, close, struct_floor - buffer, 0.0015, buffer);
 
                 return Some(Proposal {
                     signal_type: SignalType::Long,
@@ -168,6 +163,13 @@ impl TacticalScanner for TrendPBScanner {
         // 2. CHIẾN ĐỘI PULLBACK SHORT (KAMA Dốc Xuống + Hồi Quy Vi Mô + Lực Cung Đè Đỉnh)
         // -------------------------------------------------------------------------
         else if kama_slope < -slope_thresh {
+            // 🛡️ CHỐT CHẶN VETO CẤU TRÚC BẬC THANG DOW (TODO-AUDIT-NEW-52):
+            // Bảo vệ đỉnh sóng xoay chiều Lower High (Swing High cũ). Nếu giá đâm thủng đỉnh này -> VETO!
+            let dow_ceiling = sensors.dow_ceiling.get(i).copied().unwrap_or(f64::NAN);
+            if dow_ceiling.is_nan() || close > dow_ceiling {
+                return None;
+            }
+
             // 🛡️ CHỐT CHẶN KHOẢNG CÁCH KAMA (TODO-AUDIT-NEW-38):
             // delta_kama < -inval_floor: Giá đâm thủng sâu lên trên kháng cự KAMA (Breakout Invalidation) -> VETO!
             // delta_kama > max_dist: Giá lơ lửng ở đáy sâu xa KAMA (Floating Ghost Short) -> VETO!
@@ -181,26 +183,14 @@ impl TacticalScanner for TrendPBScanner {
                 return None;
             }
 
-            // Chốt chặn 1: Vùng hạ nhiệt Stochastic vi mô & Sàn RSI an toàn
+            // Chốt chặn 1: Vùng hạ nhiệt Stochastic vi mô & Sàn RSI an toàn (Single Responsibility)
             let stoch_thresh = pb_cfg.stoch_pullback_thresh.max(1.0);
             if stoch_k < (100.0 - stoch_thresh) || rsi < (100.0 - pb_cfg.rsi_max_cap) {
                 return None;
             }
 
-            // 🛡️ Chốt chặn 2: Two-Tier Stochastic Hook Guard (Chống chặn đầu xe lửa toàn dải & trần bão hòa)
-            let is_surging = if stoch_k >= 99.0 && stoch_d >= 99.0 {
-                true // Trần bão hòa FOMO cực đoan: cấm tuyệt đối
-            } else if stoch_k > (100.0 - climax_thresh) {
-                stoch_k > prev_stoch_k || stoch_k > stoch_d // Vùng Climax: đòi hỏi xác nhận kép (không tăng VÀ không trên %D)
-            } else {
-                stoch_k > prev_stoch_k || (stoch_k >= prev_stoch_k && stoch_k > stoch_d) // Vùng Pullback thường
-            };
-            if is_surging {
-                return None;
-            }
-
-            // Chốt chặn 3: Xác nhận lực cung vi mô CLV (Close Location Value <= -min_clv)
-            if clv > -pb_cfg.min_clv {
+            // 🛡️ Chốt chặn 2: Xác nhận cắm đầu thuận xu hướng vi mô (CMO 1m & CLV <= -min_clv - TODO-AUDIT-NEW-52)
+            if cmo > prev_cmo || clv > -pb_cfg.min_clv {
                 return None;
             }
 
@@ -212,8 +202,9 @@ impl TacticalScanner for TrendPBScanner {
             let score_short = convex_combine(&[f_slope, f_dist, f_stoch, f_clv], &[0.35, 0.25, 0.20, 0.20]);
 
             if score_short >= pb_cfg.min_activation_score {
-                // 🛡️ Structural SL neo chặt chẽ theo đỉnh nến vi mô hiện tại + đệm ATR chuẩn hóa
-                let sl = RiskManager::sanitize_structural_sl(false, close, high + buffer, 0.0015, buffer);
+                // 🛡️ Structural SL neo thích ứng ra ngoài đỉnh sóng xoay chiều Dow và đỉnh nến vi mô + đệm ATR
+                let struct_ceil = dow_ceiling.max(high);
+                let sl = RiskManager::sanitize_structural_sl(false, close, struct_ceil + buffer, 0.0015, buffer);
 
                 return Some(Proposal {
                     signal_type: SignalType::Short,
@@ -297,6 +288,8 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]); // buffer = 4.0 * 0.5 = 2.0
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1998.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.25; len]); // Uptrend mạnh
@@ -351,6 +344,8 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
@@ -396,6 +391,8 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![4.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![2000.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
@@ -446,6 +443,8 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
@@ -488,55 +487,37 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
 
-        // Kịch bản A: Stoch cực thấp (4.0 < 10.0) và ĐANG CẮM ĐẦU RƠI (prev = 8.0, curr = 4.0)
-        let mut stoch_falling = vec![30.0; len];
-        stoch_falling[i - 1] = 8.0;
-        stoch_falling[i] = 4.0;
+        // Kịch bản A: Động năng vi mô CMO đang cắm đầu rơi (cmo < prev_cmo) -> VETO!
+        let mut cmo_falling = vec![0.10; len];
+        cmo_falling[i - 1] = 0.20;
+        cmo_falling[i] = 0.05;
 
         let mut sensors_falling = HeliosSensors::default();
         sensors_falling.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_falling.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_falling.stoch_trend_k = std::sync::Arc::new(stoch_falling);
+        sensors_falling.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors_falling.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+        sensors_falling.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors_falling.cmo_micro = std::sync::Arc::new(cmo_falling);
 
         let prop_falling = TrendPBScanner.scan(&tick, &sensors_falling, &matrix, &config);
-        assert!(prop_falling.is_none(), "Soft Hook Guard PHẢI chặn đứng dao rơi khi Stoch < 10 và đang cắm đầu!");
+        assert!(prop_falling.is_none(), "CMO Micro Guard PHẢI chặn đứng dao rơi khi CMO đang cắm đầu (cmo < prev_cmo)!");
 
-        // Kịch bản B: Stoch cực thấp (4.0 < 10.0) nhưng ĐÃ NGÓC ĐẦU UỐN CONG (prev = 2.0, curr = 4.0)
-        let mut stoch_hooked = vec![30.0; len];
-        stoch_hooked[i - 1] = 2.0;
-        stoch_hooked[i] = 4.0;
+        // Kịch bản B: Động năng vi mô CMO đã uốn cong ngóc đầu nảy lên (cmo >= prev_cmo) -> APPROVED!
+        let mut cmo_hooked = vec![0.10; len];
+        cmo_hooked[i - 1] = 0.05;
+        cmo_hooked[i] = 0.20;
 
         let mut sensors_hooked = HeliosSensors::default();
         sensors_hooked.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_hooked.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_hooked.stoch_trend_k = std::sync::Arc::new(stoch_hooked);
+        sensors_hooked.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors_hooked.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+        sensors_hooked.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors_hooked.cmo_micro = std::sync::Arc::new(cmo_hooked);
 
         let prop_hooked = TrendPBScanner.scan(&tick, &sensors_hooked, &matrix, &config);
-        assert!(prop_hooked.is_some(), "Soft Hook Guard PHẢI phê duyệt khi Stoch đã ngóc đầu tạo đáy!");
-
-        // Kịch bản C: Nến phẳng MTF do Forward-Fill (prev = 4.0, curr = 4.0) nhưng %K < %D (stoch_d = 6.0)
-        let mut sensors_flat_falling = HeliosSensors::default();
-        sensors_flat_falling.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
-        sensors_flat_falling.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_flat_falling.stoch_trend_k = std::sync::Arc::new(vec![4.0; len]);
-        sensors_flat_falling.stoch_trend_d = std::sync::Arc::new(vec![6.0; len]);
-        sensors_flat_falling.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
-
-        let prop_flat_falling = TrendPBScanner.scan(&tick, &sensors_flat_falling, &matrix, &config);
-        assert!(prop_flat_falling.is_none(), "Soft Hook Guard PHẢI chặn đứng nến phẳng MTF khi %K < %D!");
-
-        // Kịch bản D: Nến phẳng MTF do Forward-Fill (prev = 4.0, curr = 4.0) nhưng %K >= %D (stoch_d = 3.0)
-        let mut sensors_flat_hooked = HeliosSensors::default();
-        sensors_flat_hooked.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
-        sensors_flat_hooked.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_flat_hooked.stoch_trend_k = std::sync::Arc::new(vec![4.0; len]);
-        sensors_flat_hooked.stoch_trend_d = std::sync::Arc::new(vec![3.0; len]);
-        sensors_flat_hooked.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
-
-        let prop_flat_hooked = TrendPBScanner.scan(&tick, &sensors_flat_hooked, &matrix, &config);
-        assert!(prop_flat_hooked.is_some(), "Soft Hook Guard PHẢI phê duyệt nến phẳng MTF khi %K đã cắt lên trên %D!");
+        assert!(prop_hooked.is_some(), "CMO Micro Guard PHẢI phê duyệt khi CMO đã ngóc đầu tạo đà nảy lên!");
     }
 
     #[test]
@@ -647,35 +628,29 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
 
-        // Kịch bản rơi trong Vùng Chết cũ: K = 22.0 < prev = 28.0 (cả 2 đều > climax_thresh 10.0)
-        let mut stoch_deadzone = vec![30.0; len];
-        stoch_deadzone[i - 1] = 28.0;
-        stoch_deadzone[i] = 22.0;
-
+        // Kịch bản A: Giá đâm thủng DowFloor (close 1998.0 < dow_floor 2002.0) -> VETO!
         let mut sensors_deadzone = HeliosSensors::default();
         sensors_deadzone.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_deadzone.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_deadzone.stoch_trend_k = std::sync::Arc::new(stoch_deadzone);
-        sensors_deadzone.stoch_trend_d = std::sync::Arc::new(vec![25.0; len]);
+        sensors_deadzone.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
         sensors_deadzone.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+        sensors_deadzone.dow_floor = std::sync::Arc::new(vec![2002.0; len]); // 2002 > close 1998 -> VETO
+        sensors_deadzone.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let prop_deadzone = TrendPBScanner.scan(&tick, &sensors_deadzone, &matrix, &config);
-        assert!(prop_deadzone.is_none(), "Hook Guard PHẢI triệt tiêu Vùng Chết [10, 35], cấm mua khi Stoch đang rơi!");
+        assert!(prop_deadzone.is_none(), "Dow Structure Guard PHẢI VETO khi giá đâm thủng đáy Higher Low cũ (close < dow_floor)!");
 
-        // Kịch bản hồi ngóc đầu trong dải [10, 35]: K = 26.0 > prev = 24.0, D = 25.0
-        let mut stoch_rebound = vec![30.0; len];
-        stoch_rebound[i - 1] = 24.0;
-        stoch_rebound[i] = 26.0;
-
+        // Kịch bản B: Giá giữ vững DowFloor (close 1998.0 >= dow_floor 1990.0) -> APPROVED!
         let mut sensors_rebound = HeliosSensors::default();
         sensors_rebound.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_rebound.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_rebound.stoch_trend_k = std::sync::Arc::new(stoch_rebound);
-        sensors_rebound.stoch_trend_d = std::sync::Arc::new(vec![25.0; len]);
+        sensors_rebound.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
         sensors_rebound.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+        sensors_rebound.dow_floor = std::sync::Arc::new(vec![1990.0; len]); // 1990 <= close 1998 -> PASS
+        sensors_rebound.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let prop_rebound = TrendPBScanner.scan(&tick, &sensors_rebound, &matrix, &config);
-        assert!(prop_rebound.is_some(), "Hook Guard PHẢI cho phép mở Long khi Stoch tạo đáy ngóc đầu trong dải [10, 35]!");
+        assert!(prop_rebound.is_some(), "Dow Structure Guard PHẢI cho phép mở Long khi giá giữ vững trên đáy DowFloor!");
     }
 
     #[test]
@@ -709,35 +684,32 @@ mod tests {
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
 
-        // Kịch bản A: Climax giật giả Bull Trap (K = 8.0 > prev = 6.0 nhưng D = 12.0 => K < D)
-        let mut stoch_fake = vec![30.0; len];
-        stoch_fake[i - 1] = 6.0;
-        stoch_fake[i] = 8.0;
+        // Kịch bản A: Nến chưa rút chân đạt chuẩn (min_clv = 0.60 > CLV = 0.50) -> VETO!
+        let mut config_high_clv = config.clone();
+        config_high_clv.tactical_sniper.pullback.min_clv = 0.60;
 
         let mut sensors_fake = HeliosSensors::default();
         sensors_fake.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_fake.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_fake.stoch_trend_k = std::sync::Arc::new(stoch_fake);
-        sensors_fake.stoch_trend_d = std::sync::Arc::new(vec![12.0; len]);
+        sensors_fake.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
         sensors_fake.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+        sensors_fake.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors_fake.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
-        let prop_fake = TrendPBScanner.scan(&tick, &sensors_fake, &matrix, &config);
-        assert!(prop_fake.is_none(), "Hook Guard PHẢI chặn đứng Bull Trap khi K < Climax nhưng chưa vượt D!");
+        let prop_fake = TrendPBScanner.scan(&tick, &sensors_fake, &matrix, &config_high_clv);
+        assert!(prop_fake.is_none(), "Micro CLV Guard PHẢI chặn đứng khi nến chưa rút chân đạt min_clv!");
 
-        // Kịch bản B: Climax xác nhận kép hoàn tất (K = 9.0 > prev = 6.0 VÀ D = 8.5 => K >= D)
-        let mut stoch_confirmed = vec![30.0; len];
-        stoch_confirmed[i - 1] = 6.0;
-        stoch_confirmed[i] = 9.0;
-
+        // Kịch bản B: Nến rút chân đạt chuẩn (min_clv = 0.20 <= CLV = 0.50) -> APPROVED!
         let mut sensors_confirmed = HeliosSensors::default();
         sensors_confirmed.kama_mid = std::sync::Arc::new(vec![1996.0; len]);
         sensors_confirmed.atr_sl = std::sync::Arc::new(vec![5.0; len]);
-        sensors_confirmed.stoch_trend_k = std::sync::Arc::new(stoch_confirmed);
-        sensors_confirmed.stoch_trend_d = std::sync::Arc::new(vec![8.5; len]);
+        sensors_confirmed.stoch_trend_k = std::sync::Arc::new(vec![25.0; len]);
         sensors_confirmed.rsi_trend = std::sync::Arc::new(vec![35.0; len]);
+        sensors_confirmed.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors_confirmed.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let prop_confirmed = TrendPBScanner.scan(&tick, &sensors_confirmed, &matrix, &config);
-        assert!(prop_confirmed.is_some(), "Hook Guard PHẢI phê duyệt khi K < Climax có đủ xác nhận kép (K > prev && K >= D)!");
+        assert!(prop_confirmed.is_some(), "Micro CLV Guard PHẢI phê duyệt khi nến rút chân đạt min_clv!");
     }
 
     #[test]
@@ -774,6 +746,8 @@ mod tests {
         sensors.stoch_trend_k = std::sync::Arc::new(stoch_k_vec);
         sensors.stoch_trend_d = std::sync::Arc::new(vec![22.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1970.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         // --- Kịch bản 1: Shallow Piercing Hợp lệ (Nằm an toàn trong đệm gãy nông) ---
         // Close = 1998.0, Low = 1990.0, High = 2002.0 => CLV = (2*1998 - 3992) / 12 = +4/12 = +0.333 >= 0.05
@@ -936,6 +910,8 @@ mod tests {
         sensors.rsi_trend = std::sync::Arc::new(vec![52.0; len]);
         // Z-score trong sóng tăng 4h mạnh tự nhiên đạt +1.20 (vượt trần cũ 0.80 nhưng dưới trần mới 1.60)
         sensors.z_score = std::sync::Arc::new(vec![1.20; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.25; len]); // Uptrend mạnh
@@ -995,6 +971,8 @@ mod tests {
         sensors.rsi_trend = std::sync::Arc::new(vec![48.0; len]);
         // Z-score trong sóng giảm 4h mạnh tự nhiên đạt -1.20 (vượt trần âm cũ -0.80 nhưng trên trần mới -1.60)
         sensors.z_score = std::sync::Arc::new(vec![-1.20; len]);
+        sensors.dow_ceiling = std::sync::Arc::new(vec![2005.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![-0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.25; len]); // Downtrend mạnh
@@ -1051,6 +1029,8 @@ mod tests {
         sensors.stoch_trend_d = std::sync::Arc::new(vec![22.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![52.0; len]);
         sensors.z_score = std::sync::Arc::new(vec![1.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         // Squeeze nén cực chặt 0.85 > max_squeeze_intensity (0.75)
@@ -1145,6 +1125,8 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]); // ATR = 5.0 -> Buffer = 10.0
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
         sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let mut matrix = MarketMatrixV3::default();
         matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);

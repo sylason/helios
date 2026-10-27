@@ -15,6 +15,7 @@ use ferro_trade::optimizer::DnaMappable;
 use ferro_trade::strategy::{InitContext, Strategy, TickContext};
 use ferro_trade::indicators::factory::BulkIndicatorFactory;
 use ferro_trade::broker::policies::RiskPolicy;
+use ferro_trade::data::Timeframe;
 
 use crate::strategy::core_v3::config::HeliosConfigV3;
 use crate::strategy::sensors::HeliosSensors;
@@ -103,7 +104,8 @@ impl Strategy for HeliosStrategyV3 {
             ind.price_z_score.lookback == 0 || ind.vol_z_score.lookback == 0 ||
             ind.rsi_trend.period == 0 || ind.rsi_reversal.period == 0 || ind.rsi_momentum.period == 0 ||
             ind.stoch_trend.period == 0 || ind.stoch_trend.k_period == 0 || ind.stoch_trend.d_period == 0 ||
-            ind.stoch_range.period == 0 || ind.stoch_range.k_period == 0 || ind.stoch_range.d_period == 0;
+            ind.stoch_range.period == 0 || ind.stoch_range.k_period == 0 || ind.stoch_range.d_period == 0 ||
+            ind.dow_structure.period == 0 || ind.cmo_micro.period == 0;
 
         if is_zero_period {
             tracing::error!(
@@ -215,6 +217,21 @@ impl Strategy for HeliosStrategyV3 {
         s.z_score = ctx.z_score(ind.price_z_score.timeframe, "PriceZScore", ind.price_z_score.lookback);
         s.vol_z_score = ctx.z_score_volume(ind.vol_z_score.timeframe, "VolZScore", ind.vol_z_score.lookback);
         s.atr_sl = ctx.atr(ind.atr.timeframe, "ATR_SL", ind.atr.period);
+
+        // 🏛️ [TODO-AUDIT-NEW-52] Kênh cấu trúc đỉnh/đáy bậc thang Dow Theory & CMO Vi mô
+        let (dow_floor, dow_ceiling) = ctx.dow_structure(
+            ind.dow_structure.timeframe,
+            "DowStructure",
+            ind.dow_structure.period,
+        );
+        s.dow_floor = dow_floor;
+        s.dow_ceiling = dow_ceiling;
+
+        s.cmo_micro = ctx.cmo(
+            Timeframe::T1m,
+            "CmoMicro",
+            ind.cmo_micro.period,
+        );
 
         // 🛡️ FLAW-REG.10 & TODO-AUDIT-NEW-37: Tính độ dốc chuẩn hóa của trục giữa Bollinger Bands (SMA 20) qua ATR
         // Bước nhảy k_bars tỷ lệ thuận theo timeframe của BB (Single Source of Truth qua Timeframe::to_minutes())
@@ -1767,7 +1784,14 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 121, "DNA_WIDTH phải là 121 chiều sau khi thêm gen min_mtf_headroom_rr cho Momentum (TODO-AUDIT-NEW-171)!");
+        assert_eq!(width, 124, "DNA_WIDTH phải là 124 chiều sau khi thêm gen DowStructure & CmoMicro (TODO-AUDIT-NEW-52)!");
+
+        let dow_tf_def = defs.iter().find(|(name, _)| name.contains("indicators.dow_structure.timeframe"));
+        assert!(dow_tf_def.is_some(), "defs phải chứa indicators.dow_structure.timeframe!");
+        let dow_p_def = defs.iter().find(|(name, _)| name.contains("indicators.dow_structure.period"));
+        assert!(dow_p_def.is_some(), "defs phải chứa indicators.dow_structure.period!");
+        let cmo_p_def = defs.iter().find(|(name, _)| name.contains("indicators.cmo_micro.period"));
+        assert!(cmo_p_def.is_some(), "defs phải chứa indicators.cmo_micro.period!");
 
         let mom_sqz_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.squeeze_threshold"));
         assert!(mom_sqz_def.is_some(), "defs phải chứa tactical_sniper.momentum.squeeze_threshold!");
@@ -1870,6 +1894,8 @@ mod tests {
         assert!(ind.adx.period > 0, "adx.period must be > 0");
         assert!(ind.bbands.period > 0, "bbands.period must be > 0");
         assert!(ind.atr.period > 0, "atr.period must be > 0");
+        assert!(ind.dow_structure.period > 0, "dow_structure.period must be > 0");
+        assert!(ind.cmo_micro.period > 0, "cmo_micro.period must be > 0");
     }
 
     #[test]
@@ -2030,6 +2056,8 @@ mod tests {
         sensors.kc_upper = std::sync::Arc::new(vec![2025.0; len]);
         sensors.kc_lower = std::sync::Arc::new(vec![1975.0; len]);
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
+        sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]);
 
         let matrix = MarketMatrixV3::from_sensors(&config, &sensors);
         let pb_prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
@@ -3067,6 +3095,8 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]); // <= 40.0
         sensors.rsi_trend = std::sync::Arc::new(vec![55.0; len]); // <= 70.0
+        sensors.dow_floor = std::sync::Arc::new(vec![1995.0; len]); // 1995.0 <= close 2006.0 -> Giữ vững Dow Higher Low
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.10; len]); // cmo >= prev_cmo -> Động năng nảy lên
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
@@ -3347,6 +3377,8 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
         sensors.stoch_trend_k = std::sync::Arc::new(vec![70.0; len]); // >= 100 - 40 = 60
         sensors.rsi_trend = std::sync::Arc::new(vec![45.0; len]); // >= 100 - 70 = 30
+        sensors.dow_ceiling = std::sync::Arc::new(vec![2005.0; len]); // 2005.0 >= close 1994.0 -> Giữ vững Dow Lower High
+        sensors.cmo_micro = std::sync::Arc::new(vec![-0.10; len]); // cmo <= prev_cmo -> Động năng chúc xuống
 
         let mut matrix = MarketMatrixV3::default();
         matrix.trend_strength = std::sync::Arc::new(vec![0.40; len]);
@@ -5104,6 +5136,190 @@ mod tests {
 
         let prop = MomentumIgnitionScanner.scan(&tick, &sensors, &matrix, &config);
         assert!(prop.is_some(), "Nến bứt phá vượt qua cản vĩ mô (Blue Sky / S-R Flip) PHẢI được chấp thuận!");
+    }
+
+    #[test]
+    fn test_trend_pb_vetoes_when_close_below_dow_floor() {
+        use crate::strategy::core_v3::scanners::trend_pb::TrendPBScanner;
+
+        let len = 50;
+        let i = len - 1;
+        let mut closes = vec![2000.0; len];
+        // Giá đóng cửa phá thủng Dow Floor 1995.0
+        closes[i] = 1993.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![1996.0; len]),
+            high: std::sync::Arc::new(vec![1998.0; len]),
+            low: std::sync::Arc::new(vec![1992.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![1990.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        // Dow Floor = 1995.0, trong khi close = 1993.0 (vi phạm Dow Higher Low)
+        sensors.dow_floor = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![0.15; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "TrendPB PHẢI VETO khi giá đóng cửa phá thủng Dow Floor!");
+    }
+
+    #[test]
+    fn test_trend_pb_passes_and_anchors_sl_below_dow_floor() {
+        use crate::strategy::core_v3::scanners::trend_pb::TrendPBScanner;
+
+        let len = 50;
+        let i = len - 1;
+        let mut closes = vec![2000.0; len];
+        closes[i] = 2005.0;
+
+        let mut opens = vec![2000.0; len];
+        opens[i] = 2000.0;
+
+        let mut highs = vec![2008.0; len];
+        highs[i] = 2008.0;
+
+        let mut lows = vec![1995.0; len];
+        // Low nến 1m = 1995.0, trong khi Dow Floor trước đó ở 1990.0
+        lows[i] = 1995.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(opens),
+            high: std::sync::Arc::new(highs),
+            low: std::sync::Arc::new(lows),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+        config.tactical_sniper.pullback.struct_sl_buffer_atr = 1.00; // Đệm 1.0 ATR
+        config.tactical_sniper.pullback.min_clv = 0.05;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![1995.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]); // ATR = 10.0 -> Buffer = 10.0
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![30.0; len]);
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        // Dow Floor ở 1990.0, thấp hơn nến 1m Low 1995.0
+        sensors.dow_floor = std::sync::Arc::new(vec![1990.0; len]);
+        // CMO nảy lên: prev = 0.10, current = 0.20
+        let mut cmo = vec![0.10; len];
+        cmo[i] = 0.20;
+        sensors.cmo_micro = std::sync::Arc::new(cmo);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![0.20; len]);
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_some(), "TrendPB PHẢI kích hoạt khi cấu trúc Dow vững và CMO nảy lên!");
+        let sl = prop.unwrap().suggested_sl.unwrap();
+
+        // struct_floor = min(low: 1995.0, dow_floor: 1990.0) = 1990.0.
+        // SL = 1990.0 - buffer(10.0) = 1980.0 (không phải neo theo nến 1m là 1985.0)!
+        assert!((sl - 1980.0).abs() < 1e-4, "SL phải neo ngoài Dow Floor (1980.0), thực tế: {}", sl);
+    }
+
+    #[test]
+    fn test_trend_pb_short_vetoes_when_close_above_dow_ceiling() {
+        use crate::strategy::core_v3::scanners::trend_pb::TrendPBScanner;
+
+        let len = 50;
+        let i = len - 1;
+        let mut closes = vec![2000.0; len];
+        // Giá đóng cửa bật vượt qua Dow Ceiling 2005.0
+        closes[i] = 2008.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(vec![2002.0; len]),
+            high: std::sync::Arc::new(vec![2010.0; len]),
+            low: std::sync::Arc::new(vec![2001.0; len]),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+        let trades = Vec::new();
+        let tick = ferro_trade::strategy::TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.tactical_sniper.pullback.kama_slope_threshold = 0.05;
+        config.tactical_sniper.pullback.stoch_pullback_thresh = 40.0;
+        config.tactical_sniper.pullback.min_activation_score = 0.10;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.kama_mid = std::sync::Arc::new(vec![2015.0; len]);
+        sensors.atr_sl = std::sync::Arc::new(vec![5.0; len]);
+        sensors.stoch_trend_k = std::sync::Arc::new(vec![70.0; len]); // Short pullback test
+        sensors.rsi_trend = std::sync::Arc::new(vec![50.0; len]);
+        // Dow Ceiling = 2005.0, trong khi close = 2008.0 (vi phạm Dow Lower High)
+        sensors.dow_ceiling = std::sync::Arc::new(vec![2005.0; len]);
+        sensors.cmo_micro = std::sync::Arc::new(vec![-0.15; len]);
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = std::sync::Arc::new(vec![-0.20; len]); // Downtrend
+
+        let prop = TrendPBScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(prop.is_none(), "TrendPB Short PHẢI VETO khi giá đóng cửa phá thủng Dow Ceiling!");
     }
 }
 

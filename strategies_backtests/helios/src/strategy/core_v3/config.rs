@@ -78,6 +78,10 @@ pub struct IndicatorsConfig {
     pub price_z_score: PriceZScoreParams,
     #[dna(nest)]
     pub vol_z_score: VolZScoreParams,
+    #[dna(nest)]
+    pub dow_structure: DowStructureParams,
+    #[dna(nest)]
+    pub cmo_micro: CmoMicroParams,
 }
 
 #[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
@@ -436,6 +440,41 @@ impl Default for VolZScoreParams {
         Self {
             lookback: 50,
             timeframe: Timeframe::T5m,
+        }
+    }
+}
+
+/// Cảm biến Cấu trúc Đỉnh/Đáy Bậc Thang Dow Theory (TODO-AUDIT-NEW-52)
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct DowStructureParams {
+    #[dna(subset = "15m, 1h, 4h")]
+    pub timeframe: Timeframe,
+    #[dna(min = 10.0, max = 30.0, step = 5.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub period: usize,
+}
+
+impl Default for DowStructureParams {
+    fn default() -> Self {
+        Self {
+            timeframe: Timeframe::T15m,
+            period: 15,
+        }
+    }
+}
+
+/// Cảm biến Xung lượng Vi mô Chande Momentum Oscillator (TODO-AUDIT-NEW-52)
+#[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
+pub struct CmoMicroParams {
+    #[dna(min = 5.0, max = 15.0, step = 2.0)]
+    #[serde(deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64")]
+    pub period: usize,
+}
+
+impl Default for CmoMicroParams {
+    fn default() -> Self {
+        Self {
+            period: 9,
         }
     }
 }

@@ -444,9 +444,16 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/reversal.rs`, `config.rs`, `core_v3/mod.rs`
   - **Mô tả:** [ĐÃ HOÀN THÀNH]. Kết nối `matrix` để đọc độ dốc KAMA và Chaos Index (chặn bắt dao rơi khi KAMA dốc $<-0.40$ hoặc bão Whipsaw $>0.65$); bổ sung bộ xác nhận đa nến Wyckoff Spring ($i$ vs $i-1$) trên nến 1m nguyên bản (nến xanh hấp thụ và giữ vững đáy); áp dụng cổng kiểm tra tỷ lệ kỳ vọng toán học $\frac{\text{TP Dist}}{\text{SL Dist}} \ge 1.20$; bảo toàn 107 chiều DNA; bộ test 11/11 tests pass 100%.
 
-- [ ] **TODO-AUDIT-NEW-52: Triển Khai Bộ Nhận Diện Cấu Trúc Đỉnh/Đáy Bậc Thang Dow & Bảo Vệ Đáy Sóng Cũ (`TREND-DOW-STRUCTURE`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `sensors.rs`
-  - **Mô tả:** Bổ sung cơ chế theo dõi cấu trúc đỉnh/đáy bậc thang (HH/HL cho Uptrend, LH/LL cho Downtrend); cấm mở lệnh nếu nhịp hồi đã đâm thủng đáy Swing Low trước đó; bổ sung nến xác nhận tiếp diễn $t+1$.
+- [x] **TODO-AUDIT-NEW-52: Triển Khai Bộ Nhận Diện Cấu Trúc Đỉnh/Đáy Bậc Thang Dow & Bảo Vệ Đáy Sóng Cũ (`TREND-DOW-STRUCTURE`)**
+  - **File:** `ferro_trade/src/indicators/`, `strategies_backtests/helios/src/strategy/core_v3/scanners/trend_pb.rs`, `sensors.rs`, `config.rs`, `core_v3/mod.rs`
+  - **Tài liệu thiết kế:** [57_todo_audit_new_52_trend_dow_structure_and_micro_cmo.md](file:///E:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/notes/57_todo_audit_new_52_trend_dow_structure_and_micro_cmo.md)
+  - **Mô tả:** [ĐÃ HOÀN THÀNH]. Triển khai bộ nhận diện cấu trúc đỉnh/đáy bậc thang Dow Theory (Higher Low / Lower High), bảo vệ đáy sóng cũ chống bắt dao rơi, lượng hóa điều kiện xác nhận nảy lên vi mô (CMO 1m + CLV thay thế đếm nến $t+1$), và neo Stop Loss thích ứng ra ngoài toàn bộ cấu trúc sóng theo Phương Án 7 (The Ultimate Quant Paradigm). Mở 3 gen DNA trực giao (`dow_structure.timeframe`, `dow_structure.period`, `cmo_micro.period`), nâng `DNA_WIDTH` từ 121 lên 124 chiều. Toàn bộ 55/55 tests `ferro_trade` và 209/209 tests `helios` pass 100%.
+  - **Baby Steps:**
+    - [x] Bước 1: Triển khai toán học Core trong `ferro_trade` (`dow_structure_channel`, `cmo`, `IndicatorType`, `BulkIndicatorFactory`). (55/55 tests pass 100%)
+    - [x] Bước 2: Bổ sung cấu hình DNA và Sensors trong `helios` (`DowStructureParams`, `CmoMicroParams`, `HeliosSensors`, cập nhật `DNA_WIDTH = 124`). (206/206 tests pass 100%)
+    - [x] Bước 3: Triển khai logic trong `trend_pb.rs` (VETO Dow, Bounce Confirm via CMO 1m & CLV, Single-responsibility Stoch 15m, Neo Structural SL). (22/22 unit tests pass 100%)
+    - [x] Bước 4: Viết unit tests kiểm chứng trong `core_v3/mod.rs` và chạy full regression test suite. (209/209 tests pass 100%)
+    - [x] Bước 5: Hậu kiểm `/helios-post-check` và bàn giao commit.
 
 ---
 

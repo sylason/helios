@@ -62,4 +62,9 @@ pub struct HeliosSensors {
     
     // --- Risk & Execution ---
     pub atr_sl: Arc<Vec<f64>>,
+
+    // --- Dow Structure & Micro CMO (TODO-AUDIT-NEW-52) ---
+    pub dow_floor: Arc<Vec<f64>>,
+    pub dow_ceiling: Arc<Vec<f64>>,
+    pub cmo_micro: Arc<Vec<f64>>,
 }
