@@ -264,7 +264,16 @@ impl Strategy for HeliosStrategy {
 
         // --- 2. MARKET MATRIX (CHUYỂN HÓA NHẬN THỨC) ---
         let vol_ratio = match ind.vol_ma.timeframe {
-            Timeframe::T5m => 5.0, Timeframe::T15m => 15.0, Timeframe::T1h => 60.0, Timeframe::T4h => 240.0, _ => 1.0,
+            Timeframe::T3m => 3.0,
+            Timeframe::T5m => 5.0,
+            Timeframe::T10m => 10.0, // 👈 Thêm
+            Timeframe::T15m => 15.0,
+            Timeframe::T30m => 30.0, // 👈 Thêm
+            Timeframe::T1h => 60.0,
+            Timeframe::T2h => 120.0, // 👈 Thêm
+            Timeframe::T3h => 180.0, // 👈 Thêm
+            Timeframe::T4h => 240.0,
+            _ => 1.0,
         };
 
         // --- 3. GÁN SENSORS ---

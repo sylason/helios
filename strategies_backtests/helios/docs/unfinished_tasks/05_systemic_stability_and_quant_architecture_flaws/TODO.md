@@ -814,9 +814,9 @@
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:650-653`, `trading_bot/bot_engine/src/execution/order_executor.rs`
   - **Mô tả:** Thiết lập cơ chế Closed-Loop Sync xác nhận mức SL sàn đã khớp lệnh trước khi Strategy dời SL tiếp theo, xóa bỏ hoàn toàn hiện tượng spam lệnh và Naked SL Gap 150ms.
 
-- [ ] **TODO-AUDIT-NEW-121: Thích Ứng Hóa Thời Gian Giải Phóng Vốn Ngâm Theo Độ Nén Biến Động Squeeze (`H-RSK-05`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:358-371`
-  - **Mô tả:** Kết hợp chỉ số `squeeze_intensity` vào logic `Stagnant Capital Release`, tự động gia hạn thời gian giữ lệnh khi thị trường đang tích lũy nén cực đại, tránh cắt lỗ non trước sóng bùng nổ.
+- [x] **TODO-AUDIT-NEW-121: Thích Ứng Hóa Thời Gian Giải Phóng Vốn Ngâm Theo Độ Nén Biến Động Squeeze (`H-RSK-05`) (BÁO ĐỘNG GIẢ: ĐÃ BÁC BỎ & DỌN DẸP MÃ CHẾT ZOMBIE PURGE)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs:548-559`
+  - **Mô tả:** [BÁO ĐỘNG GIẢ: ĐÃ BÁC BỎ & DỌN DẸP MÃ CHẾT]. Yêu cầu kéo dài thời gian giữ lệnh chưa có lãi khi thị trường Squeeze bị bác bỏ vì sai lầm về kỳ vọng toán học (EV <= 0, gia hạn lệnh âm trong Squeeze chỉ làm tăng rủi ro hứng chịu cú sập tiếp diễn). Đồng thời dọn dẹp hoàn toàn khối mã chết `Zombie Trade Purge` vô nghĩa (vốn không bao giờ chạy tới do bị `max_hold` chặn trước) và loại bỏ con số hardcode ma thuật 720 nến trong `risk.rs`. Toàn bộ 225/225 unit tests PASS 100%.
 
 ---
 
@@ -1378,12 +1378,12 @@
     - [x] `test_range_bound_touch_counter_locks_after_4_touches`
     - [x] `test_range_bound_breakout_volume_invalidates_range`
 
-- [ ] **TODO-AUDIT-NEW-198: Sàn Chi Phí Sinh Tồn Của Hộp (Minimum Economic Height $\ge 1.2\%$) & Vùng Cấm Trade $40\%$ Quanh POC (`RNG-ECONOMIC-HEIGHT-AND-DEADZONE`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
-  - **Mô tả:** Bắt buộc chiều cao hộp $Height_{\text{box}} \ge 3.0 \times (2 \times \text{Fee} + \text{Slippage})$ (tối thiểu $> 1.2\%$ tại 20x), cấm tiệt giao dịch trong các hộp teo tóp dưới sàn ma sát. Cấm mở lệnh nếu vị trí giá nằm trong vùng chết 40% quanh trục giữa $POC$ (Dead-Zone Exclusion Box).
+- [x] **TODO-AUDIT-NEW-198: Sàn Chi Phí Sinh Tồn Của Hộp (Minimum Economic Height $\ge 1.2\%$) & Vùng Cấm Trade $40\%$ Quanh POC (`RNG-ECONOMIC-HEIGHT-AND-DEADZONE`) + Động Hóa Toàn Diện 8 Gen Trực Giao `TacticalRangeParams` (`DNA_WIDTH: 133 -> 141`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`, `config.rs`, `mod.rs`
+  - **Mô tả:** Thiết lập sàn kinh tế bao phủ tối đa $Height_{\text{box}} \ge \max(\text{min\_box\_atr} \cdot ATR,\ 3.0 \times (2 \times \text{Fee} + \text{Slippage}) \cdot P_{\text{close}})$, cấm tiệt giao dịch trong các hộp vi mô teo tóp dưới sàn ma sát khi $ATR$ co hẹp. Động hóa bán kính vùng cấm quanh trục giữa $POC$ (`dead_zone_ratio`) và dọn sạch 8 gen Bollinger/Stoch Zombie cũ, khôi phục `#[dna(nest)]` với 8 gen trực giao tinh khiết cho `TacticalRangeParams` (`DNA_WIDTH = 141`).
   - **Unit Tests:**
-    - [ ] `test_range_bound_rejects_sub_frictional_micro_range`
-    - [ ] `test_range_bound_dead_zone_exclusion_around_poc`
+    - [x] `test_range_bound_rejects_sub_frictional_micro_range`
+    - [x] `test_range_bound_dead_zone_exclusion_around_poc`
 
 - [ ] **TODO-AUDIT-NEW-199: Giao Thức Đón Sóng Sau Đột Phá Giả UTAD (UTAD Re-entry Protocol) (`RNG-UTAD-REENTRY`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`

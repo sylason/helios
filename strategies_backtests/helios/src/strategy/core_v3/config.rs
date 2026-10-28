@@ -776,8 +776,8 @@ pub struct TacticalSniperConfig {
     pub pullback: TacticalPullbackParams,
     #[dna(nest)]
     pub momentum: TacticalMomentumParams,
-    // [V3.3 TINH GIẢN DNA] Tắt gen của Range Oscillator (giảm 12 gen)
-    // #[dna(nest)]
+    // [TODO-AUDIT-NEW-198] Bật lại 8 gen trực giao của Range Oscillator (Hộp cấu trúc VAH/VAL/POC)
+    #[dna(nest)]
     pub range: TacticalRangeParams,
     #[dna(nest)]
     pub reversal: TacticalReversalParams,
@@ -977,79 +977,81 @@ impl Default for TacticalMomentumParams {
     }
 }
 
-/// 🌊 3. CHIẾN ĐỘI RANGE OSCILLATOR (Bắt đỉnh/đáy biên độ thị trường đi ngang)
+/// 🌊 3. CHIẾN ĐỘI RANGE OSCILLATOR (Hộp Cấu Trúc Cố Định VAH/VAL/POC - Đi Ngang)
 #[derive(Debug, Clone, Deserialize, DnaMappableMacro)]
 pub struct TacticalRangeParams {
-    /// Kẹp trần rủi ro ROE ban đầu (4.0% -> 15.0% ROE, Step 1.0% -> 12 nấc)
+    /// 1. Kẹp trần rủi ro ROE ban đầu (4.0% -> 15.0% ROE, Step 1.0% -> 12 nấc)
     #[dna(min = 0.04, max = 0.15, step = 0.01)]
     pub max_initial_sl_pct: f64,
 
-    /// Khoảng cách tiệm cận biên Bollinger (0.1% -> 5.0% giá, Step 0.2% -> 25 nấc)
-    #[dna(min = 0.001, max = 0.050, step = 0.002)]
-    pub bb_proximity_pct: f64,
-
-    /// Ngưỡng quá bán Stochastic (Universal 1.0 -> 50.0, Step 1.5 -> 33 nấc)
-    #[dna(min = 1.0, max = 50.0, step = 1.5)]
-    pub stoch_oversold: f64,
-
-    /// Ngưỡng quá mua Stochastic (Universal 50.0 -> 99.0, Step 1.5 -> 33 nấc)
-    #[dna(min = 50.0, max = 99.0, step = 1.5)]
-    pub stoch_overbought: f64,
-
-    /// Độ rộng tối thiểu dải Range (0.2% -> 6.0% giá, Step 0.2% -> 30 nấc)
-    #[dna(min = 0.002, max = 0.060, step = 0.002)]
-    pub min_width_pct: f64,
-
-    /// Trần Volume né tin tức (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
-    pub volume_max_threshold: f64,
-
-    /// Ngưỡng kích hoạt mềm Range Oscillator (Universal 1% -> 99%, Step 3% -> 33 nấc)
-    #[dna(min = 0.01, max = 0.99, step = 0.03)]
-    pub min_activation_score: f64,
-
-    /// Ngưỡng sức mạnh Trend tối đa mà Range được phép hoạt động (0.10 -> 0.80, Step 0.05)
-    /// Đọc từ matrix.trend_strength (vốn được tính động từ ADX theo Timeframe mà DNA chọn!)
-    #[dna(min = 0.10, max = 0.80, step = 0.05)]
-    pub max_trend_strength: f64,
-
-    /// Ngưỡng dốc xu hướng KAMA tối đa cấm bắt dao rơi (0.05 -> 0.50, Step 0.05)
-    /// Ngăn chặn bắt dao rơi: Nếu Trend dốc xuống vượt ngưỡng này -> Cấm Long!
-    #[dna(min = 0.05, max = 0.50, step = 0.05)]
-    pub max_adverse_slope: f64,
-
-    /// Đệm ATR ngoài biên dải Bollinger Bands (0.10 -> 3.00 ATR, Step 0.15 -> 20 nấc)
-    #[dna(min = 0.10, max = 3.00, step = 0.15)]
+    /// 2. Đệm ATR bảo vệ ngoài râu nến biên hộp (0.10 -> 2.50 ATR, Step 0.05 -> 49 nấc)
+    #[dna(min = 0.10, max = 2.50, step = 0.05)]
     #[serde(default = "default_range_sl_buffer_atr")]
     pub struct_sl_buffer_atr: f64,
 
-    /// 🛡️ FLAW-REG.10: Ngưỡng dốc tối đa của trục giữa BB Middle (0.02 -> 0.50 ATR, Step 0.02 -> 25 nấc)
+    /// 3. Ngưỡng dốc xu hướng KAMA tối đa cấm bắt dao rơi / cản tàu (0.02 -> 0.50, Step 0.02 -> 25 nấc)
     #[dna(min = 0.02, max = 0.50, step = 0.02)]
-    #[serde(default = "default_range_max_bb_slope")]
-    pub max_bb_slope: f64,
+    #[serde(default = "default_range_max_adverse_slope")]
+    pub max_adverse_slope: f64,
 
-    /// 🛡️ FLAW-REG.10: Tỷ lệ mục tiêu Take Profit từ Entry đến dải đối diện (0.10 -> 0.90, Step 0.05 -> 17 nấc)
-    /// 0.50 = Đúng trục giữa BB Middle (SMA 20); < 0.50 = Chốt non an toàn; > 0.50 = Hướng về dải đối diện
-    #[dna(min = 0.10, max = 0.90, step = 0.05)]
-    #[serde(default = "default_range_tp_target_ratio")]
-    pub tp_target_ratio: f64,
+    /// 4. Chu kỳ nến xác lập Hộp Cấu Trúc VAH/VAL/POC (20 -> 240 nến, Step 10 -> 23 nấc)
+    #[dna(min = 20.0, max = 240.0, step = 10.0)]
+    #[serde(
+        default = "default_range_box_lookback",
+        deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64"
+    )]
+    pub box_lookback: usize,
+
+    /// 5. Chiều cao hộp tối thiểu theo bội số ATR (1.50 -> 5.00 ATR, Step 0.25 -> 15 nấc)
+    #[dna(min = 1.50, max = 5.00, step = 0.25)]
+    #[serde(default = "default_range_min_box_atr")]
+    pub min_box_atr: f64,
+
+    /// 6. Tỷ lệ bán kính vùng cấm Dead-Zone quanh trục POC (0.25 -> 0.70, Step 0.05 -> 10 nấc)
+    #[dna(min = 0.25, max = 0.70, step = 0.05)]
+    #[serde(default = "default_range_dead_zone_ratio")]
+    pub dead_zone_ratio: f64,
+
+    /// 7. Lực nến từ chối giá CLV tối thiểu tại biên hộp (0.10 -> 0.60, Step 0.05 -> 11 nấc)
+    #[dna(min = 0.10, max = 0.60, step = 0.05)]
+    #[serde(default = "default_range_min_clv")]
+    pub min_clv: f64,
+
+    /// 8. Ngưỡng Z-Score Volume bùng nổ kích hoạt Anti-Breakout Veto (1.50 -> 3.50 sigma, Step 0.10 -> 21 nấc)
+    #[dna(min = 1.50, max = 3.50, step = 0.10)]
+    #[serde(default = "default_range_breakout_vol_z")]
+    pub breakout_vol_z: f64,
+
+    /// 🛡️ Chốt chặn bất biến 1: Ngưỡng kích hoạt mềm kỹ thuật (Mặc định: 0.05)
+    #[serde(default = "default_min_activation_score")]
+    pub min_activation_score: f64,
+
+    /// 🛡️ Chốt chặn bất biến 2: Số chu kỳ chạm biên tối đa trước khi khóa hộp lão hóa (Mặc định: 4 lần)
+    #[serde(
+        default = "default_range_max_boundary_touches",
+        deserialize_with = "ferro_trade::optimizer::config_parser::deserialize_usize_from_f64"
+    )]
+    pub max_boundary_touches: usize,
+
+    /// 🛡️ Chốt chặn bất biến 3: Tỷ lệ R:R tối thiểu khi nhắm biên đối diện (Mặc định: 1.50)
+    #[serde(default = "default_range_min_rr_ratio")]
+    pub min_rr_ratio: f64,
 }
 
 impl Default for TacticalRangeParams {
     fn default() -> Self {
         Self {
             max_initial_sl_pct: 0.15,
-            bb_proximity_pct: 0.01,
-            stoch_oversold: 20.0,
-            stoch_overbought: 80.0,
-            min_width_pct: 0.01,
-            volume_max_threshold: 0.50,
-            min_activation_score: 0.05,
-            max_trend_strength: 0.30,
-            max_adverse_slope: 0.15,
             struct_sl_buffer_atr: default_range_sl_buffer_atr(),
-            max_bb_slope: default_range_max_bb_slope(),
-            tp_target_ratio: default_range_tp_target_ratio(),
+            max_adverse_slope: default_range_max_adverse_slope(),
+            box_lookback: default_range_box_lookback(),
+            min_box_atr: default_range_min_box_atr(),
+            dead_zone_ratio: default_range_dead_zone_ratio(),
+            min_clv: default_range_min_clv(),
+            breakout_vol_z: default_range_breakout_vol_z(),
+            min_activation_score: default_min_activation_score(),
+            max_boundary_touches: default_range_max_boundary_touches(),
+            min_rr_ratio: default_range_min_rr_ratio(),
         }
     }
 }
@@ -1688,12 +1690,36 @@ fn default_absorption_mfi_thresh() -> f64 {
     35.0
 }
 
-fn default_range_max_bb_slope() -> f64 {
-    0.10
+fn default_range_max_adverse_slope() -> f64 {
+    0.15
 }
 
-fn default_range_tp_target_ratio() -> f64 {
+fn default_range_box_lookback() -> usize {
+    40
+}
+
+fn default_range_min_box_atr() -> f64 {
+    2.0
+}
+
+fn default_range_dead_zone_ratio() -> f64 {
     0.50
+}
+
+fn default_range_min_clv() -> f64 {
+    0.35
+}
+
+fn default_range_breakout_vol_z() -> f64 {
+    2.0
+}
+
+fn default_range_max_boundary_touches() -> usize {
+    4
+}
+
+fn default_range_min_rr_ratio() -> f64 {
+    1.50
 }
 
 fn default_pullback_rsi_max_cap() -> f64 {

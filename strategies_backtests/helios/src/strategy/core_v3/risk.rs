@@ -545,19 +545,6 @@ impl RiskManager {
                 continue;
             }
 
-            // Zombie Trade Purge: Lệnh ngâm quá 2x max_stagnant_hold_bars (tối đa 720 nến = 12 tiếng) -> Cưỡng bức dọn dẹp nếu không có lãi
-            let zombie_limit = (max_hold * 2).max(720);
-            if max_hold > 0 && bars_held >= zombie_limit && !is_in_strong_profit {
-                if _debug_mode {
-                    tracing::warn!(
-                        "🧟 [ZOMBIE TRADE PURGE] Bar: {} | Trade #{:?} | Held: {} bars >= zombie limit: {} | ROE: {:+.2}% -> Force closed",
-                        i, trade.id, bars_held, zombie_limit, current_roe * 100.0
-                    );
-                }
-                tick.close(None);
-                continue;
-            }
-
             // =========================================================================
             // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
             // =========================================================================
@@ -2087,12 +2074,11 @@ mod tests {
 
     #[test]
     fn test_stagnant_exit_bypassed_when_position_in_strong_profit() {
-        // 🛡️ [TODO-AUDIT-NEW-167]: Kiểm chứng bỏ qua Stagnant Exit và Zombie Purge khi vị thế có lãi >= 5.0% ROE
+        // 🛡️ [TODO-AUDIT-NEW-167]: Kiểm chứng bỏ qua Stagnant Exit khi vị thế có lãi >= 5.0% ROE
         let max_hold = 180;
-        let zombie_limit = (max_hold * 2).max(720); // 720
         let stagnant_min_profit_pct = 0.01; // 1% giá
 
-        // Kịch bản 1: Lệnh ngâm 200 nến (> max_hold) nhưng đang lãi 8% ROE (trade_price_pnl = 0.4% tại 20x)
+        // Kịch bản 1: Lệnh ngâm 200 nến (> max_hold) nhưng đang lãi 8% ROE -> TUYỆT ĐỐI KHÔNG ĐÓNG
         let bars_held = 200;
         let current_roe = 0.08;
         let trade_price_pnl_pct = 0.004;
@@ -2102,16 +2088,7 @@ mod tests {
         let should_stagnant_exit = max_hold > 0 && bars_held >= max_hold && !is_in_strong_profit;
         assert!(!should_stagnant_exit, "Lệnh lãi 8% ROE TUYỆT ĐỐI KHÔNG được kích hoạt Stagnant Exit!");
 
-        // Kịch bản 2: Lệnh ngâm 800 nến (> zombie_limit) nhưng đang lãi 15% ROE
-        let zombie_bars_held = 800;
-        let zombie_roe = 0.15;
-        let zombie_price_pnl = 0.0075;
-        let zombie_is_strong = zombie_roe >= 0.05 || zombie_price_pnl >= stagnant_min_profit_pct;
-        assert!(zombie_is_strong);
-        let should_zombie_purge = max_hold > 0 && zombie_bars_held >= zombie_limit && !zombie_is_strong;
-        assert!(!should_zombie_purge, "Lệnh lãi 15% ROE TUYỆT ĐỐI KHÔNG bị Zombie Purge chém cụt!");
-
-        // Kịch bản 3: Lệnh ngâm 200 nến nhưng đang lỗ -2% ROE -> PHẢI đóng để giải phóng vốn
+        // Kịch bản 2: Lệnh ngâm 200 nến nhưng đang lỗ -2% ROE -> PHẢI đóng để giải phóng vốn
         let loss_roe = -0.02;
         let loss_price_pnl = -0.001;
         let loss_is_strong = loss_roe >= 0.05 || loss_price_pnl >= stagnant_min_profit_pct;

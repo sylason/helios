@@ -1729,6 +1729,11 @@ mod tests {
         let has_rev_climax_vol = defs.iter().any(|(name, _)| name.contains("tactical_sniper.reversal.climax_vol_threshold"));
         let has_rev_exhaust_vol = defs.iter().any(|(name, _)| name.contains("exhaustion_vol_drop"));
         let has_range = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range"));
+        let has_range_lookback = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.box_lookback"));
+        let has_range_min_atr = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.min_box_atr"));
+        let has_range_dead_zone = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.dead_zone_ratio"));
+        let has_range_min_clv = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.min_clv"));
+        let has_range_breakout_vol = defs.iter().any(|(name, _)| name.contains("tactical_sniper.range.breakout_vol_z"));
         let has_anomaly = defs.iter().any(|(name, _)| name.contains("tactical_sniper.anomaly"));
         let has_rsi_ano = defs.iter().any(|(name, _)| name.contains("rsi_anomaly"));
         let has_stoch_range = defs.iter().any(|(name, _)| name.contains("stoch_range"));
@@ -1736,7 +1741,12 @@ mod tests {
         let has_pb_inval = defs.iter().any(|(name, _)| name.contains("tactical_sniper.pullback.invalidation_buffer_atr"));
         assert!(!has_macd, "defs không được chứa macd!");
         assert!(!has_vol_ma, "defs không được chứa vol_ma!");
-        assert!(!has_range, "defs KHÔNG được chứa tactical_sniper.range!");
+        assert!(has_range, "defs phải chứa tactical_sniper.range theo TODO-AUDIT-NEW-198!");
+        assert!(has_range_lookback, "defs phải chứa tactical_sniper.range.box_lookback!");
+        assert!(has_range_min_atr, "defs phải chứa tactical_sniper.range.min_box_atr!");
+        assert!(has_range_dead_zone, "defs phải chứa tactical_sniper.range.dead_zone_ratio!");
+        assert!(has_range_min_clv, "defs phải chứa tactical_sniper.range.min_clv!");
+        assert!(has_range_breakout_vol, "defs phải chứa tactical_sniper.range.breakout_vol_z!");
         assert!(!has_anomaly, "defs KHÔNG được chứa tactical_sniper.anomaly!");
         assert!(!has_rsi_ano, "defs KHÔNG được chứa rsi_anomaly!");
         assert!(!has_stoch_range, "defs KHÔNG được chứa stoch_range!");
@@ -1805,7 +1815,7 @@ mod tests {
             _ => panic!("max_adverse_adx phải là ParamDefinition::Range"),
         }
 
-        assert_eq!(width, 133, "DNA_WIDTH phải là 133 chiều sau khi thêm 3 cảm biến sóng và 3 ngưỡng pullback trực giao (TODO-AUDIT-NEW-179/180)!");
+        assert_eq!(width, 141, "DNA_WIDTH phải là 141 chiều sau khi khôi phục và tái cấu trúc 8 gen trực giao của TacticalRangeParams (TODO-AUDIT-NEW-198)!");
 
         let dow_tf_def = defs.iter().find(|(name, _)| name.contains("indicators.dow_structure.timeframe"));
         assert!(dow_tf_def.is_some(), "defs phải chứa indicators.dow_structure.timeframe!");
@@ -1913,7 +1923,7 @@ mod tests {
         }
 
         let count_struct_sl = defs.iter().filter(|(name, _)| name.contains("struct_sl_buffer_atr")).count();
-        assert_eq!(count_struct_sl, 3, "defs phải chứa chính xác 3 gene struct_sl_buffer_atr cho 3 Scanners (pullback, momentum, absorption)!");
+        assert_eq!(count_struct_sl, 4, "defs phải chứa chính xác 4 gene struct_sl_buffer_atr cho 4 Scanners (pullback, momentum, range, absorption)!");
 
         let rsi_mom_def = defs.iter().find(|(name, _)| name.contains("tactical_sniper.momentum.rsi_threshold"));
         assert!(rsi_mom_def.is_some(), "defs phải chứa tactical_sniper.momentum.rsi_threshold!");
@@ -2063,12 +2073,6 @@ mod tests {
         config.tactical_sniper.momentum.min_activation_score = 0.1;
         config.tactical_sniper.momentum.struct_sl_buffer_atr = 0.3;
 
-        config.tactical_sniper.range.min_width_pct = 0.01;
-        config.tactical_sniper.range.volume_max_threshold = 0.8;
-        config.tactical_sniper.range.bb_proximity_pct = 0.02;
-        config.tactical_sniper.range.stoch_oversold = 30.0;
-        config.tactical_sniper.range.stoch_overbought = 70.0;
-        config.tactical_sniper.range.max_trend_strength = 0.6;
         config.tactical_sniper.range.max_adverse_slope = 0.2;
         config.tactical_sniper.range.min_activation_score = 0.1;
         config.tactical_sniper.range.struct_sl_buffer_atr = 0.3;
@@ -2899,15 +2903,8 @@ mod tests {
         };
 
         let mut config = HeliosConfigV3::default();
-        config.tactical_sniper.range.max_bb_slope = 0.10;
         config.tactical_sniper.range.max_adverse_slope = 0.15;
         config.tactical_sniper.range.min_activation_score = 0.10;
-        config.tactical_sniper.range.min_width_pct = 0.005;
-        config.tactical_sniper.range.bb_proximity_pct = 0.015;
-        config.tactical_sniper.range.stoch_oversold = 25.0;
-        config.tactical_sniper.range.stoch_overbought = 75.0;
-        config.tactical_sniper.range.volume_max_threshold = 2.0;
-        config.tactical_sniper.range.max_trend_strength = 0.50;
 
         let mut sensors = HeliosSensors::default();
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
@@ -2977,16 +2974,8 @@ mod tests {
         };
 
         let mut config = HeliosConfigV3::default();
-        config.tactical_sniper.range.max_bb_slope = 0.10;
         config.tactical_sniper.range.max_adverse_slope = 0.15;
         config.tactical_sniper.range.min_activation_score = 0.10;
-        config.tactical_sniper.range.min_width_pct = 0.005;
-        config.tactical_sniper.range.bb_proximity_pct = 0.015;
-        config.tactical_sniper.range.stoch_oversold = 25.0;
-        config.tactical_sniper.range.stoch_overbought = 75.0;
-        config.tactical_sniper.range.volume_max_threshold = 2.0;
-        config.tactical_sniper.range.max_trend_strength = 0.50;
-        config.tactical_sniper.range.tp_target_ratio = 0.50;
         config.tactical_sniper.range.struct_sl_buffer_atr = 0.30;
 
         let mut sensors = HeliosSensors::default();
@@ -3055,15 +3044,8 @@ mod tests {
         };
 
         let mut config = HeliosConfigV3::default();
-        config.tactical_sniper.range.max_bb_slope = 0.10;
         config.tactical_sniper.range.max_adverse_slope = 0.15;
         config.tactical_sniper.range.min_activation_score = 0.10;
-        config.tactical_sniper.range.min_width_pct = 0.005;
-        config.tactical_sniper.range.bb_proximity_pct = 0.015;
-        config.tactical_sniper.range.stoch_oversold = 25.0;
-        config.tactical_sniper.range.stoch_overbought = 75.0;
-        config.tactical_sniper.range.volume_max_threshold = 2.0;
-        config.tactical_sniper.range.max_trend_strength = 0.50;
 
         let mut sensors = HeliosSensors::default();
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
@@ -4694,15 +4676,9 @@ mod tests {
         };
 
         let mut config = HeliosConfigV3::default();
-        config.tactical_sniper.range.max_bb_slope = 0.10;
         config.tactical_sniper.range.max_adverse_slope = 0.15;
         config.tactical_sniper.range.min_activation_score = 0.10;
-        config.tactical_sniper.range.min_width_pct = 0.005;
-        config.tactical_sniper.range.bb_proximity_pct = 0.015;
-        config.tactical_sniper.range.stoch_oversold = 25.0;
-        config.tactical_sniper.range.stoch_overbought = 75.0;
         config.tactical_sniper.range.struct_sl_buffer_atr = 1.0;
-        config.tactical_sniper.range.tp_target_ratio = 0.50;
 
         let mut sensors = HeliosSensors::default();
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);
@@ -4780,15 +4756,9 @@ mod tests {
         };
 
         let mut config = HeliosConfigV3::default();
-        config.tactical_sniper.range.max_bb_slope = 0.10;
         config.tactical_sniper.range.max_adverse_slope = 0.15;
         config.tactical_sniper.range.min_activation_score = 0.10;
-        config.tactical_sniper.range.min_width_pct = 0.005;
-        config.tactical_sniper.range.bb_proximity_pct = 0.015;
-        config.tactical_sniper.range.stoch_oversold = 25.0;
-        config.tactical_sniper.range.stoch_overbought = 75.0;
         config.tactical_sniper.range.struct_sl_buffer_atr = 1.0;
-        config.tactical_sniper.range.tp_target_ratio = 0.50;
 
         let mut sensors = HeliosSensors::default();
         sensors.bb_middle = std::sync::Arc::new(vec![2000.0; len]);

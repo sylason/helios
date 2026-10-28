@@ -34,7 +34,8 @@ impl TacticalScanner for RangeOscScanner {
 
     fn scan(&self, tick: &TickContext, sensors: &HeliosSensors, matrix: &MarketMatrixV3, config: &HeliosConfigV3) -> Option<Proposal> {
         let i = tick.i;
-        let lookback = 40.min(i);
+        let range_cfg = &config.tactical_sniper.range;
+        let lookback = range_cfg.box_lookback.max(10).min(i);
         if lookback < 10 {
             return None;
         }
@@ -66,9 +67,14 @@ impl TacticalScanner for RangeOscScanner {
         }
 
         let box_height = vah - val;
-        // 🛡️ CHỐT CHẶN 1: Sàn chi phí sinh tồn (Minimum Economic Height >= 2.0 ATR)
-        // Ngăn chặn các hộp quá hẹp bị phí sàn và spread bào mòn vốn
-        if box_height < 2.0 * current_atr {
+        // 🛡️ CHỐT CHẶN 1: Sàn chi phí sinh tồn đa tài sản (Max-Envelope Minimum Economic Height - TODO-AUDIT-NEW-198)
+        // Bắt buộc biên độ hộp >= max(min_box_atr * ATR, 3.0 * (2 * Fee + Slippage) * Close)
+        let min_box_atr = range_cfg.min_box_atr.max(1.0);
+        let roundtrip_friction = (2.0 * config.risk_management.risk_base.taker_fee_rate
+            + config.risk_management.risk_base.slippage_allowance_pct)
+            .max(0.0_f64);
+        let min_economic_height = (min_box_atr * current_atr).max(3.0 * roundtrip_friction * close);
+        if box_height < min_economic_height {
             return None;
         }
 
@@ -77,9 +83,10 @@ impl TacticalScanner for RangeOscScanner {
         // 2. Tọa độ phân vị phi thứ nguyên trong hộp: delta_norm in [-1.0, 1.0]
         let delta_norm = ((close - poc) / (0.5 * box_height)).clamp(-1.0, 1.0);
 
-        // 🛡️ CHỐT CHẶN 2: Vùng cấm Dead Zone 50% quanh trục giữa POC
-        // Triệt tiêu hoàn toàn nguy cơ cào lệnh ở giữa hộp
-        if delta_norm.abs() < 0.50 {
+        // 🛡️ CHỐT CHẶN 2: Vùng cấm Dead Zone quanh trục giữa POC (TODO-AUDIT-NEW-198)
+        // Triệt tiêu hoàn toàn nguy cơ cào lệnh ở vùng cân bằng quanh POC
+        let dead_zone = range_cfg.dead_zone_ratio.clamp(0.25, 0.85);
+        if delta_norm.abs() < dead_zone {
             return None;
         }
 
@@ -87,12 +94,17 @@ impl TacticalScanner for RangeOscScanner {
         let candle_range = (high - low).max(1e-5);
         let clv = ((2.0 * close - high - low) / candle_range).clamp(-1.0, 1.0);
 
-        let range_cfg = &config.tactical_sniper.range;
+        let min_clv = range_cfg.min_clv.clamp(0.05, 0.90);
         let buffer = current_atr * range_cfg.struct_sl_buffer_atr.max(0.10);
-        // Đường biên tuyến tính liên tục (Continuous Coupling Frontier): 0.5*|delta_norm| + 0.5*|CLV| >= 0.50
-        let effective_min_score = range_cfg.min_activation_score.max(0.50);
+        // Đường biên tuyến tính liên tục (Continuous Coupling Frontier): tự động đồng bộ thang đo với dead_zone và min_clv
+        let effective_min_score = range_cfg
+            .min_activation_score
+            .max(0.5 * (dead_zone + min_clv));
         let kama_slope = matrix.kama_slope_atr.get(i).copied().unwrap_or(0.0);
         let max_adverse = range_cfg.max_adverse_slope.max(0.01);
+        let max_touches = range_cfg.max_boundary_touches.max(2);
+        let breakout_vol_z = range_cfg.breakout_vol_z.max(1.0);
+        let min_rr = range_cfg.min_rr_ratio.max(1.0);
 
         // 🛡️ CHỐT CHẶN 5: Bộ Đếm Chu Kỳ Sống Của Hộp (Boundary Touch Counter: Chỉ Đánh Lần 2, 3, 4; Cấm Lần 5+)
         // & Anti-Breakout Directional Volume Veto (TODO-AUDIT-NEW-197)
@@ -116,7 +128,7 @@ impl TacticalScanner for RangeOscScanner {
         let closes = tick.closes();
 
         // 4. Định tuyến tín hiệu Long/Short
-        if delta_norm <= -0.50 && close >= val && clv >= 0.35 {
+        if delta_norm <= -dead_zone && close >= val && clv >= min_clv {
             // 🛡️ BỘ ĐẾM CHU KỲ SỐNG: Đếm chu kỳ chạm đáy VAL bằng Schmitt Trigger Hysteresis 15%/30%
             let mut lower_touches = 0usize;
             let mut in_lower_zone = false;
@@ -132,8 +144,8 @@ impl TacticalScanner for RangeOscScanner {
                 }
             }
 
-            // Khóa hoàn toàn giao dịch nảy biên khi hộp đã lão hóa (chạm từ lần thứ 5 trở đi)
-            if lower_touches > 4 {
+            // Khóa hoàn toàn giao dịch nảy biên khi hộp đã lão hóa (chạm vượt quá max_boundary_touches)
+            if lower_touches > max_touches {
                 return None;
             }
 
@@ -142,7 +154,7 @@ impl TacticalScanner for RangeOscScanner {
             for idx in start_breakout_idx..=i {
                 let vol_z = sensors.vol_z_score.get(idx).copied().unwrap_or(0.0);
                 let vol_ratio = if avg_box_vol > 0.0 { vols[idx] / avg_box_vol } else { 0.0 };
-                let is_vol_spike = vol_z >= 2.0 || vol_ratio >= 2.5;
+                let is_vol_spike = vol_z >= breakout_vol_z || vol_ratio >= 2.5;
 
                 if is_vol_spike {
                     let rng = (highs[idx] - lows[idx]).max(1e-5);
@@ -169,10 +181,10 @@ impl TacticalScanner for RangeOscScanner {
             let sl = RiskManager::sanitize_structural_sl(true, close, raw_sl, 0.0015, fallback_buf);
             let tp = vah; // Chốt lời sang biên đối diện hộp (Value Area High)
 
-            // 🛡️ BỘ LỌC KỲ VỌNG TOÁN HỌC: Bắt buộc R:R >= 1.50 (Tự động lọc nến quét râu quá sâu / dao rơi)
+            // 🛡️ BỘ LỌC KỲ VỌNG TOÁN HỌC: Bắt buộc R:R >= min_rr_ratio (Tự động lọc nến quét râu quá sâu / dao rơi)
             let reward = (tp - close).max(0.0);
             let risk = (close - sl).max(1e-5);
-            if reward / risk < 1.50 {
+            if reward / risk < min_rr {
                 return None;
             }
 
@@ -183,7 +195,7 @@ impl TacticalScanner for RangeOscScanner {
                 suggested_sl: Some(sl),
                 suggested_tp: Some(tp),
             });
-        } else if delta_norm >= 0.50 && close <= vah && clv <= -0.35 {
+        } else if delta_norm >= dead_zone && close <= vah && clv <= -min_clv {
             // 🛡️ BỘ ĐẾM CHU KỲ SỐNG: Đếm chu kỳ chạm đỉnh VAH bằng Schmitt Trigger Hysteresis 15%/30%
             let mut upper_touches = 0usize;
             let mut in_upper_zone = false;
@@ -199,8 +211,8 @@ impl TacticalScanner for RangeOscScanner {
                 }
             }
 
-            // Khóa hoàn toàn giao dịch nảy biên khi hộp đã lão hóa (chạm từ lần thứ 5 trở đi)
-            if upper_touches > 4 {
+            // Khóa hoàn toàn giao dịch nảy biên khi hộp đã lão hóa (chạm vượt quá max_boundary_touches)
+            if upper_touches > max_touches {
                 return None;
             }
 
@@ -209,7 +221,7 @@ impl TacticalScanner for RangeOscScanner {
             for idx in start_breakout_idx..=i {
                 let vol_z = sensors.vol_z_score.get(idx).copied().unwrap_or(0.0);
                 let vol_ratio = if avg_box_vol > 0.0 { vols[idx] / avg_box_vol } else { 0.0 };
-                let is_vol_spike = vol_z >= 2.0 || vol_ratio >= 2.5;
+                let is_vol_spike = vol_z >= breakout_vol_z || vol_ratio >= 2.5;
 
                 if is_vol_spike {
                     let rng = (highs[idx] - lows[idx]).max(1e-5);
@@ -236,10 +248,10 @@ impl TacticalScanner for RangeOscScanner {
             let sl = RiskManager::sanitize_structural_sl(false, close, raw_sl, 0.0015, fallback_buf);
             let tp = val; // Chốt lời sang biên đối diện hộp (Value Area Low)
 
-            // 🛡️ BỘ LỌC KỲ VỌNG TOÁN HỌC: Bắt buộc R:R >= 1.50 (Tự động lọc nến quét râu quá sâu / tên lửa)
+            // 🛡️ BỘ LỌC KỲ VỌNG TOÁN HỌC: Bắt buộc R:R >= min_rr_ratio (Tự động lọc nến quét râu quá sâu / tên lửa)
             let reward = (close - tp).max(0.0);
             let risk = (sl - close).max(1e-5);
-            if reward / risk < 1.50 {
+            if reward / risk < min_rr {
                 return None;
             }
 
@@ -810,5 +822,145 @@ mod tests {
         let prop_spring = RangeOscScanner.scan(&tick_spring, &sensors, &matrix, &config);
         assert!(prop_spring.is_some(), "RangeBound PHẢI DUYỆT cú Spring rút chân nổ Volume gom hàng (Bảo toàn Task 195)!");
         assert_eq!(prop_spring.unwrap().signal_type, SignalType::Long);
+    }
+
+    #[test]
+    fn test_range_bound_rejects_sub_frictional_micro_range() {
+        let len = 50;
+        let i = len - 1;
+        let config = HeliosConfigV3::default();
+        // Với mặc định taker_fee_rate = 0.0004, slippage = 0.0002 -> roundtrip_friction = 0.0010 (0.10%)
+        // Tại mức giá Close ~ 2000.0 -> Sàn kinh tế 3.0 * 0.0010 * 2000.0 = 6.0 USD
+        // Giả lập thị trường ngủ đông cực đại: current_atr = 1.5 -> 2.0 * ATR = 3.0 USD (< 6.0 USD)
+        // Hộp Micro-Range có VAL = 1998.0, VAH = 2002.0 -> box_height = 4.0 USD (>= 3.0 ATR nhưng < 6.0 sàn ma sát)
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2000.5; len];
+        let mut lows = vec![1999.5; len];
+        let mut closes = vec![2000.0; len];
+
+        highs[15] = 2002.0; // VAH = 2002.0
+        lows[20] = 1998.0;  // VAL = 1998.0 -> box_height = 4.0 < 6.0
+
+        // Nến i rút chân tại VAL = 1998.0
+        opens[i] = 1998.2;
+        lows[i] = 1998.0;
+        highs[i] = 1999.0;
+        closes[i] = 1998.8;
+
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![1.5; len]); // 2.0 * ATR = 3.0 < box_height = 4.0
+
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        let (dv, im, mut actions, trades) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(
+            prop.is_none(),
+            "RangeBound PHẢI TỪ CHỐI hộp Micro-Range (height = 4.0 < sàn chi phí ma sát 6.0) dù đã thỏa >= 2.0 ATR (3.0)!"
+        );
+
+        // Khi hộp mở rộng lên VAL = 1990.0, VAH = 2010.0 -> box_height = 20.0 >= max(3.0, 6.0) -> PHẢI ĐƯỢC DUYỆT
+        highs[15] = 2010.0;
+        lows[20] = 1990.0;
+        opens[i] = 1990.5;
+        lows[i] = 1990.0;
+        highs[i] = 1993.0;
+        closes[i] = 1992.5; // delta_norm = (1992.5 - 2000)/10 = -0.75 <= -0.50, CLV = +0.667 >= 0.35
+
+        let (dv_ok, im_ok, mut act_ok, tr_ok) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick_ok = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv_ok,
+            indicator_manager: &im_ok,
+            trades: &tr_ok,
+            last_closed_trade: None,
+            actions: &mut act_ok,
+            position: Position::default(),
+        };
+        let prop_ok = RangeOscScanner.scan(&tick_ok, &sensors, &matrix, &config);
+        assert!(
+            prop_ok.is_some(),
+            "RangeBound PHẢI DUYỆT khi biên độ hộp (20.0) vượt qua cả sàn ATR (3.0) và sàn kinh tế (6.0)!"
+        );
+    }
+
+    #[test]
+    fn test_range_bound_dead_zone_exclusion_around_poc() {
+        let len = 50;
+        let i = len - 1;
+        let mut config = HeliosConfigV3::default();
+        // Cấu hình động dead_zone_ratio = 0.40 (vùng cấm 40% quanh POC: |delta_norm| < 0.40 bị chặn)
+        config.tactical_sniper.range.dead_zone_ratio = 0.40;
+
+        // Hộp chuẩn: VAL = 1960, VAH = 2040 -> POC = 2000, half_height = 40.0
+        let mut opens = vec![2000.0; len];
+        let mut highs = vec![2010.0; len];
+        let mut lows = vec![1990.0; len];
+        let mut closes = vec![2000.0; len];
+        highs[15] = 2040.0;
+        lows[20] = 1960.0;
+
+        // Kịch bản 1: Giá nằm trong vùng cấm 40% quanh POC (Close = 1986 -> delta_norm = -14/40 = -0.35, |delta_norm| = 0.35 < 0.40)
+        opens[i] = 1980.0;
+        lows[i] = 1978.0;
+        highs[i] = 1988.0;
+        closes[i] = 1986.0; // CLV = +0.60 rất đẹp nhưng nằm trong vùng cấm 40% quanh POC
+
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        let (dv1, im1, mut act1, tr1) = setup_mock_tick(opens.clone(), highs.clone(), lows.clone(), closes.clone(), i);
+        let tick1 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv1,
+            indicator_manager: &im1,
+            trades: &tr1,
+            last_closed_trade: None,
+            actions: &mut act1,
+            position: Position::default(),
+        };
+        assert!(
+            RangeOscScanner.scan(&tick1, &sensors, &matrix, &config).is_none(),
+            "RangeBound PHẢI CHẶN ĐỨNG lệnh nằm trong vùng cấm 40% quanh POC (|delta_norm| = 0.35 < 0.40)!"
+        );
+
+        // Kịch bản 2: Khi DNA mở rộng dead_zone_ratio = 0.65, nến ở |delta_norm| = 0.55 (Close = 1978) cũng phải bị chặn
+        config.tactical_sniper.range.dead_zone_ratio = 0.65;
+        opens[i] = 1972.0;
+        lows[i] = 1970.0;
+        highs[i] = 1980.0;
+        closes[i] = 1978.0; // delta_norm = -22/40 = -0.55 -> |delta_norm| = 0.55 < 0.65
+
+        let (dv2, im2, mut act2, tr2) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick2 = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv2,
+            indicator_manager: &im2,
+            trades: &tr2,
+            last_closed_trade: None,
+            actions: &mut act2,
+            position: Position::default(),
+        };
+        assert!(
+            RangeOscScanner.scan(&tick2, &sensors, &matrix, &config).is_none(),
+            "RangeBound PHẢI TÔN TRỌNG gen dead_zone_ratio động (0.65) và chặn lệnh ở |delta_norm| = 0.55!"
+        );
     }
 }
