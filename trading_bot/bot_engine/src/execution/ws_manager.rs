@@ -120,14 +120,20 @@ impl WsManager {
                                                 opt_s.as_ref().and_then(|str_val| str_val.parse::<f64>().ok()).unwrap_or(0.0)
                                             };
 
+                                            let c_val = parse_f64(&k.c);
+                                            let v_val = parse_f64(&k.v);
+                                            let qv_raw = parse_f64(&k.q);
+                                            let qv = if qv_raw > 0.0 { qv_raw } else { c_val * v_val };
+
                                             let candle = Candle {
                                                 symbol: s.clone(),
                                                 timestamp: k.t.unwrap_or(0),
                                                 open: parse_f64(&k.o),
                                                 high: parse_f64(&k.h),
                                                 low: parse_f64(&k.l),
-                                                close: parse_f64(&k.c),
-                                                volume: parse_f64(&k.v),
+                                                close: c_val,
+                                                volume: v_val,
+                                                quote_volume: qv,
                                             };
 
                                             debug!("📊 Nến mới đóng [WS]: {:?}", candle);

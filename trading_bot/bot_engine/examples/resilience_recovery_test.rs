@@ -86,12 +86,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let c1 = Candle {
         symbol: "ETHUSDT".to_string(),
         timestamp: base_ts,
-        open: 1800.0, high: 1805.0, low: 1795.0, close: 1802.0, volume: 100.0
+        open: 1800.0, high: 1805.0, low: 1795.0, close: 1802.0, volume: 100.0, quote_volume: 180200.0
     };
     let c2 = Candle {
         symbol: "ETHUSDT".to_string(),
         timestamp: gap_ts,
-        open: 1810.0, high: 1815.0, low: 1808.0, close: 1812.0, volume: 120.0
+        open: 1810.0, high: 1815.0, low: 1808.0, close: 1812.0, volume: 120.0, quote_volume: 217440.0
     };
 
     db_store.save_candle(c1).await?;
@@ -233,8 +233,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // Bơm nến song song cho ETHUSDT và BTCUSDT
-    let candle_eth = Candle { symbol: "ETHUSDT".to_string(), timestamp: base_ts + 60000, open: 1800.0, high: 1810.0, low: 1790.0, close: 1805.0, volume: 50.0 };
-    let candle_btc = Candle { symbol: "BTCUSDT".to_string(), timestamp: base_ts + 60000, open: 60000.0, high: 60500.0, low: 59900.0, close: 60200.0, volume: 10.0 };
+    let candle_eth = Candle { symbol: "ETHUSDT".to_string(), timestamp: base_ts + 60000, open: 1800.0, high: 1810.0, low: 1790.0, close: 1805.0, volume: 50.0, quote_volume: 90250.0 };
+    let candle_btc = Candle { symbol: "BTCUSDT".to_string(), timestamp: base_ts + 60000, open: 60000.0, high: 60500.0, low: 59900.0, close: 60200.0, volume: 10.0, quote_volume: 602000.0 };
 
     data_tx.send((candle_eth, false))?;
     data_tx.send((candle_btc, false))?;

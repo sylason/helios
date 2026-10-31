@@ -37,6 +37,7 @@ impl SqliteStore {
                 low DOUBLE,
                 close DOUBLE,
                 volume DOUBLE,
+                quote_volume DOUBLE DEFAULT 0.0,
                 PRIMARY KEY (symbol, open_time)
             )",
             [],
@@ -171,9 +172,9 @@ impl CandleRepository for SqliteStore {
     async fn save_candle(&self, c: Candle) -> Result<(), BotError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume],
+            "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume, c.effective_quote_volume()],
         ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
         
         debug!("💾 [{}] Candle {} saved to DB.", c.symbol, c.timestamp);
@@ -187,9 +188,9 @@ impl CandleRepository for SqliteStore {
         
         for c in candles {
             tx.execute(
-                "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume) 
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume],
+                "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume) 
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume, c.effective_quote_volume()],
             ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
         }
         
@@ -201,7 +202,7 @@ impl CandleRepository for SqliteStore {
     async fn get_candles_by_range(&self, symbol: &str, start: i64, end: i64) -> Result<Vec<Candle>, BotError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT symbol, open_time, open, high, low, close, volume 
+            "SELECT symbol, open_time, open, high, low, close, volume, quote_volume 
              FROM candles_1m 
              WHERE symbol = ?1 AND open_time >= ?2 AND open_time <= ?3
              ORDER BY open_time ASC"
@@ -216,6 +217,7 @@ impl CandleRepository for SqliteStore {
                 low: row.get(4)?,
                 close: row.get(5)?,
                 volume: row.get(6)?,
+                quote_volume: row.get(7)?,
             })
         }).map_err(|e| BotError::DatabaseError(e.to_string()))?;
 
@@ -230,7 +232,7 @@ impl CandleRepository for SqliteStore {
     async fn get_latest_candle(&self, symbol: &str) -> Result<Option<Candle>, BotError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT symbol, open_time, open, high, low, close, volume 
+            "SELECT symbol, open_time, open, high, low, close, volume, quote_volume 
              FROM candles_1m 
              WHERE symbol = ?1 
              ORDER BY open_time DESC LIMIT 1"
@@ -248,6 +250,7 @@ impl CandleRepository for SqliteStore {
                 low: row.get(4)?,
                 close: row.get(5)?,
                 volume: row.get(6)?,
+                quote_volume: row.get(7)?,
             }))
         } else {
             Ok(None)
@@ -258,7 +261,7 @@ impl CandleRepository for SqliteStore {
     async fn get_oldest_candle(&self, symbol: &str) -> Result<Option<Candle>, BotError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT symbol, open_time, open, high, low, close, volume 
+            "SELECT symbol, open_time, open, high, low, close, volume, quote_volume 
              FROM candles_1m 
              WHERE symbol = ?1 
              ORDER BY open_time ASC LIMIT 1"
@@ -276,6 +279,7 @@ impl CandleRepository for SqliteStore {
                 low: row.get(4)?,
                 close: row.get(5)?,
                 volume: row.get(6)?,
+                quote_volume: row.get(7)?,
             }))
         } else {
             Ok(None)
@@ -381,6 +385,7 @@ mod tests {
             low: 0.5,
             close: 1.5,
             volume: 100.0,
+            quote_volume: 150.0,
         };
 
         let c2 = Candle {
@@ -391,6 +396,7 @@ mod tests {
             low: 1.0,
             close: 2.0,
             volume: 200.0,
+            quote_volume: 400.0,
         };
 
         // 2. Test Insert
@@ -400,6 +406,7 @@ mod tests {
         // 3. Test Get Latest
         let latest = db.get_latest_candle("BTCUSDT").await.unwrap().unwrap();
         assert_eq!(latest.timestamp, 2000);
+        assert_eq!(latest.quote_volume, 400.0);
 
         // 4. Test Get Range
         let range = db.get_candles_by_range("BTCUSDT", 1000, 2000).await.unwrap();
@@ -436,5 +443,61 @@ mod tests {
         db.remove_active_algo_order("BTCUSDT").unwrap();
         assert_eq!(db.get_active_algo_order("BTCUSDT").unwrap(), None);
         assert_eq!(db.get_all_active_algo_orders().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_candle_storage_with_quote_volume() {
+        let db = SqliteStore::new(":memory:").expect("Failed to create in-memory db");
+
+        let c1 = Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 1000,
+            open: 2000.0,
+            high: 2010.0,
+            low: 1990.0,
+            close: 2005.0,
+            volume: 5.0,
+            quote_volume: 10025.5,
+        };
+
+        // 1. Test single save & get
+        db.save_candle(c1.clone()).await.unwrap();
+        let latest = db.get_latest_candle("ETHUSDT").await.unwrap().unwrap();
+        assert_eq!(latest.symbol, "ETHUSDT");
+        assert_eq!(latest.timestamp, 1000);
+        assert_eq!(latest.quote_volume, 10025.5);
+
+        // 2. Test batch save & range query
+        let c2 = Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 2000,
+            open: 2005.0,
+            high: 2020.0,
+            low: 2000.0,
+            close: 2015.0,
+            volume: 8.0,
+            quote_volume: 16120.0,
+        };
+        let c3 = Candle {
+            symbol: "ETHUSDT".to_string(),
+            timestamp: 3000,
+            open: 2015.0,
+            high: 2030.0,
+            low: 2010.0,
+            close: 2025.0,
+            volume: 10.0,
+            quote_volume: 20250.0,
+        };
+        db.save_candles(vec![c2, c3]).await.unwrap();
+
+        let range = db.get_candles_by_range("ETHUSDT", 1000, 3000).await.unwrap();
+        assert_eq!(range.len(), 3);
+        assert_eq!(range[0].quote_volume, 10025.5);
+        assert_eq!(range[1].quote_volume, 16120.0);
+        assert_eq!(range[2].quote_volume, 20250.0);
+
+        let oldest = db.get_oldest_candle("ETHUSDT").await.unwrap().unwrap();
+        assert_eq!(oldest.timestamp, 1000);
+        assert_eq!(oldest.quote_volume, 10025.5);
     }
 }

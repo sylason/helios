@@ -657,6 +657,7 @@ mod tests {
                 low: 2490.0,
                 close: 2505.0,
                 volume: 100.0,
+                quote_volume: 250500.0,
             },
             Candle {
                 symbol: "ETHUSDT".to_string(),
@@ -666,6 +667,7 @@ mod tests {
                 low: 2500.0,
                 close: 2510.0,
                 volume: 120.0,
+                quote_volume: 301200.0,
             },
         ];
 

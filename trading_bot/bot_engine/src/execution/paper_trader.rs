@@ -824,6 +824,7 @@ mod tests {
             low: 2040.0, // Chạm SL
             close: 2045.0,
             volume: 10.0,
+            quote_volume: 20450.0,
         };
 
         let sl_hit = trader.on_candle(&candle, 2, None);
@@ -856,6 +857,7 @@ mod tests {
             low: 1940.0, // Thủng mức SL 1950.0
             close: 1960.0,
             volume: 10.0,
+            quote_volume: 19600.0,
         };
 
         // Do SL được bảo tồn ở 1950.0 nên vị thế vẫn được bảo vệ và cắt lỗ thành công
@@ -882,6 +884,7 @@ mod tests {
             low: 2040.0,
             close: 2110.0,
             volume: 10.0,
+            quote_volume: 21100.0,
         };
 
         let tp_hit = trader.on_candle(&candle, 4, None);
@@ -908,6 +911,7 @@ mod tests {
             low: 1890.0,
             close: 1910.0,
             volume: 10.0,
+            quote_volume: 19100.0,
         };
         let hit = trader.on_candle(&candle, 1, None);
         assert!(hit);
@@ -934,6 +938,7 @@ mod tests {
             low: 1940.0,
             close: 1945.0,
             volume: 10.0,
+            quote_volume: 19450.0,
         };
         let hit = trader.on_candle(&candle, 2, None);
         assert!(hit);
@@ -986,6 +991,7 @@ mod tests {
             low: 1940.0,
             close: 1960.0,
             volume: 100.0,
+            quote_volume: 196000.0,
         };
 
         // Theo mô hình bảo thủ Pessimistic Matching (1:1 với ferro_trade::Broker):
@@ -1016,6 +1022,7 @@ mod tests {
             low: 1980.0,
             close: 2050.0,
             volume: 10.0,
+            quote_volume: 20500.0,
         };
         trader.on_candle(&candle1, 1, None);
 
@@ -1028,6 +1035,7 @@ mod tests {
             low: 2040.0,
             close: 2205.0,
             volume: 10.0,
+            quote_volume: 22050.0,
         };
         let hit = trader.on_candle(&candle2, 2, None);
         assert!(hit);

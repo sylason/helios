@@ -35,6 +35,7 @@ fn create_mock_candles(start_price: f64, prices: &[f64]) -> Vec<Candle> {
             low: p - 0.5,
             close: p,
             volume: 1000.0,
+            quote_volume: p * 1000.0,
         });
         timestamp += 60000;
     }
@@ -50,6 +51,7 @@ fn create_mock_candles(start_price: f64, prices: &[f64]) -> Vec<Candle> {
             low: p.min(last_p) - 0.5,
             close: p,
             volume: 1200.0,
+            quote_volume: p * 1200.0,
         });
         last_p = p;
         timestamp += 60000;

@@ -112,11 +112,16 @@ impl InitialSync {
                     item_array.get(4).and_then(to_f64),
                     item_array.get(5).and_then(to_f64),
                 ) {
+                    let qv = item_array.get(7).and_then(to_f64).unwrap_or(c * v);
                     candles.push(Candle {
                         symbol: symbol_upper.clone(),
                         timestamp: t,
                         open: o,
-                        high: h, low: l, close: c, volume: v,
+                        high: h,
+                        low: l,
+                        close: c,
+                        volume: v,
+                        quote_volume: qv,
                     });
                     last_timestamp = t;
                 }
@@ -235,10 +240,16 @@ impl InitialSync {
                     item_array.get(4).and_then(to_f64),
                     item_array.get(5).and_then(to_f64),
                 ) {
+                    let qv = item_array.get(7).and_then(to_f64).unwrap_or(c * v);
                     candles.push(Candle {
                         symbol: symbol_upper.clone(),
                         timestamp: t,
-                        open: o, high: h, low: l, close: c, volume: v,
+                        open: o,
+                        high: h,
+                        low: l,
+                        close: c,
+                        volume: v,
+                        quote_volume: qv,
                     });
                     if t < first_timestamp {
                         first_timestamp = t;

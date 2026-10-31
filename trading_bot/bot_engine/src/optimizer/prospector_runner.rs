@@ -428,6 +428,7 @@ impl ProspectorRunner {
         // =========================================================================
         // 🚪 WFE VALIDATION GATE: WATERFALL THẨM ĐỊNH OOS TOP-K CANDIDATES (TODO-AUDIT-NEW-153)
         // =========================================================================
+        let fallback_cold_start_champion = top_candidates.first().cloned();
         let mut approved_champion: Option<Candidate> = None;
 
         for (idx, candidate) in top_candidates.into_iter().enumerate() {
@@ -453,7 +454,8 @@ impl ProspectorRunner {
                 break;
             }
 
-            match super::helios_bridge::HeliosBridge::diagnostic_backtest(&validation_slice, &dna) {
+            let eval_start_bar = validation_slice.len().saturating_sub(val_span_bars);
+            match super::helios_bridge::HeliosBridge::diagnostic_backtest_with_eval(&validation_slice, &dna, Some(eval_start_bar)) {
                 Ok(val_res) => {
                     let val_ret = val_res.stats.return_pct;
                     let val_dd = val_res.stats.max_drawdown_pct;
@@ -463,28 +465,27 @@ impl ProspectorRunner {
                     // 🛡️ TIÊU CHUẨN THẨM ĐỊNH OOS KỶ LUẬT VÀ THÍCH ỨNG (ROBUST & ADAPTIVE WFE GATE):
                     // 1. In-Sample: Bắt buộc phải có lệnh (trades > 0) và có lãi (ret > 0.0%).
                     // 2. Out-Of-Sample Validation (3 ngày):
-                    //    - Nếu val_trades == 0: Đứng ngoài né bão bảo toàn 100% vốn (val_dd = 0.0%) -> SOLID PASS!
-                    //    - Nếu val_trades > 0: Bắt buộc không lỗ ròng (val_net_ret >= 0.0%) và Drawdown an toàn (val_dd <= 15.0%).
-                    let slippage_drag_roe = 2.0 * fitness_cfg.slippage_rate * leverage * 100.0;
-                    let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
-
+                    //    - Tầng chiến lược Helios (Gatekeeper, Arbiter, Risk, Scanner) và Broker commission 
+                    //      đã chủ động phòng vệ và khấu trừ ma sát sàn thực tế.
+                    //    - Bắt buộc SOLID PASS phải có giao dịch (val_trades >= 1), không lỗ ròng (val_ret >= 0.0%)
+                    //      và Drawdown an toàn (val_dd <= 15.0%).
                     let is_in_sample_invalid = trades == 0 || ret <= 0.0;
-                    let is_oos_failed = val_trades > 0 && (val_net_ret < 0.0 || val_dd > 15.0);
+                    let is_oos_failed = val_trades == 0 || val_ret < 0.0 || val_dd > 15.0;
 
                     if is_in_sample_invalid || is_oos_failed {
                         warn!(
-                            "🚨 [WFE GATE: REJECTED - INVALID OR OVERFIT] Symbol: {} | Candidate #{} Rejected! \
-                            In-Sample Return: {:.2}% (Trades: {}) | OOS Val Return: {:+.2}% (Net: {:+.2}%, Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
+                            "🚨 [WFE GATE: REJECTED - INVALID OR DORMANT] Symbol: {} | Candidate #{} Rejected! \
+                            In-Sample Return: {:.2}% (Trades: {}) | OOS Val Return: {:+.2}% (Max DD: {:.2}%, Trades: {}, Win Rate: {:.1}%) \
                             -> REJECTED! Thử tiếp ứng viên kế tiếp trong Top-K...",
-                            symbol, rank, ret, trades, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
+                            symbol, rank, ret, trades, val_ret, val_dd, val_trades, val_win_rate
                         );
                         continue;
                     }
 
                     info!(
-                        "✨ [WFE GATE: SOLID PASS] Candidate #{} Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% (Net: {:+.2}%) \
+                        "✨ [WFE GATE: SOLID PASS] Candidate #{} Validated! In-Sample Return: {:.2}% | OOS Val Return: {:+.2}% \
                         | OOS Max DD: {:.2}% | OOS Trades: {} (Win Rate: {:.1}%) -> Approved for Deployment.",
-                        rank, ret, val_ret, val_net_ret, val_dd, val_trades, val_win_rate
+                        rank, ret, val_ret, val_dd, val_trades, val_win_rate
                     );
                     approved_champion = Some(candidate);
                     break;
@@ -529,51 +530,63 @@ impl ProspectorRunner {
                 info!("✨ [OPTIMIZER] New DNA deployed to Actor (Fitness: {:.2}%).", champion.stats.return_pct);
             }
         } else {
-            warn!(
-                "🛑 [WFE GATE: ALL REJECTED] Symbol: {} | Toàn bộ Top-K ứng viên đều không vượt qua thẩm định OOS! \
-                Giữ nguyên DNA cũ trong DB và Actor để bảo toàn vốn.",
-                symbol
-            );
+            // Kiểm tra DB xem đã có DNA nào lưu trước đó chưa
+            let existing_dna = db.get_best_dna(symbol, strategy_id).await.unwrap_or(None);
+
+            if existing_dna.is_none() {
+                // 🚀 COLD START FALLBACK: Lần đầu chạy bot, DB hoàn toàn trống và toàn bộ Top-K đều không có lệnh OOS.
+                // Nạp Candidate #1 In-Sample làm hạt giống mồi khởi tạo ban đầu theo quyết định /grill-me.
+                if let Some(first_champ) = fallback_cold_start_champion {
+                    if let Some(dna) = &first_champ.dna {
+                        use crate::models::models::OptimizedDna;
+                        use std::collections::HashMap;
+
+                        let now = chrono::Utc::now().timestamp_millis();
+                        let mut stats_map = HashMap::new();
+                        stats_map.insert("Return %".to_string(), first_champ.stats.return_pct);
+                        stats_map.insert("Max DD %".to_string(), first_champ.stats.max_drawdown_pct);
+                        stats_map.insert("Trades".to_string(), first_champ.stats.total_trades as f64);
+                        stats_map.insert("Profit Factor".to_string(), first_champ.stats.profit_factor);
+                        stats_map.insert("Sharpe".to_string(), first_champ.stats.sharpe_ratio);
+
+                        let opt_dna = OptimizedDna {
+                            symbol: symbol.to_string(),
+                            strategy_id: strategy_id.to_string(),
+                            dna: dna.clone(),
+                            mapping: HashMap::new(),
+                            fitness: first_champ.stats.return_pct,
+                            stats: stats_map,
+                            updated_at: now,
+                        };
+
+                        info!(
+                            "🌱 [WFE GATE: COLD START FALLBACK] Symbol: {} | DB trống và toàn bộ Top-K không có lệnh OOS. \
+                            Khởi tạo giống mồi bằng Candidate #1 In-Sample (Fitness: {:.2}%, Trades: {})...",
+                            symbol, first_champ.stats.return_pct, first_champ.stats.total_trades
+                        );
+
+                        db.save_best_dna(opt_dna.clone()).await.map_err(|e| e.to_string())?;
+
+                        if let Some(tx) = &dna_tx {
+                            let _ = tx.send(Some(opt_dna));
+                        }
+                    }
+                }
+            } else {
+                warn!(
+                    "🛑 [WFE GATE: ALL REJECTED] Symbol: {} | Không có OOS tối ưu tại chu kỳ này. \
+                    Kích hoạt Flat Defense & giữ nguyên DNA cũ trong DB để bảo toàn vốn.",
+                    symbol
+                );
+            }
         }
 
         Ok(())
     }
 
-    /// Clone hàm chuyển đổi DataFrame
-    fn candles_to_df(candles: &[crate::models::models::Candle]) -> PolarsResult<DataFrame> {
-        let n = candles.len();
-        let mut dt_vec = Vec::with_capacity(n);
-        let mut open_vec = Vec::with_capacity(n);
-        let mut high_vec = Vec::with_capacity(n);
-        let mut low_vec = Vec::with_capacity(n);
-        let mut close_vec = Vec::with_capacity(n);
-        let mut vol_vec = Vec::with_capacity(n);
-
-        for c in candles {
-            dt_vec.push(c.timestamp * 1_000_000);
-            open_vec.push(c.open);
-            high_vec.push(c.high);
-            low_vec.push(c.low);
-            close_vec.push(c.close);
-            vol_vec.push(c.volume);
-        }
-
-        let s_dt = Series::new("Datetime".into(), dt_vec)
-            .cast(&DataType::Datetime(TimeUnit::Nanoseconds, None))?;
-        let s_open = Series::new("Open".into(), open_vec);
-        let s_high = Series::new("High".into(), high_vec);
-        let s_low = Series::new("Low".into(), low_vec);
-        let s_close = Series::new("Close".into(), close_vec);
-        let s_vol = Series::new("Volume".into(), vol_vec);
-
-        DataFrame::new(vec![
-            s_dt.into(),
-            s_open.into(),
-            s_high.into(),
-            s_low.into(),
-            s_close.into(),
-            s_vol.into(),
-        ])
+    /// Chuyển đổi DataFrame ủy nhiệm trực tiếp cho HeliosBridge::candles_to_df (Single Source of Truth)
+    pub fn candles_to_df(candles: &[crate::models::models::Candle]) -> PolarsResult<DataFrame> {
+        crate::optimizer::helios_bridge::HeliosBridge::candles_to_df(candles)
     }
 
     /// Tính toán điểm số Fitness theo hàm Mục tiêu 2 Pha Bão hòa Mũ (Exponential Saturation Two-Phase Fitness)
@@ -641,12 +654,16 @@ mod tests {
                 low: 0.5,
                 close: 1.5,
                 volume: 100.0,
+                quote_volume: 150.0,
             }
         ];
         
         let df = ProspectorRunner::candles_to_df(&candles).unwrap();
         assert_eq!(df.height(), 1);
-        assert_eq!(df.width(), 6);
+        assert_eq!(df.width(), 7);
+        assert!(df.column("QuoteVolume").is_ok());
+        let qv_val = df.column("QuoteVolume").unwrap().f64().unwrap().get(0).unwrap();
+        assert_eq!(qv_val, 150.0);
     }
 
     #[test]
@@ -754,10 +771,6 @@ mod tests {
 
     #[test]
     fn test_wfe_gate_adaptive_validation() {
-        let leverage = 20.0;
-        let fitness_cfg = FitnessConfig::default();
-        let slippage_drag_roe = 2.0 * fitness_cfg.slippage_rate * leverage * 100.0; // 0.8%
-
         // Kịch bản A: In-Sample 0 lệnh -> REJECT
         let is_in_sample_invalid_0 = 0 == 0 || 0.0 <= 0.0;
         assert!(is_in_sample_invalid_0, "In-Sample 0 lệnh bắt buộc phải bị REJECT!");
@@ -766,36 +779,32 @@ mod tests {
         let is_in_sample_invalid_neg = 5 == 0 || -2.0 <= 0.0;
         assert!(is_in_sample_invalid_neg, "In-Sample Return âm bắt buộc phải bị REJECT!");
 
-        // Kịch bản C: OOS 3 ngày đứng ngoài né bão (val_trades == 0, val_dd == 0.0%) -> SOLID PASS!
+        // Kịch bản C: OOS 3 ngày đứng ngoài né bão (val_trades == 0) -> BỊ TỪ CHỐI CẤP SOLID PASS!
         let val_trades_0 = 0;
         let val_ret_0 = 0.0;
         let val_dd_0 = 0.0;
-        let val_net_ret_0 = val_ret_0 - (val_trades_0 as f64 * slippage_drag_roe);
-        let is_oos_failed_0 = val_trades_0 > 0 && (val_net_ret_0 < 0.0 || val_dd_0 > 15.0);
-        assert!(!is_oos_failed_0, "OOS 3 ngày 0 lệnh bảo toàn vốn không được bị đánh trượt (Do No Harm)!");
+        let is_oos_failed_0 = val_trades_0 == 0 || val_ret_0 < 0.0 || val_dd_0 > 15.0;
+        assert!(is_oos_failed_0, "OOS 3 ngày 0 lệnh không được cấp SOLID PASS (chống bẫy cá thể ngủ đông)!");
 
         // Kịch bản D: OOS 3 ngày có trade nhưng lỗ ròng -> REJECT!
         let val_trades_loss = 3;
         let val_ret_loss = -1.0;
         let val_dd_loss = 5.0;
-        let val_net_ret_loss = val_ret_loss - (val_trades_loss as f64 * slippage_drag_roe);
-        let is_oos_failed_loss = val_trades_loss > 0 && (val_net_ret_loss < 0.0 || val_dd_loss > 15.0);
+        let is_oos_failed_loss = val_trades_loss == 0 || val_ret_loss < 0.0 || val_dd_loss > 15.0;
         assert!(is_oos_failed_loss, "OOS 3 ngày trade bị lỗ ròng bắt buộc phải bị REJECT!");
 
         // Kịch bản E: OOS 3 ngày Drawdown vượt ngưỡng 15.0% -> REJECT!
         let val_trades_dd = 4;
         let val_ret_dd = 2.0;
         let val_dd_excess = 18.0;
-        let val_net_ret_dd = val_ret_dd - (val_trades_dd as f64 * slippage_drag_roe);
-        let is_oos_failed_dd = val_trades_dd > 0 && (val_net_ret_dd < 0.0 || val_dd_excess > 15.0);
+        let is_oos_failed_dd = val_trades_dd == 0 || val_ret_dd < 0.0 || val_dd_excess > 15.0;
         assert!(is_oos_failed_dd, "OOS 3 ngày Drawdown vượt quá 15% bắt buộc phải bị REJECT!");
 
         // Kịch bản F: OOS 3 ngày có lãi ròng an toàn (+2.5%, DD = 4.0%, 2 trades) -> SOLID PASS!
         let val_trades_pass = 2;
-        let val_ret_pass = 4.1;
+        let val_ret_pass = 2.5;
         let val_dd_pass = 4.0;
-        let val_net_ret_pass = val_ret_pass - (val_trades_pass as f64 * slippage_drag_roe); // 4.1 - 1.6 = 2.5%
-        let is_oos_failed_pass = val_trades_pass > 0 && (val_net_ret_pass < 0.0 || val_dd_pass > 15.0);
+        let is_oos_failed_pass = val_trades_pass == 0 || val_ret_pass < 0.0 || val_dd_pass > 15.0;
         assert!(!is_oos_failed_pass, "OOS 3 ngày có lãi ròng (+2.5%) và DD an toàn (4%) phải được APPROVE!");
     }
 
@@ -905,7 +914,6 @@ mod tests {
         assert_eq!(top_candidates[2].stats.return_pct, 15.0);
 
         // 2. Mô phỏng luồng Waterfall qua WFE Gate
-        let slippage_drag_roe = 0.8; // 2 * 0.0004 * 10 * 100
         let mut approved_champion: Option<Candidate> = None;
 
         for (idx, candidate) in top_candidates.into_iter().enumerate() {
@@ -914,14 +922,13 @@ mod tests {
 
             // Giả lập kết quả OOS tương ứng với từng Rank:
             let (val_ret, val_dd, val_trades) = match idx {
-                0 => (-1.4, 6.0, 2), // Rank 1: Net = -1.4 - (2 * 0.8) = -3.0% < 0 -> FAILED!
-                1 => (6.0, 4.0, 2),  // Rank 2: Net = 6.0 - (2 * 0.8) = +4.4% >= 0, DD 4% <= 15% -> PASS!
+                0 => (-1.4, 6.0, 2), // Rank 1: Net = -1.4 < 0 -> FAILED!
+                1 => (4.4, 4.0, 2),  // Rank 2: Net = +4.4% >= 0, DD 4% <= 15%, trades >= 1 -> PASS!
                 _ => (5.0, 3.0, 2),  // Rank 3: Không bao giờ được duyệt tới do Rank 2 đã break
             };
 
-            let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
             let is_in_sample_invalid = trades == 0 || ret <= 0.0;
-            let is_oos_failed = val_trades > 0 && (val_net_ret < 0.0 || val_dd > 15.0);
+            let is_oos_failed = val_trades == 0 || val_ret < 0.0 || val_dd > 15.0;
 
             if is_in_sample_invalid || is_oos_failed {
                 continue;
@@ -975,7 +982,6 @@ mod tests {
         c3.stats.total_trades = 0;
         candidates.push(c3);
 
-        let slippage_drag_roe = 0.8;
         let mut approved_champion: Option<Candidate> = None;
 
         for (idx, candidate) in candidates.into_iter().enumerate() {
@@ -988,9 +994,8 @@ mod tests {
                 _ => (0.0, 0.0, 0),   // trades = 0 in sample
             };
 
-            let val_net_ret = val_ret - (val_trades as f64 * slippage_drag_roe);
             let is_in_sample_invalid = trades == 0 || ret <= 0.0;
-            let is_oos_failed = val_trades > 0 && (val_net_ret < 0.0 || val_dd > 15.0);
+            let is_oos_failed = val_trades == 0 || val_ret < 0.0 || val_dd > 15.0;
 
             if is_in_sample_invalid || is_oos_failed {
                 continue;

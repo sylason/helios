@@ -12,11 +12,15 @@ use crate::models::models::Candle;
 use tracing::{debug, error};
 
 /// Danh sách các khung thời gian tiêu chuẩn cho chiến lược Helios V3 (Bao gồm cả nến vi mô 3m)
-pub const HELIOS_REQUIRED_TIMEFRAMES: [Timeframe; 5] = [
+pub const HELIOS_REQUIRED_TIMEFRAMES: [Timeframe; 9] = [
     Timeframe::T3m,
     Timeframe::T5m,
+    Timeframe::T10m, // 👈 Thêm
     Timeframe::T15m,
+    Timeframe::T30m, // 👈 Thêm
     Timeframe::T1h,
+    Timeframe::T2h,  // 👈 Thêm
+    Timeframe::T3h,  // 👈 Thêm
     Timeframe::T4h,
 ];
 
@@ -326,6 +330,7 @@ impl HeliosBridge {
         let mut low_vec = Vec::with_capacity(n);
         let mut close_vec = Vec::with_capacity(n);
         let mut vol_vec = Vec::with_capacity(n);
+        let mut quote_vol_vec = Vec::with_capacity(n);
 
         for c in candles {
             dt_vec.push(c.timestamp * 1_000_000);
@@ -334,6 +339,7 @@ impl HeliosBridge {
             low_vec.push(c.low);
             close_vec.push(c.close);
             vol_vec.push(c.volume);
+            quote_vol_vec.push(c.effective_quote_volume());
         }
 
         let s_dt = Series::new("Datetime".into(), dt_vec)
@@ -343,6 +349,7 @@ impl HeliosBridge {
         let s_low = Series::new("Low".into(), low_vec);
         let s_close = Series::new("Close".into(), close_vec);
         let s_vol = Series::new("Volume".into(), vol_vec);
+        let s_quote_vol = Series::new("QuoteVolume".into(), quote_vol_vec);
 
         DataFrame::new(vec![
             Column::from(s_dt),
@@ -351,6 +358,7 @@ impl HeliosBridge {
             Column::from(s_low),
             Column::from(s_close),
             Column::from(s_vol),
+            Column::from(s_quote_vol),
         ])
     }
 
@@ -360,13 +368,32 @@ impl HeliosBridge {
         candles: &[Candle],
         dna: &[f64],
     ) -> Result<ferro_trade::backtest::engine::BacktestResult, String> {
-        Self::diagnostic_backtest_with_config(candles, dna, &crate::models::config::EngineConfig::default())
+        Self::diagnostic_backtest_with_eval_and_config(candles, dna, None, &crate::models::config::EngineConfig::default())
+    }
+
+    /// [DIAGNOSTIC] Chạy lại pipeline Backtest với vị trí bắt đầu đánh giá eval_start_bar để cô lập 100% cửa sổ OOS
+    pub fn diagnostic_backtest_with_eval(
+        candles: &[Candle],
+        dna: &[f64],
+        eval_start_bar: Option<usize>,
+    ) -> Result<ferro_trade::backtest::engine::BacktestResult, String> {
+        Self::diagnostic_backtest_with_eval_and_config(candles, dna, eval_start_bar, &crate::models::config::EngineConfig::default())
     }
 
     /// [DIAGNOSTIC] Chạy lại toàn bộ pipeline Backtest với cấu hình EngineConfig động
     pub fn diagnostic_backtest_with_config(
         candles: &[Candle],
         dna: &[f64],
+        config: &crate::models::config::EngineConfig,
+    ) -> Result<ferro_trade::backtest::engine::BacktestResult, String> {
+        Self::diagnostic_backtest_with_eval_and_config(candles, dna, None, config)
+    }
+
+    /// [DIAGNOSTIC] Chạy lại toàn bộ pipeline Backtest với eval_start_bar và EngineConfig động
+    pub fn diagnostic_backtest_with_eval_and_config(
+        candles: &[Candle],
+        dna: &[f64],
+        eval_start_bar: Option<usize>,
         config: &crate::models::config::EngineConfig,
     ) -> Result<ferro_trade::backtest::engine::BacktestResult, String> {
         if candles.is_empty() {
@@ -385,7 +412,7 @@ impl HeliosBridge {
             .iter()
             .map(|tf| tf.as_polars_rule().to_string())
             .collect();
-        let backtest = ferro_trade::backtest::BacktestBuilder::new()
+        let mut builder = ferro_trade::backtest::BacktestBuilder::new()
             .data(df)
             .timeframes(&available_tfs)
             .cash(config.initial_cash)
@@ -400,9 +427,13 @@ impl HeliosBridge {
                 ferro_trade::stats::StatItem::ReturnPct,
                 ferro_trade::stats::StatItem::TotalTrades,
                 ferro_trade::stats::StatItem::MaxDrawdownPct,
-            ])
-            .build()
-            .map_err(|e| e.to_string())?;
+            ]);
+
+        if let Some(start) = eval_start_bar {
+            builder = builder.eval_start_bar(start);
+        }
+
+        let backtest = builder.build().map_err(|e| e.to_string())?;
 
         // 3. Tiền tính toán MTF bằng Prospector
         let mut prospector_config = ferro_trade::optimizer::prospector::ProspectorConfig::default();
@@ -417,5 +448,123 @@ impl HeliosBridge {
             .map_err(|e| e.to_string())?;
 
         Ok(result)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_helios_bridge_quote_volume_dataframe_mapping() {
+        let candles = vec![
+            Candle {
+                symbol: "BTCUSDT".to_string(),
+                timestamp: 1600000000,
+                open: 50000.0,
+                high: 50100.0,
+                low: 49900.0,
+                close: 50050.0,
+                volume: 2.5,
+                quote_volume: 125125.0, // 1:1 quote volume from Binance
+            },
+            Candle {
+                symbol: "BTCUSDT".to_string(),
+                timestamp: 1600000060,
+                open: 50050.0,
+                high: 50200.0,
+                low: 50000.0,
+                close: 50100.0,
+                volume: 1.0,
+                quote_volume: 0.0, // Historical candle without quote volume -> triggers fallback
+            },
+        ];
+
+        let df = HeliosBridge::candles_to_df(&candles).expect("Conversion to DataFrame failed");
+        assert_eq!(df.height(), 2);
+        assert_eq!(df.width(), 7);
+
+        // Check columns
+        let quote_vol_col = df.column("QuoteVolume").expect("QuoteVolume column must exist");
+        let qv_ca = quote_vol_col.f64().expect("QuoteVolume must be f64");
+        assert_eq!(qv_ca.get(0).unwrap(), 125125.0);
+        assert_eq!(qv_ca.get(1).unwrap(), 50100.0 * 1.0); // Fallback to close * volume
+
+        // Check RawDataCache integration
+        let raw_cache = ferro_trade::data::RawDataCache::new(&df).expect("RawDataCache::new failed");
+        assert!(raw_cache.custom_columns.contains_key("QuoteVolume"));
+        let custom_qv = raw_cache.custom_columns.get("QuoteVolume").unwrap();
+        assert_eq!(custom_qv[0], 125125.0);
+        assert_eq!(custom_qv[1], 50100.0);
+
+        // Check DataView integration
+        let data_view = ferro_trade::data::DataView::new(raw_cache);
+        data_view.set_len(2);
+        let slice = data_view.get_column_slice("QuoteVolume").expect("get_column_slice failed");
+        assert_eq!(slice.len(), 2);
+        assert_eq!(slice[0], 125125.0);
+        assert_eq!(slice[1], 50100.0);
+    }
+
+    #[test]
+    fn test_candle_quote_volume_parsing_rest_and_ws() {
+        // 1. Test deserialization of Candle with quote_volume
+        let json_with_qv = r#"{"symbol":"BTCUSDT","timestamp":1000,"open":100.0,"high":105.0,"low":95.0,"close":102.0,"volume":10.0,"quote_volume":1020.0}"#;
+        let c1: Candle = serde_json::from_str(json_with_qv).unwrap();
+        assert_eq!(c1.quote_volume, 1020.0);
+        assert_eq!(c1.effective_quote_volume(), 1020.0);
+
+        // 2. Test backward compatibility: deserialization without quote_volume defaults to 0.0
+        let json_without_qv = r#"{"symbol":"BTCUSDT","timestamp":1000,"open":100.0,"high":105.0,"low":95.0,"close":102.0,"volume":10.0}"#;
+        let c2: Candle = serde_json::from_str(json_without_qv).unwrap();
+        assert_eq!(c2.quote_volume, 0.0);
+        assert_eq!(c2.effective_quote_volume(), 1020.0); // Fallback to 102.0 * 10.0
+
+        // 3. Test Binance WS Kline event JSON extraction
+        let ws_kline_json = r#"{
+            "e": "kline",
+            "E": 1638747660000,
+            "s": "ETHUSDT",
+            "k": {
+                "t": 1638747600000,
+                "T": 1638747659999,
+                "s": "ETHUSDT",
+                "i": "1m",
+                "o": "4000.0",
+                "c": "4010.0",
+                "h": "4020.0",
+                "l": "3990.0",
+                "v": "25.0",
+                "q": "100250.75",
+                "x": true
+            }
+        }"#;
+        let v: serde_json::Value = serde_json::from_str(ws_kline_json).unwrap();
+        let k = &v["k"];
+        let parse_f64 = |val: &serde_json::Value| -> f64 {
+            val.as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0)
+        };
+        let qv = parse_f64(&k["q"]);
+        assert_eq!(qv, 100250.75);
+
+        // 4. Test Binance REST array parsing
+        let rest_kline_json = r#"[
+            1499040000000,
+            "50000.00",
+            "50200.00",
+            "49800.00",
+            "50150.00",
+            "12.345",
+            1499040059999,
+            "618850.50",
+            100,
+            "6.0",
+            "300900.0",
+            "0"
+        ]"#;
+        let arr: Vec<serde_json::Value> = serde_json::from_str(rest_kline_json).unwrap();
+        let rest_qv = arr[7].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap();
+        assert_eq!(rest_qv, 618850.50);
     }
 }

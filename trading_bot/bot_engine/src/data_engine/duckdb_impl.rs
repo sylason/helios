@@ -30,6 +30,7 @@ impl DuckDbStore {
                 low DOUBLE,
                 close DOUBLE,
                 volume DOUBLE,
+                quote_volume DOUBLE DEFAULT 0.0,
                 PRIMARY KEY (symbol, open_time)
             )",
             [],
@@ -64,9 +65,9 @@ impl CandleRepository for DuckDbStore {
     async fn save_candle(&self, c: Candle) -> Result<(), BotError> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume],
+            "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume, c.effective_quote_volume()],
         ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
         
         debug!("💾 [{}] Candle {} saved to DB.", c.symbol, c.timestamp);
@@ -80,9 +81,9 @@ impl CandleRepository for DuckDbStore {
         
         for c in candles {
             tx.execute(
-                "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
-                params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume],
+                "INSERT OR REPLACE INTO candles_1m (symbol, open_time, open, high, low, close, volume, quote_volume) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params![c.symbol, c.timestamp, c.open, c.high, c.low, c.close, c.volume, c.effective_quote_volume()],
             ).map_err(|e| BotError::DatabaseError(e.to_string()))?;
         }
         
@@ -94,7 +95,7 @@ impl CandleRepository for DuckDbStore {
     async fn get_candles_by_range(&self, symbol: &str, start: i64, end: i64) -> Result<Vec<Candle>, BotError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT symbol, open_time, open, high, low, close, volume 
+            "SELECT symbol, open_time, open, high, low, close, volume, quote_volume 
              FROM candles_1m 
              WHERE symbol = ? AND open_time >= ? AND open_time <= ?
              ORDER BY open_time ASC"
@@ -109,6 +110,7 @@ impl CandleRepository for DuckDbStore {
                 low: row.get(4)?,
                 close: row.get(5)?,
                 volume: row.get(6)?,
+                quote_volume: row.get(7)?,
             })
         }).map_err(|e| BotError::DatabaseError(e.to_string()))?;
 
@@ -123,7 +125,7 @@ impl CandleRepository for DuckDbStore {
     async fn get_latest_candle(&self, symbol: &str) -> Result<Option<Candle>, BotError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT symbol, open_time, open, high, low, close, volume 
+            "SELECT symbol, open_time, open, high, low, close, volume, quote_volume 
              FROM candles_1m 
              WHERE symbol = ? 
              ORDER BY open_time DESC LIMIT 1"
@@ -141,6 +143,7 @@ impl CandleRepository for DuckDbStore {
                 low: row.get(4)?,
                 close: row.get(5)?,
                 volume: row.get(6)?,
+                quote_volume: row.get(7)?,
             }))
         } else {
             Ok(None)
@@ -151,7 +154,7 @@ impl CandleRepository for DuckDbStore {
     async fn get_oldest_candle(&self, symbol: &str) -> Result<Option<Candle>, BotError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT symbol, open_time, open, high, low, close, volume 
+            "SELECT symbol, open_time, open, high, low, close, volume, quote_volume 
              FROM candles_1m 
              WHERE symbol = ? 
              ORDER BY open_time ASC LIMIT 1"
@@ -169,6 +172,7 @@ impl CandleRepository for DuckDbStore {
                 low: row.get(4)?,
                 close: row.get(5)?,
                 volume: row.get(6)?,
+                quote_volume: row.get(7)?,
             }))
         } else {
             Ok(None)
@@ -274,6 +278,7 @@ mod tests {
             low: 0.5,
             close: 1.5,
             volume: 100.0,
+            quote_volume: 150.0,
         };
 
         let c2 = Candle {
@@ -284,6 +289,7 @@ mod tests {
             low: 1.0,
             close: 2.0,
             volume: 200.0,
+            quote_volume: 400.0,
         };
 
         // 2. Test Insert
@@ -293,6 +299,7 @@ mod tests {
         // 3. Test Get Latest
         let latest = db.get_latest_candle("BTCUSDT").await.unwrap().unwrap();
         assert_eq!(latest.timestamp, 2000);
+        assert_eq!(latest.quote_volume, 400.0);
 
         // 4. Test Get Range
         let range = db.get_candles_by_range("BTCUSDT", 1000, 2000).await.unwrap();

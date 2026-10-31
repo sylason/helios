@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 /// Cấu trúc nến 1 phút cơ bản
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Candle {
     pub symbol: String,
     pub timestamp: i64,
@@ -12,6 +12,22 @@ pub struct Candle {
     pub low: f64,
     pub close: f64,
     pub volume: f64,
+    #[serde(default)]
+    pub quote_volume: f64,
+}
+
+impl Candle {
+    /// Tính toán giá trị thanh khoản danh nghĩa hiệu dụng (Quote Asset Volume - USDT).
+    /// Nếu sàn Binance đã cấp quote_volume gốc (> 0.0) thì dùng trực tiếp 1:1.
+    /// Nếu nến lịch sử từ CSV cũ hoặc test mock có quote_volume == 0.0, tự động fallback về close * volume.
+    #[inline]
+    pub fn effective_quote_volume(&self) -> f64 {
+        if self.quote_volume > 0.0 {
+            self.quote_volume
+        } else {
+            self.close * self.volume
+        }
+    }
 }
 
 /// Các loại hành động giao dịch
@@ -135,6 +151,7 @@ mod tests {
             low: 100.0,
             close: 100.0,
             volume: 10.0,
+            quote_volume: 1000.0,
         };
 
         // 1. Khởi tạo mảng nến có khoảng trống (Gap) ở giữa (Mất mạng phút 2, 3)
@@ -202,6 +219,7 @@ mod tests {
                 low: 95.0,
                 close: 102.0,
                 volume: 50.0,
+                quote_volume: 5100.0,
             });
         }
 

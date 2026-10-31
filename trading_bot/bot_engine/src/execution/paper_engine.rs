@@ -219,6 +219,7 @@ mod tests {
             low: close,
             close,
             volume: 1.0,
+            quote_volume: close * 1.0,
         }
     }
 
