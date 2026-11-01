@@ -405,6 +405,50 @@ impl RiskManager {
         )
     }
 
+    /// 🛡️ [TODO-STAB-01.B]: Tính toán sàn ROE bảo vệ lợi nhuận đơn điệu (Dynamic Fee-Anchored Ladder).
+    /// Chuẩn hóa 100% theo ma sát phí 2 chiều và đòn bẩy tài khoản (Friction ROE).
+    /// Hàm thuần khiết (Pure Function), không phụ thuộc vào trạng thái ngoài, đảm bảo tính tất định và dễ kiểm thử.
+    pub fn calculate_tiered_profit_floor_roe(
+        peak_roe: f64,
+        friction_roe: f64,
+        net_be_roe: f64,
+        base_be_roe_trigger: f64,
+        mega_trend_min_lock_roe: f64,
+        mega_trend_lock_ratio: f64,
+        is_mega_trend: bool,
+    ) -> f64 {
+        if friction_roe <= 0.0 || friction_roe.is_nan() || peak_roe <= 0.0 || peak_roe.is_nan() {
+            return 0.0;
+        }
+
+        // Nấc 0 (True Break-Even): Kích hoạt khi lãi đỉnh MFE >= 2.5 * Friction_ROE
+        let tier0_hurdle = (2.5 * friction_roe).max(net_be_roe).max(base_be_roe_trigger);
+        // Nấc 1 (Survival Lock): Vượt chi phí 6% ROE (Cứu Lệnh #008, #009)
+        let tier1_hurdle = (friction_roe + 0.06).max(tier0_hurdle);
+        // Nấc 2 (Half-Back Lock): Vượt chi phí 10% ROE
+        let tier2_hurdle = (friction_roe + 0.10).max(tier1_hurdle);
+        // Nấc 3 (Trend Lock): Vượt chi phí 18% ROE
+        let tier3_hurdle = (friction_roe + 0.18).max(tier2_hurdle);
+        // Nấc 4 (Mega Trend): Siêu sóng
+        let mega_min = if mega_trend_min_lock_roe > 0.0 { mega_trend_min_lock_roe } else { 0.35 };
+        let tier4_hurdle = mega_min.max(tier3_hurdle * 1.25).max(0.35);
+        let mega_ratio = if mega_trend_lock_ratio > 0.0 { mega_trend_lock_ratio.min(0.70) } else { 0.50 };
+
+        if peak_roe >= tier4_hurdle || is_mega_trend {
+            (peak_roe * mega_ratio).max(net_be_roe)
+        } else if peak_roe >= tier3_hurdle {
+            (peak_roe * 0.60).max(net_be_roe)
+        } else if peak_roe >= tier2_hurdle {
+            (peak_roe * 0.50).max(net_be_roe)
+        } else if peak_roe >= tier1_hurdle {
+            (friction_roe + 0.03).max(net_be_roe)
+        } else if peak_roe >= tier0_hurdle {
+            net_be_roe
+        } else {
+            0.0
+        }
+    }
+
     /// Quản lý Trailing Stop cho tất cả các lệnh đang mở (Adaptive Loose Trailing & Stagnant Exit)
     pub fn manage_trailing_stop(
         config: &HeliosConfigV3,
@@ -640,100 +684,11 @@ impl RiskManager {
                 .max(net_be_gain);
 
             // 5. Kích hoạt theo Chốt Chặn Kép: Vượt sàn kinh tế DNA VÀ vượt đệm biến động Regime / POC
-            let is_be_triggered = peak_dist >= required_price_gain && peak_roe >= be_trigger_roe;
-
-            // =========================================================================
-            // 🛡️ TODO-AUDIT-NEW-48: MÁY TRẠNG THÁI HẬU KÍCH HỎA (POST-TRIGGER FSM) CHO MOMENTUM_IGN
-            // =========================================================================
-            // Nến t+1 ngay sau cú bứt phá xung lực (bars_held == 1) là chốt chặn vi cấu trúc sinh tử:
-            // 1. Nhánh Bứt Phá Xịt (Failed Breakout): Đóng nến thủng chiến lũy Open nến kích hoạt -> Thoát ngay cắt lỗ vi mô!
-            // 2. Nhánh Tiếp Diễn (Follow-Through): Tạo đỉnh cao hơn nến t & lãi đỉnh vượt phí sàn -> Kéo ngay SL lên hòa vốn sau phí!
-            let mut is_momentum_post_trigger_be = false;
-            if tag_str == "MOMENTUM_IGN" && bars_held == 1 {
-                let prev_open = if entry_bar < tick.opens().len() { tick.opens()[entry_bar] } else { trade.entry_price };
-                let prev_high = if entry_bar < tick.highs().len() { tick.highs()[entry_bar] } else { trade.entry_price };
-                let prev_low = if entry_bar < tick.lows().len() { tick.lows()[entry_bar] } else { trade.entry_price };
-
-                if trade.is_long() {
-                    if current_close < prev_open {
-                        if _debug_mode {
-                            tracing::info!(
-                                "🚨 [MOMENTUM FADE EXIT] Bar: {} | Trade #{:?} Long | Close: {:.2} < Open_t: {:.2} -> Failed Breakout Immediate Exit",
-                                i, trade.id, current_close, prev_open
-                            );
-                        }
-                        tick.close(None);
-                        continue;
-                    } else if peak_val > prev_high && peak_dist >= trade.entry_price * fee_buffer_pct {
-                        is_momentum_post_trigger_be = true;
-                    }
-                } else {
-                    if current_close > prev_open {
-                        if _debug_mode {
-                            tracing::info!(
-                                "🚨 [MOMENTUM FADE EXIT] Bar: {} | Trade #{:?} Short | Close: {:.2} > Open_t: {:.2} -> Failed Breakdown Immediate Exit",
-                                i, trade.id, current_close, prev_open
-                            );
-                        }
-                        tick.close(None);
-                        continue;
-                    } else if peak_val < prev_low && peak_dist >= trade.entry_price * fee_buffer_pct {
-                        is_momentum_post_trigger_be = true;
-                    }
-                }
-            }
+            let _is_be_triggered = peak_dist >= required_price_gain && peak_roe >= be_trigger_roe;
 
             // 1. Kiểm tra chế độ Siêu Sóng Mega Trend
             let mega_trend_trigger_pnl = risk_cfg.mega_trend_pnl_trigger * trade.entry_price * trade.size.abs();
             let is_mega_trend = current_pnl > 0.0 && (current_pnl >= mega_trend_trigger_pnl || current_roe >= 0.50);
-
-            // =========================================================================
-            // 🚀 [FLAW-TSL.1: HYBRID TTP - NHÁNH B: PEAK-CALLBACK TRAILING TAKE PROFIT]
-            // =========================================================================
-            // 🚀 [TODO-AUDIT-NEW-188: UNIFIED DUAL-LAYER TTP ENGINE]
-            // Áp dụng cơ chế bám đỉnh chốt lời (Trailing Take Profit) cho TẤT CẢ các Playbook (kể cả REVERSAL và RANGE_OSC).
-            // Ngay cả khi lệnh có Static Limit Anchor TP0 trên sàn, TTP trong RAM vẫn bảo vệ khóa lợi nhuận nếu giá tạo đỉnh rồi quay đầu.
-            // 🛡️ TODO-SEM-03: Tách độc lập TTP khỏi Break-Even. TTP chỉ kích hoạt khi peak_roe >= ttp_act_roe (>= 15% ROE).
-            let is_ttp_eligible = true;
-            if is_ttp_eligible {
-                let ttp_act_roe = if risk_cfg.ttp_activation_roe > 0.0 { risk_cfg.ttp_activation_roe } else { 0.15 };
-                let base_ttp_cb = if risk_cfg.ttp_callback_atr > 0.0 { risk_cfg.ttp_callback_atr } else { 0.80 };
-                // 🛡️ Chống xung đột TTP vs Mega Trend: Khi sóng lớn, nới Callback ATR đồng bộ với tsl_atr_loose
-                let ttp_cb_atr = if is_mega_trend { base_ttp_cb.max(risk_cfg.tsl_atr_loose) } else { base_ttp_cb };
-                let min_gain_pct = if risk_cfg.dynamic_tp_min_gain_pct > 0.0 { risk_cfg.dynamic_tp_min_gain_pct } else { 0.002 };
-                let min_exit_gain_pct = min_gain_pct.max(fee_buffer_pct);
-
-                let is_ttp_active = peak_roe >= ttp_act_roe;
-                if is_ttp_active {
-                    if trade.is_long() {
-                        let ttp_trigger_price = peak_val - (ttp_cb_atr * current_atr);
-                        let min_exit_price = trade.entry_price * (1.0 + min_exit_gain_pct);
-                        if current_close <= ttp_trigger_price && current_close >= min_exit_price {
-                            if _debug_mode {
-                                tracing::info!(
-                                    "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Long | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
-                                    i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
-                                );
-                            }
-                            tick.close(None);
-                            continue;
-                        }
-                    } else {
-                        let ttp_trigger_price = peak_val + (ttp_cb_atr * current_atr);
-                        let max_exit_price = trade.entry_price * (1.0 - min_exit_gain_pct);
-                        if current_close >= ttp_trigger_price && current_close <= max_exit_price {
-                            if _debug_mode {
-                                tracing::info!(
-                                    "🏆 [TTP TRIGGERED EXIT] Bar: {} | Trade #{:?} ({}) Short | Peak: {:.2} (ROE: {:.2}%) | Trigger: {:.2} | Close: {:.2} -> Locked profit via Trailing TP",
-                                    i, trade.id, tag_str, peak_val, peak_roe * 100.0, ttp_trigger_price, current_close
-                                );
-                            }
-                            tick.close(None);
-                            continue;
-                        }
-                    }
-                }
-            }
 
             // 2. Tính toán hệ số nhân Multiplier hiện tại
             let mut current_multiplier = if is_mega_trend {
@@ -775,34 +730,20 @@ impl RiskManager {
             };
 
             // =========================================================================
-            // 🛡️ [TIERED PROFIT RATCHET: MONOTONIC DUAL-CRITERION PROFIT RETENTION]
+            // 🛡️ [TODO-STAB-01.B: TIERED PROFIT RATCHET - DYNAMIC FEE-ANCHORED LADDER]
             // =========================================================================
-            if is_be_triggered || is_mega_trend || is_momentum_post_trigger_be {
-                // 🛡️ [TODO-AUDIT-NEW-166]: Định nghĩa 4 tầng bậc đơn điệu tuyệt đối (Chống 100% Tier Inversion)
-                let tier1_hurdle = be_trigger_roe;
-                let tier2_hurdle = tier1_hurdle.max(0.10);
-                let tier3_hurdle = tier2_hurdle.max(0.15);
-                let mega_min_roe = if risk_cfg.mega_trend_min_lock_roe > 0.0 { risk_cfg.mega_trend_min_lock_roe } else { 0.15 };
-                let tier4_hurdle = mega_min_roe.max(tier3_hurdle * 1.25).max(0.20);
-                let mega_ratio = if risk_cfg.mega_trend_lock_ratio > 0.0 { risk_cfg.mega_trend_lock_ratio.min(0.70) } else { 0.50 };
+            // Phá bỏ bẫy Cổng Chờ Kép `is_be_triggered`. Khối Bậc Thang hoạt động độc lập theo High Watermark `peak_roe`.
+            let locked_roe_floor = Self::calculate_tiered_profit_floor_roe(
+                peak_roe,
+                friction_roe,
+                net_be_roe,
+                be_trigger_roe,
+                risk_cfg.mega_trend_min_lock_roe,
+                risk_cfg.mega_trend_lock_ratio,
+                is_mega_trend,
+            );
 
-                // Xác định tỷ lệ ROE sàn được bảo vệ đơn điệu theo từng tầng bậc
-                let locked_roe_floor = if peak_roe >= tier4_hurdle || is_mega_trend {
-                    // Nấc 4: Bảo vệ siêu sóng Mega Trend (Tối đa 70% lợi nhuận)
-                    (peak_roe * mega_ratio).max(net_be_roe)
-                } else if peak_roe >= tier3_hurdle {
-                    // Nấc 3: Khóa 60% lợi nhuận (Tối thiểu +9.0% ROE tại mốc 15% ROE)
-                    (peak_roe * 0.60).max(net_be_roe)
-                } else if peak_roe >= tier2_hurdle {
-                    // Nấc 2: Khóa 50% lợi nhuận Half-Back (Tối thiểu +5.0% ROE tại mốc 10% ROE)
-                    (peak_roe * 0.50).max(net_be_roe)
-                } else {
-                    // Nấc 1: Khóa bảo vệ hòa vốn sau phí (Break-Even)
-                    net_be_roe
-                };
-
-                // Chuyển đổi ROE sàn thành mức giá dừng lỗ cứng (Độc lập với biến động phình to của ATR)
-                // Đã loại bỏ dynamic_floor = peak_val - current_atr * be_buffer_mult để tránh xung đột với ATR TSL
+            if locked_roe_floor > 0.0 {
                 if trade.is_long() {
                     let min_be_price = trade.entry_price * (1.0 + (locked_roe_floor / leverage));
                     calculated_sl = calculated_sl.max(min_be_price);
@@ -814,13 +755,8 @@ impl RiskManager {
 
             // [ENHANCEMENT 3: MONOTONIC RATCHET GUARD]
             // Bảo toàn Stop Loss 1 chiều tuyệt đối: SL chỉ được phép dời theo hướng bảo vệ vốn (Tiến, cấm Lùi).
-            // 🛡️ TODO-SEM-03: Bổ sung `|| is_be_triggered`. Khi vị thế đã thỏa mãn BE từ đỉnh High Watermark,
-            // SL hòa vốn mới (min_be) vẫn được gửi sang Broker/Sàn ngay cả khi nến hiện tại đang retest quanh Entry (current_pnl <= 0.0).
-            // 🛡️ TODO-AUDIT-NEW-48: Cho phép đồng bộ SL hòa vốn khi nến t+1 thỏa mãn Follow-Through của MOMENTUM_IGN.
-            // 🛡️ TODO-AUDIT-NEW-188 & 196: Toàn bộ Playbooks (bao gồm REVERSAL & RANGE_OSC) bảo toàn 100%
-            // Static Limit Anchor TP0 (trade.tp_price) kết hợp Unified Dual-Layer TTP trong RAM.
-            if current_pnl > 0.0 || is_be_triggered || is_mega_trend || is_momentum_post_trigger_be {
-                // KHI CÓ LÃI DANH NGHĨA HOẶC ĐÃ THỎA MÃN BREAK-EVEN / MEGA TREND: Trailing theo đỉnh High Watermark & Dynamic BE & Mega Trend
+            // Kích hoạt cập nhật SL ngay khi có lãi danh nghĩa HOẶC Bậc Thang đã khóa sàn lợi nhuận HOẶC Mega Trend.
+            if current_pnl > 0.0 || locked_roe_floor > 0.0 || is_mega_trend {
                 let sl_changed = if trade.is_long() {
                     calculated_sl > trade.sl_price.unwrap_or(f64::NEG_INFINITY)
                 } else {
@@ -2163,11 +2099,9 @@ mod tests {
         sensors.atr_sl = std::sync::Arc::new(vec![10.0; len]);
 
         RiskManager::manage_trailing_stop(&config, &matrix, &mut tick_1, &sensors, false);
-        assert!(!actions_1.is_empty(), "Kịch bản 1: Bứt phá xịt nến t+1 thủng Open_t PHẢI phát sinh lệnh đóng vị thế!");
-        match &actions_1[0] {
-            Action::ClosePosition { .. } | Action::CloseLongs { .. } => {},
-            other => panic!("Kỳ vọng Action::ClosePosition hoặc CloseLongs, thực tế: {:?}", other),
-        }
+        // 🛡️ [TODO-STAB-01.B]: Loại bỏ Price Action đếm nến vi mô t+1 - KHÔNG tự ý cắt lỗ non bằng Market Order!
+        let has_early_close = actions_1.iter().any(|a| matches!(a, Action::ClosePosition { .. } | Action::CloseLongs { .. }));
+        assert!(!has_early_close, "Kịch bản 1: Phải để Trailing SL và Hard SL bảo vệ vị thế, cấm cắt lỗ non t+1!");
 
         // KỊCH BẢN 2: Tiếp diễn thuận lợi (Follow-Through)
         // Nến t+1 (i = 6) tạo đỉnh cao hơn (High = 2030 > High_t 2020) và đóng nến 2025 -> PHẢI DỜI SL LÊN HÒA VỐN!
@@ -2451,5 +2385,259 @@ mod tests {
             }
         }
         assert!(found_update, "Phải tìm thấy Action::UpdateTradeSlTp cho trade 101!");
+    }
+
+    #[test]
+    fn test_calculate_tiered_profit_floor_sub_hurdle_returns_zero() {
+        // 🛡️ [TODO-STAB-01.B]: Lãi đỉnh dưới Tier 0 (< 2.5 * Friction_ROE) phải trả về 0.0 để ATR Trailing tự do thở
+        let friction_roe = 0.020; // 2.0% ROE
+        let net_be_roe = 0.026;   // 2.6% ROE
+        let peak_roe = 0.035;     // 3.5% ROE < 5.0% Tier 0
+        let floor = RiskManager::calculate_tiered_profit_floor_roe(
+            peak_roe, friction_roe, net_be_roe, 0.0, 0.35, 0.70, false,
+        );
+        assert_eq!(floor, 0.0, "Dưới Tier 0 hurdle bắt buộc trả về 0.0!");
+    }
+
+    #[test]
+    fn test_calculate_tiered_profit_floor_tier0_true_break_even() {
+        // 🛡️ [TODO-STAB-01.B]: Lãi đỉnh đạt 6.0% ROE (>= 5.0% Tier 0) khóa đúng sàn hòa vốn sau phí net_be_roe
+        let friction_roe = 0.020;
+        let net_be_roe = 0.026;
+        let peak_roe = 0.060;
+        let floor = RiskManager::calculate_tiered_profit_floor_roe(
+            peak_roe, friction_roe, net_be_roe, 0.0, 0.35, 0.70, false,
+        );
+        assert_eq!(floor, net_be_roe, "Nấc 0 True Break-Even phải khóa đúng net_be_roe!");
+    }
+
+    #[test]
+    fn test_calculate_tiered_profit_floor_tier1_survival_rescues_trade_008_009() {
+        // 🛡️ [TODO-STAB-01.B]: Mô phỏng Lệnh #009 (Peak +10.1% ROE) -> Cứu sống bằng Survival Lock +5.0% ROE
+        let friction_roe = 0.020;
+        let net_be_roe = 0.026;
+        let peak_roe = 0.101; // 10.1% ROE
+        let floor = RiskManager::calculate_tiered_profit_floor_roe(
+            peak_roe, friction_roe, net_be_roe, 0.0, 0.35, 0.70, false,
+        );
+        let expected_floor = friction_roe + 0.030; // 5.0% ROE
+        assert_eq!(floor, expected_floor, "Lệnh #009 phải được khóa sàn đúng Survival Lock 5.0% ROE!");
+        let net_profit_roe = floor - friction_roe;
+        assert!(net_profit_roe >= 0.030, "Lãi ròng sau phí thực nhận bắt buộc >= +3.0% ROE!");
+    }
+
+    #[test]
+    fn test_calculate_tiered_profit_floor_tier2_half_back() {
+        // 🛡️ [TODO-STAB-01.B]: Mô phỏng Lệnh #008 (Peak +12.4% ROE) -> Khóa Half-Back 50% đỉnh (+6.2% ROE)
+        let friction_roe = 0.020;
+        let net_be_roe = 0.026;
+        let peak_roe = 0.124; // 12.4% ROE >= 12.0% Tier 2
+        let floor = RiskManager::calculate_tiered_profit_floor_roe(
+            peak_roe, friction_roe, net_be_roe, 0.0, 0.35, 0.70, false,
+        );
+        let expected_floor = peak_roe * 0.50; // 6.2% ROE
+        assert!((floor - expected_floor).abs() < 1e-6, "Lệnh #008 phải được khóa sàn Half-Back 50% đỉnh!");
+        let net_profit_roe = floor - friction_roe;
+        assert!(net_profit_roe >= 0.040, "Lãi ròng sau phí thực nhận bắt buộc >= +4.0% ROE!");
+    }
+
+    #[test]
+    fn test_calculate_tiered_profit_floor_tier3_trend_lock() {
+        // 🛡️ [TODO-STAB-01.B]: Sóng trung bình 22.0% ROE (>= 20.0% Tier 3) -> Khóa 60% đỉnh (+13.2% ROE)
+        let friction_roe = 0.020;
+        let net_be_roe = 0.026;
+        let peak_roe = 0.220;
+        let floor = RiskManager::calculate_tiered_profit_floor_roe(
+            peak_roe, friction_roe, net_be_roe, 0.0, 0.35, 0.70, false,
+        );
+        let expected_floor = peak_roe * 0.60; // 13.2% ROE
+        assert!((floor - expected_floor).abs() < 1e-6, "Sóng Trend phải được khóa 60% đỉnh!");
+    }
+
+    #[test]
+    fn test_calculate_tiered_profit_floor_tier4_mega_trend() {
+        // 🛡️ [TODO-STAB-01.B]: Siêu sóng Mega Trend 40.0% ROE -> Khóa 70% đỉnh (+28.0% ROE)
+        let friction_roe = 0.020;
+        let net_be_roe = 0.026;
+        let peak_roe = 0.400;
+        let floor = RiskManager::calculate_tiered_profit_floor_roe(
+            peak_roe, friction_roe, net_be_roe, 0.0, 0.35, 0.70, false,
+        );
+        let expected_floor = peak_roe * 0.70; // 28.0% ROE
+        assert!((floor - expected_floor).abs() < 1e-6, "Siêu sóng Mega Trend phải khóa 70% đỉnh!");
+    }
+
+    #[test]
+    fn test_calculate_tiered_profit_floor_strict_monotonicity() {
+        // 🛡️ [TODO-STAB-01.B]: Quét dải liên tục 0% -> 150% ROE, kiểm chứng tính đơn điệu toán học tuyệt đối
+        let friction_roe = 0.020;
+        let net_be_roe = 0.026;
+        let mut prev_floor = 0.0;
+        let steps = 1500;
+        for s in 0..=steps {
+            let peak_roe = s as f64 * 0.001; // 0.000 -> 1.500
+            let floor = RiskManager::calculate_tiered_profit_floor_roe(
+                peak_roe, friction_roe, net_be_roe, 0.0, 0.35, 0.70, false,
+            );
+            assert!(
+                floor >= prev_floor,
+                "LỖI PHẢN ĐƠN ĐIỆU (Tier Inversion)! Tại peak_roe {:.3}, floor {:.4} < prev_floor {:.4}",
+                peak_roe, floor, prev_floor
+            );
+            prev_floor = floor;
+        }
+    }
+
+    #[test]
+    fn test_manage_trailing_stop_rescues_trade_008() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use ferro_trade::broker::Trade;
+        use ferro_trade::broker::actions::Action;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        // 🛡️ [TODO-STAB-01.B]: Kiểm chứng tích hợp qua manage_trailing_stop giải cứu Lệnh #008
+        // Entry 2348.50, Peak 2363.0 (+12.35% ROE), Nến hiện tại pullback về 2350.0 (sát entry)
+        let len = 50;
+        let entry_bar = 10;
+        let i = 45;
+        let mut closes = vec![2348.50; len];
+        closes[i] = 2350.0; // Nến hiện tại đang sụt giảm về sát entry
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(closes.clone()),
+            high: std::sync::Arc::new(vec![2363.0; len]),
+            low: std::sync::Arc::new(closes.clone()),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+
+        let mut trade = Trade::new(8, 1.0, 2348.50, entry_bar, None, Some("TREND_PB".to_string()));
+        trade.sl_price = Some(2328.0); // Hard SL âm -8.6%
+        trade.highest_favorable_price = 2363.0; // Đỉnh đạt +12.35% ROE
+        trade.peak_bar = 30;
+        let trades = vec![trade];
+
+        let mut tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.risk_management.risk_base.leverage = 20.0;
+        config.risk_management.risk_base.taker_fee_rate = 0.0004;
+        config.risk_management.risk_base.slippage_allowance_pct = 0.0002;
+        // Đặt ATR rất lớn để ATR Trailing không thể dời SL lên dương (mục đích stress-test Bậc Thang)
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = std::sync::Arc::new(vec![50.0; len]);
+        let matrix = MarketMatrixV3::default();
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick, &sensors, false);
+
+        assert!(!actions.is_empty(), "Phải phát hành Action::UpdateTradeSlTp để bảo vệ Lệnh #008!");
+        let mut found_update = false;
+        for action in &actions {
+            if let Action::UpdateTradeSlTp { trade_id, new_sl_price, .. } = action {
+                if *trade_id == 8 {
+                    found_update = true;
+                    let new_sl = new_sl_price.expect("Phải có SL mới");
+                    assert!(
+                        new_sl >= 2355.70,
+                        "SL mới ({:.2}) phải >= 2355.70 để khóa Half-Back 50% đỉnh (+4.0% ROE lãi ròng sau phí)!",
+                        new_sl
+                    );
+                }
+            }
+        }
+        assert!(found_update, "Phải tìm thấy UpdateTradeSlTp cho Trade #8!");
+    }
+
+    #[test]
+    fn test_manage_trailing_stop_rescues_trade_009() {
+        use ferro_trade::data::{RawDataCache, DataView};
+        use ferro_trade::backtest::manager::IndicatorManager;
+        use ferro_trade::broker::position::Position;
+        use ferro_trade::broker::Trade;
+        use ferro_trade::broker::actions::Action;
+        use smallvec::SmallVec;
+        use std::collections::HashMap;
+
+        // 🛡️ [TODO-STAB-01.B]: Kiểm chứng tích hợp qua manage_trailing_stop giải cứu Lệnh #009
+        // Entry 2348.50, Peak 2360.30 (+10.05% ROE), Nến hiện tại pullback về 2350.0
+        let len = 50;
+        let entry_bar = 10;
+        let i = 45;
+        let mut closes = vec![2348.50; len];
+        closes[i] = 2350.0;
+
+        let raw_cache = RawDataCache {
+            datetime: std::sync::Arc::new(vec![0i64; len]),
+            open: std::sync::Arc::new(closes.clone()),
+            high: std::sync::Arc::new(vec![2360.30; len]),
+            low: std::sync::Arc::new(closes.clone()),
+            close: std::sync::Arc::new(closes),
+            volume: std::sync::Arc::new(vec![1000.0; len]),
+            custom_columns: HashMap::new(),
+        };
+        let data_view = DataView::new(raw_cache);
+        let indicator_manager = IndicatorManager::new();
+        let mut actions = SmallVec::new();
+
+        let mut trade = Trade::new(9, 1.0, 2348.50, entry_bar, None, Some("TREND_PB".to_string()));
+        trade.sl_price = Some(2328.0);
+        trade.highest_favorable_price = 2360.30; // Đỉnh đạt +10.05% ROE
+        trade.peak_bar = 30;
+        let trades = vec![trade];
+
+        let mut tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &data_view,
+            indicator_manager: &indicator_manager,
+            trades: &trades,
+            last_closed_trade: None,
+            actions: &mut actions,
+            position: Position::default(),
+        };
+
+        let mut config = HeliosConfigV3::default();
+        config.risk_management.risk_base.leverage = 20.0;
+        config.risk_management.risk_base.taker_fee_rate = 0.0004;
+        config.risk_management.risk_base.slippage_allowance_pct = 0.0002;
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = std::sync::Arc::new(vec![50.0; len]);
+        let matrix = MarketMatrixV3::default();
+
+        RiskManager::manage_trailing_stop(&config, &matrix, &mut tick, &sensors, false);
+
+        assert!(!actions.is_empty(), "Phải phát hành Action::UpdateTradeSlTp để bảo vệ Lệnh #009!");
+        let mut found_update = false;
+        for action in &actions {
+            if let Action::UpdateTradeSlTp { trade_id, new_sl_price, .. } = action {
+                if *trade_id == 9 {
+                    found_update = true;
+                    let new_sl = new_sl_price.expect("Phải có SL mới");
+                    assert!(
+                        new_sl >= 2354.30,
+                        "SL mới ({:.2}) phải >= 2354.30 để khóa Survival Lock (+3.0% ROE lãi ròng sau phí)!",
+                        new_sl
+                    );
+                }
+            }
+        }
+        assert!(found_update, "Phải tìm thấy UpdateTradeSlTp cho Trade #9!");
     }
 }

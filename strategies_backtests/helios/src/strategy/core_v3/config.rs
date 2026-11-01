@@ -681,11 +681,15 @@ pub struct ArbiterConfig {
     #[serde(default = "default_chaos_veto_threshold")]
     pub chaos_veto_threshold: f64,
 
-    /// 📉 BIÊN LỢI NHUẬN RÒNG VI MÔ TỐI THIỂU (DNA Net Alpha) VƯỢT TRÊN SÀN CHI PHÍ SINH TỒN (0.0002 -> 0.0300, Step 0.0002 -> 150 nấc)
+    /// 📉 BIÊN LỢI NHUẬN RÒNG VI MÔ TỐI THIỂU (DNA Net Alpha) VƯỢT TRÊN SÀN CHI PHÍ SINH TỒN (0.0002 -> 0.0030, Step 0.0001 -> 28 nấc)
     /// Effective_Min_NATR = 2 * taker_fee_rate + slippage_allowance_pct + min_natr_threshold
-    /// 🛡️ TODO-AUDIT-NEW-61 (H-CFG-06): Phủ trọn phổ biến động từ Forex (~0.02%) đến Memecoin (~3.00%).
-    /// Sàn chi phí thực tế (roundtrip_fee_pct) trong gatekeeper.rs luôn là chốt chặn độc lập, không bao giờ bị thủng.
-    #[dna(min = 0.0002, max = 0.0300, step = 0.0002)]
+    /// 🛡️ Kẹp trần an toàn chống bẫy GA Overfitting (lạm dụng Gatekeeper làm phanh lách luật khóa 74%-96% thời gian).
+    /// Dải [0.0002, 0.0030] (tương đương Alpha 0.02% -> 0.30%) phủ trọn phổ biến động:
+    /// - Forex: ~0.02% - 0.03%
+    /// - BTC: ~0.05% - 0.20%
+    /// - ETH: ~0.10% - 0.30%
+    /// - Altcoins/Memecoin: ~0.20% - 0.30% (Sàn chi phí thực tế roundtrip_fee_pct luôn bảo vệ độc lập).
+    #[dna(min = 0.0002, max = 0.0030, step = 0.0001)]
     #[serde(default = "default_min_natr_threshold")]
     pub min_natr_threshold: f64,
 

@@ -25,6 +25,24 @@
     - [x] `test_tiered_profit_lock_locks_4_pct_at_8_pct_roe`
     - [x] `test_anti_atr_expansion_tightening`
 
+- [x] **TODO-STAB-01.B: Tái cấu trúc Central Risk Manager & Bậc Thang Khóa Lãi Động Học Chuẩn Hóa Theo Phí Sàn**
+  - **Tài liệu thiết kế:** [`05_technical_spec_central_risk_fee_anchored_ladder.md`](file:///e:/Projects/Automations/trading_backtest/strategies_backtests/helios/docs/unfinished_tasks/05_systemic_stability_and_quant_architecture_flaws/05_technical_spec_central_risk_fee_anchored_ladder.md)
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/risk.rs`
+  - **Mô tả:**
+    1. [x] **Step 1 (Pure Logic Engine):** Triển khai hàm `RiskManager::calculate_tiered_profit_floor_roe` chuẩn hóa 100% theo `Friction_ROE`, tự co giãn theo mọi đòn bẩy và phí sàn. Đảm bảo tính đơn điệu tuyệt đối (Monotonicity Guarantee).
+    2. [x] **Step 2 (Integration & Decommission):** Khai tử hoàn toàn TTP (`risk.rs:691-736`), xóa bỏ logic đếm nến vi mô (`bars_held == 1`), phá bỏ bẫy Cổng Chờ Kép `is_be_triggered`, tích hợp `calculate_tiered_profit_floor_roe` vào `manage_trailing_stop`.
+  - **Unit Tests (9/9 PASSED):**
+    - [x] `test_calculate_tiered_profit_floor_sub_hurdle_returns_zero`
+    - [x] `test_calculate_tiered_profit_floor_tier0_true_break_even`
+    - [x] `test_calculate_tiered_profit_floor_tier1_survival_rescues_trade_008_009`
+    - [x] `test_calculate_tiered_profit_floor_tier2_half_back`
+    - [x] `test_calculate_tiered_profit_floor_tier3_trend_lock`
+    - [x] `test_calculate_tiered_profit_floor_tier4_mega_trend`
+    - [x] `test_calculate_tiered_profit_floor_strict_monotonicity`
+    - [x] `test_manage_trailing_stop_rescues_trade_008`
+    - [x] `test_manage_trailing_stop_rescues_trade_009`
+    - [x] `test_momentum_post_trigger_fsm_behavior` (đã cập nhật loại bỏ Price Action đếm nến)
+
 - [x] **TODO-STAB-02: Khử triệt để dao rơi trong Absorption Scanner (`TODO-SCN-02`)**
   - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/absorption.rs:123-140`, `config.rs:1027-1031`
   - **Mô tả:** [ĐÃ HOÀN THÀNH] Bổ sung Macro Adverse Slope Veto (`FLAW-REG.9 TẦNG 2`): cấm Long khi `kama_slope_atr < -max_adverse_slope`, cấm Short khi `kama_slope_atr > max_adverse_slope` (tham số hóa DNA `max_adverse_slope` $\in [0.02, 0.25]$, mặc định `0.15`), kết hợp loại bỏ bộ lọc trễ pha `vwma < bb_middle` và neo SL trực tiếp theo đáy/đỉnh nến Spring/Upthrust vi mô.
@@ -659,12 +677,12 @@
   - **File:** `trading_bot/bot_engine/src/data_engine/sqlite_impl.rs:16-28`
   - **Mô tả:** Tự động gọi `std::fs::create_dir_all(parent)` trước khi mở file CSDL SQLite, tránh lỗi IO crash khi đường dẫn thư mục tùy biến chưa được tạo trước.
 
-- [ ] **TODO-AUDIT-NEW-209: Mở Rộng Pipeline Dữ Liệu Lưu Trữ Quote Asset Volume Gốc Từ Binance API (`TB-DATA-QUOTE-VOLUME`)**
+- [x] **TODO-AUDIT-NEW-209: Mở Rộng Pipeline Dữ Liệu Lưu Trữ Quote Asset Volume Gốc Từ Binance API (`TB-DATA-QUOTE-VOLUME`)**
   - **File:** `trading_bot/bot_engine/src/models.rs`, `data_engine/binance_rest.rs`, `data_engine/ws_manager.rs`, `data_engine/sqlite_impl.rs`, `actors/helios_bridge.rs`, `ferro_trade/src/data/cache.rs`
   - **Mô tả:** Mở rộng struct `Candle` bổ sung trường `quote_volume: f64` (giá trị USDT danh nghĩa). Nạp `quote_volume` từ Binance REST klines (index 7) và WebSocket kline stream (`k.q`). Cập nhật schema bảng `candles` trong SQLite (`quote_volume DOUBLE DEFAULT 0.0`), cập nhật hàm parse nến và lưu trữ CSDL. Đồng thời kết nối `quote_volume` vào `RawDataCache` / `custom_columns` để các chiến thuật (như Absorption Scanner trong `TODO-AUDIT-NEW-174`) có thể truy cập trực tiếp giá trị thanh khoản danh nghĩa chuẩn xác 1:1 từ sàn.
   - **Unit Tests:**
-    - [ ] `test_candle_quote_volume_parsing_rest_and_ws`
-    - [ ] `test_sqlite_candle_storage_with_quote_volume`
+    - [x] `test_candle_quote_volume_parsing_rest_and_ws`
+    - [x] `test_sqlite_candle_storage_with_quote_volume`
 
 ---
 
