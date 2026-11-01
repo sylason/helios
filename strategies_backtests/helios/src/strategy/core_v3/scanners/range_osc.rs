@@ -53,9 +53,11 @@ impl TacticalScanner for RangeOscScanner {
         let lows = tick.lows();
 
         // 1. Xác lập Hộp Cấu Trúc Cố Định (Fixed Structural Box) từ cực trị N nến
+        // 🛡️ BẢO TỒN HỘP CƠ SỞ: Quét trên cửa sổ [i - lookback .. i - 1] để mốc cản gốc không bị ô nhiễm bởi cú rướn nến i-1 (TODO-AUDIT-NEW-199)
         let mut vah = f64::NEG_INFINITY;
         let mut val = f64::INFINITY;
-        for idx in (i - lookback)..i {
+        let base_end = i.saturating_sub(1);
+        for idx in (i - lookback)..base_end {
             let h = highs[idx];
             let l = lows[idx];
             if !h.is_nan() && h > vah { vah = h; }
@@ -176,7 +178,10 @@ impl TacticalScanner for RangeOscScanner {
                 return None;
             }
 
-            let raw_sl = low - buffer;
+            // 🛡️ BẢO VỆ CỰC TRỊ CỤM NẾN: Neo SL dưới đáy thấp nhất của cả đợt nhúng (nến i và nến i-1) (TODO-AUDIT-NEW-199)
+            let prev_idx = i.saturating_sub(1);
+            let low_anchor = low.min(lows[prev_idx]);
+            let raw_sl = low_anchor - buffer;
             let fallback_buf = buffer.max(current_atr * 0.20);
             let sl = RiskManager::sanitize_structural_sl(true, close, raw_sl, 0.0015, fallback_buf);
             let tp = vah; // Chốt lời sang biên đối diện hộp (Value Area High)
@@ -243,7 +248,10 @@ impl TacticalScanner for RangeOscScanner {
                 return None;
             }
 
-            let raw_sl = high + buffer;
+            // 🛡️ BẢO VỆ CỰC TRỊ CỤM NẾN: Neo SL trên đỉnh cao nhất của cả đợt vọt xà UTAD (nến i và nến i-1) (TODO-AUDIT-NEW-199)
+            let prev_idx = i.saturating_sub(1);
+            let high_anchor = high.max(highs[prev_idx]);
+            let raw_sl = high_anchor + buffer;
             let fallback_buf = buffer.max(current_atr * 0.20);
             let sl = RiskManager::sanitize_structural_sl(false, close, raw_sl, 0.0015, fallback_buf);
             let tp = val; // Chốt lời sang biên đối diện hộp (Value Area Low)
@@ -962,5 +970,135 @@ mod tests {
             RangeOscScanner.scan(&tick2, &sensors, &matrix, &config).is_none(),
             "RangeBound PHẢI TÔN TRỌNG gen dead_zone_ratio động (0.65) và chặn lệnh ở |delta_norm| = 0.55!"
         );
+    }
+
+    #[test]
+    fn test_range_bound_utad_reentry_protocol() {
+        let len = 50;
+        let i = len - 1;
+        let opens = vec![2050.0; len];
+        let mut highs = vec![2060.0; len];
+        let mut lows = vec![2040.0; len];
+        let mut closes = vec![2050.0; len];
+
+        // Hộp cấu trúc chuẩn 40 nến: VAH = 2100.0, VAL = 2000.0, POC = 2050.0
+        highs[10] = 2100.0;
+        lows[15] = 2000.0;
+
+        // Nến i - 1: Cú rướn bứt phá giả ngoài trần VAH (High = 2118.0 > 2100.0 + 1.8 ATR)
+        highs[i - 1] = 2118.0;
+        lows[i - 1] = 2095.0;
+        closes[i - 1] = 2105.0;
+
+        // Nến i: Nến đỏ quay xe cắm ngược vào trong hộp (Confirmation bar)
+        // High = 2102.0, Low = 2080.0, Close = 2082.0 <= VAH (2100.0)
+        // CLV = (4164 - 2102 - 2080) / 22 = -18 / 22 = -0.818 <= -0.35
+        // delta_norm = (2082 - 2050) / 50 = +0.64 >= 0.50 (ngoài Dead Zone)
+        highs[i] = 2102.0;
+        lows[i] = 2080.0;
+        closes[i] = 2082.0;
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]); // ATR = 10.0, struct_sl_buffer_atr = 0.50 -> buffer = 5.0
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(
+            prop.is_some(),
+            "RangeBound PHẢI DUYỆT Proposal Short khi nến i xác nhận đảo chiều chui vào trong hộp sau cú rướn UTAD ở nến i-1!"
+        );
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Short);
+        assert_eq!(p.suggested_tp, Some(2000.0), "TP Short phải hướng về sàn VAL (2000.0)");
+        
+        let sl = p.suggested_sl.unwrap();
+        assert!(
+            sl > 2118.0,
+            "Stop Loss ({:.2}) BẮT BUỘC phải đặt trên đỉnh râu cao nhất của nến UTAD i-1 (2118.0)!",
+            sl
+        );
+        let reward = 2082.0 - 2000.0;
+        let risk = sl - 2082.0;
+        let rr = reward / risk;
+        assert!(rr >= 1.50, "Tỷ lệ R:R ({:.2}) phải đạt >= 1.50", rr);
+    }
+
+    #[test]
+    fn test_range_bound_spring_multi_bar_reentry_protocol() {
+        let len = 50;
+        let i = len - 1;
+        let opens = vec![2050.0; len];
+        let mut highs = vec![2060.0; len];
+        let mut lows = vec![2040.0; len];
+        let mut closes = vec![2050.0; len];
+
+        // Hộp cấu trúc: VAH = 2100.0, VAL = 2000.0, POC = 2050.0
+        highs[10] = 2100.0;
+        lows[15] = 2000.0;
+
+        // Nến i - 1: Cú nhúng giả thủng sàn VAL (Low = 1982.0 < 2000.0 - 1.8 ATR)
+        highs[i - 1] = 2005.0;
+        lows[i - 1] = 1982.0;
+        closes[i - 1] = 1995.0;
+
+        // Nến i: Nến xanh rút chân đóng ngược vào trong hộp (Confirmation bar)
+        // High = 2020.0, Low = 1998.0, Close = 2018.0 >= VAL (2000.0)
+        // CLV = (4036 - 2020 - 1998) / 22 = +18 / 22 = +0.818 >= +0.35
+        // delta_norm = (2018 - 2050) / 50 = -0.64 <= -0.50 (ngoài Dead Zone)
+        highs[i] = 2020.0;
+        lows[i] = 1998.0;
+        closes[i] = 2018.0;
+
+        let config = HeliosConfigV3::default();
+        let mut sensors = HeliosSensors::default();
+        sensors.atr_sl = Arc::new(vec![10.0; len]);
+        let mut matrix = MarketMatrixV3::default();
+        matrix.kama_slope_atr = Arc::new(vec![0.0; len]);
+
+        let (dv, im, mut act, tr) = setup_mock_tick(opens, highs, lows, closes, i);
+        let tick = TickContext {
+            i,
+            equity: 1000.0,
+            data_view: &dv,
+            indicator_manager: &im,
+            trades: &tr,
+            last_closed_trade: None,
+            actions: &mut act,
+            position: Position::default(),
+        };
+
+        let prop = RangeOscScanner.scan(&tick, &sensors, &matrix, &config);
+        assert!(
+            prop.is_some(),
+            "RangeBound PHẢI DUYỆT Proposal Long khi nến i xác nhận rút chân vào trong hộp sau cú Spring ở nến i-1!"
+        );
+        let p = prop.unwrap();
+        assert_eq!(p.signal_type, SignalType::Long);
+        assert_eq!(p.suggested_tp, Some(2100.0), "TP Long phải hướng về trần VAH (2100.0)");
+
+        let sl = p.suggested_sl.unwrap();
+        assert!(
+            sl < 1982.0,
+            "Stop Loss ({:.2}) BẮT BUỘC phải đặt dưới đáy nhúng thấp nhất của nến Spring i-1 (1982.0)!",
+            sl
+        );
+        let reward = 2100.0 - 2018.0;
+        let risk = 2018.0 - sl;
+        let rr = reward / risk;
+        assert!(rr >= 1.50, "Tỷ lệ R:R ({:.2}) phải đạt >= 1.50", rr);
     }
 }

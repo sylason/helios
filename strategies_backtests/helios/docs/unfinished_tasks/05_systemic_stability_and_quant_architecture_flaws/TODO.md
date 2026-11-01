@@ -1403,11 +1403,12 @@
     - [x] `test_range_bound_rejects_sub_frictional_micro_range`
     - [x] `test_range_bound_dead_zone_exclusion_around_poc`
 
-- [ ] **TODO-AUDIT-NEW-199: Giao Thức Đón Sóng Sau Đột Phá Giả UTAD (UTAD Re-entry Protocol) (`RNG-UTAD-REENTRY`)**
-  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_bound.rs`
-  - **Mô tả:** Nhận diện cây nến đỏ quay ngược trở lại vào trong Range sau cú rướn bứt phá giả $> 1.5\text{ ATR}$ ngoài Range High (Upthrust After Distribution), kích hoạt lệnh Short đón sóng sập về đáy hộp với Stop Loss đặt ngay trên đỉnh râu nến UTAD.
+- [x] **TODO-AUDIT-NEW-199: Giao Thức Đón Sóng Sau Đột Phá Giả UTAD (UTAD Re-entry Protocol) (`RNG-UTAD-REENTRY`)**
+  - **File:** `strategies_backtests/helios/src/strategy/core_v3/scanners/range_osc.rs`
+  - **Mô tả:** Nhận diện cây nến đỏ quay ngược trở lại vào trong Range sau cú rướn bứt phá giả $> 1.5\text{ ATR}$ ngoài Range High (Upthrust After Distribution), kích hoạt lệnh Short đón sóng sập về đáy hộp với Stop Loss đặt ngay trên đỉnh râu nến UTAD. Bảo đảm tính đối xứng hoàn hảo cho chiều Long (Spring Re-entry sau cú nhúng giả thủng sàn VAL) và cô lập Hộp Cơ Sở chống ô nhiễm mốc cản.
   - **Unit Tests:**
-    - [ ] `test_range_bound_utad_reentry_protocol`
+    - [x] `test_range_bound_utad_reentry_protocol`
+    - [x] `test_range_bound_spring_multi_bar_reentry_protocol`
 
 ---
 
